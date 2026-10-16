@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
@@ -136,6 +136,9 @@ HINTS = [
      "The LLM provider account has no credit. Top it up, or use detection mode (free) instead of proxy mode."),
     (r"\b429\b|rate.?limit",
      "Rate limited. Wait a minute, or lower --rounds."),
+    (r"keychain",
+     "Unlock the login keychain (Keychain Access > File > Unlock) and choose 'Always Allow' when macOS asks whether "
+     "Python may use it. Then retry."),
     (r"not one of the values accepted",
      "The API rejected an enum value - your tenant may run a newer AI Guard API. Run with --verbose and send the log to the kit owner."),
 ]
@@ -161,11 +164,22 @@ def tls_setup():
 
 
 def kc_get(name):
+    """None when the entry doesn't exist. Access problems raise, so the kit never mistakes a locked or denied
+    keychain for a missing key (which would create duplicate keys in AI Guard)."""
     import keyring
     try:
         return keyring.get_password(KC, KC_NS + name)
-    except Exception:
-        return None
+    except Exception as e:
+        raise KitError(f"Couldn't read the keychain entry '{name}': {e}. Unlock your keychain or choose "
+                       f"'Always Allow' when macOS asks, then try again.") from e
+
+
+def kc_has(name):
+    """For display only: True/False, never raises."""
+    try:
+        return bool(kc_get(name))
+    except KitError:
+        return False
 
 
 def kc_set(name, value):
@@ -977,6 +991,67 @@ def default_answers(facts):
                           for k, v in facts["providers"].items()}}
 
 
+def kit_app_credentials(t, cfg=None):
+    """All app credentials the kit may own. The list API omits DETECTIONS-mode keys, so this also follows the
+    credential ids referenced by the kit's rules and saved state, and fetches each one."""
+    found = {c["id"]: c for c in t.list("llm_application_credentials") if is_mine(c)}
+    ids = set()
+    for r in t.list("policy_match_rules"):
+        if is_mine(r):
+            for a in (r.get("matchCriteria") or {}).get("llmApplications") or []:
+                ids.update(a.get("applicationCredentialsIds") or [])
+    for a in ((cfg or {}).get("state") or {}).get("apps", {}).values():
+        ids.update(x for x in (a.get("das_cred_id"), a.get("proxy_cred_id")) if x)
+    ids.update(((cfg or {}).get("state") or {}).get("retire", []))
+    for cid in ids - set(found):
+        try:
+            c = t.call("llm_application_credentials", "get_credential", cid)
+            if c and is_mine(c):
+                found[cid] = c
+        except Exception as e:
+            vlog(f"credential {cid}: {e}")
+    return found
+
+
+def create_app_key(t, cfg, log, label, kind, **fields):
+    """Creates a kit app credential. If one with the same name already exists (its key isn't on this machine,
+    e.g. after a reinstall), creates a uniquely named replacement and marks the old one for removal."""
+    base = f"{PREFIX}: {label} {kind} key"
+    st = cfg["state"]
+    existing = [c for c in kit_app_credentials(t, cfg).values() if c.get("name", "").startswith(base)
+                and c.get("applicationId") == fields.get("applicationId")]
+    name = base
+    if any(c.get("name") == base for c in existing):
+        name = f"{base} {time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        cred = t.call("llm_application_credentials", "add_credential", name=name, **fields)
+    except KitError as e:
+        if "409" not in str(e) and "already_exists" not in str(e):
+            raise
+        name = f"{base} {time.strftime('%Y%m%d-%H%M%S')}"
+        cred = t.call("llm_application_credentials", "add_credential", name=name, **fields)
+    old = [c["id"] for c in existing if c["id"] != cred["id"]]
+    if old:
+        st.setdefault("retire", [])
+        st["retire"] = sorted(set(st["retire"]) | set(old))
+        log("info", f"{label}: an earlier {kind} key exists in AI Guard but its secret isn't on this machine; "
+                    f"created a replacement and will remove the old one")
+    return cred
+
+
+def retire_old_keys(t, cfg, log):
+    st = cfg["state"]
+    for cid in list(st.get("retire", [])):
+        try:
+            t.call("llm_application_credentials", "delete_credential", cid)
+            log("ok", f"Removed an old key (id {cid}) that this machine couldn't use")
+        except Exception as e:
+            log("warn", f"Couldn't remove old key {cid} yet: {str(e)[:120]}")
+            continue
+        st["retire"].remove(cid)
+    save_cfg(cfg)
+
+
 def setup_apply(t, cfg, ans, log):
     """Creates or fills in everything for the answers given. Safe to run again after a failure."""
     cfg.setdefault("state", {"apps": {}})
@@ -1040,8 +1115,7 @@ def setup_apply(t, cfg, ans, log):
         st["apps"][app_name] = a
         save_cfg(cfg)
         if not (a.get("das_cred_id") and kc_get(f"{app_name}:detections")):
-            cred = t.call("llm_application_credentials", "add_credential", name=f"{PREFIX}: {label} detection key",
-                          applicationId=a["id"], mode="DETECTIONS")
+            cred = create_app_key(t, cfg, log, label, "detection", applicationId=a["id"], mode="DETECTIONS")
             kc_set(f"{app_name}:detections", cred["key"])
             a["das_cred_id"] = cred["id"]
             log("ok", f"{label}: detection key created and saved to your keychain")
@@ -1075,8 +1149,8 @@ def setup_apply(t, cfg, ans, log):
                 log("info", f"{label}: no {label} key is configured in this tenant, so detection mode only. "
                             f"To add proxy mode later, rerun setup and enter a key in Choices.")
             continue
-        cred = t.call("llm_application_credentials", "add_credential", name=f"{PREFIX}: {label} proxy key",
-                      applicationId=a["id"], providerId=prov["id"], providerCredentialsId=pc_id, mode="PROXY")
+        cred = create_app_key(t, cfg, log, label, "proxy", applicationId=a["id"], providerId=prov["id"],
+                              providerCredentialsId=pc_id, mode="PROXY")
         kc_set(f"{app_name}:proxy", cred["key"])
         a["proxy_cred_id"], a["provider_cred_id"] = cred["id"], pc_id
         log("ok", f"{label}: proxy key created and saved to your keychain")
@@ -1105,6 +1179,8 @@ def setup_apply(t, cfg, ans, log):
             st[f"{kind}_rule_id"] = r["id"]
             log("ok", f"Created rule '{rname}' (order {body['ruleOrder']})")
     save_cfg(cfg)
+    if st.get("retire"):
+        retire_old_keys(t, cfg, log)   # only now: the rules no longer point at them
 
 
 def verify(cfg, log, wait=75):
@@ -1297,7 +1373,9 @@ def cmd_setup():
 def teardown(t, cfg, confirm=True, log=None):
     log = log or cli_log
     pre = PREFIX + ":"
-    found = {r: [o for o in t.list(r) if str(o.get("name", "")).startswith(pre)] for r in
+    creds = kit_app_credentials(t, cfg)   # includes DETECTIONS keys, which the list API omits
+    found = {r: ([o for o in t.list(r) if str(o.get("name", "")).startswith(pre)] if r != "llm_application_credentials"
+                 else list(creds.values())) for r in
              ("policy_match_rules", "llm_application_credentials", "llm_applications", "llm_provider_credentials",
               "policies")}
     total = sum(len(v) for v in found.values())
@@ -1491,8 +1569,8 @@ def cmd_gui():
                 c = load_cfg()
                 lib = load_tests()
                 apps = [{"name": n, "label": n.split(": ", 1)[-1], "provider": a.get("provider_type"),
-                         "model": a.get("model"), "detect": bool(kc_get(f"{n}:detections")),
-                         "proxy": bool(a.get("proxy_cred_id") and kc_get(f"{n}:proxy"))}
+                         "model": a.get("model"), "detect": kc_has(f"{n}:detections"),
+                         "proxy": bool(a.get("proxy_cred_id")) and kc_has(f"{n}:proxy")}
                         for n, a in c.get("state", {}).get("apps", {}).items()]
                 return self._send(200, {"tenant": c.get("vanity_domain"), "version": VERSION, "apps": apps,
                                         "policy_id": c.get("state", {}).get("policy_id"), "console": CONSOLE,
@@ -1510,7 +1588,7 @@ def cmd_gui():
             if path == "/api/setup/state":
                 c = load_cfg()
                 return self._send(200, {"vanity": c.get("vanity_domain", ""), "client_id": mask(c.get("client_id", "")),
-                                        "saved": bool(c.get("client_id") and kc_get("oneapi-client-secret")),
+                                        "saved": bool(c.get("client_id")) and kc_has("oneapi-client-secret"),
                                         "claude_desktop": bool(import_claude_desktop()), "prefix": PREFIX,
                                         "set_up": bool(c.get("state", {}).get("apps")), "profile": PROFILE})
             self._send(404, {"error": "not found"})

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1
+- Fixed: setup failed with 409 "already exists" when the tenant already had the kit's detection keys but their
+  secrets weren't on this machine. The AI Guard list API doesn't return DETECTIONS-mode keys, so the kit now
+  finds them through its rules and saved state, creates a uniquely named replacement, and removes the old key
+  once the rules point at the new one.
+- Fixed: teardown now removes detection keys too (previously they were left behind).
+- A locked or denied keychain now stops with a clear message instead of looking like a missing key.
+
 ## 1.5.0
 - **Policy profiles** replace the single Monitor/Enforce switch: Monitor, Block attacks, Block attacks + data
   leakage (secrets and regulated PII: cards, SSNs, bank, IBAN/SWIFT, passport, ITIN), Block everything risky.

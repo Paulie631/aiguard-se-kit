@@ -41,11 +41,17 @@ class FakeTenant:
         self.calls = []
 
     def list(self, r):
-        return copy.deepcopy(self.db[r])
+        objs = self.db[r]
+        if r == "llm_application_credentials":   # like the real API: DETECTIONS keys are not listed
+            objs = [o for o in objs if o.get("mode") != "DETECTIONS"]
+        return copy.deepcopy(objs)
 
     def call(self, r, m, *a, **kw):
         self.calls.append((r, m, a, kw))
         if m.startswith("add"):
+            if r == "llm_application_credentials" and any(o.get("name") == kw.get("name") for o in self.db[r]):
+                raise sys.modules[type(self).kit_module].KitError(
+                    'llm_application_credentials.add_credential failed: {"status": 409, "already_exists"}')
             o = dict(copy.deepcopy(kw), id=next(self.ids))
             if r == "llm_application_credentials":
                 o["key"] = f"key-{o['id']}"
@@ -71,6 +77,8 @@ def env(monkeypatch, tmp_path):
         kit = load_kit(monkeypatch, tmp_path, list(argv))
         t = FakeTenant()
         kit.Tenant = lambda cfg: t
+        FakeTenant.kit_module = kit.__name__
+        sys.modules[kit.__name__] = kit
         kit.import_claude_desktop = lambda: {"ZSCALER_CLIENT_ID": "cid", "ZSCALER_CLIENT_SECRET": "sec",
                                              "ZSCALER_VANITY_DOMAIN": "acme"}
         kit.das_scan = lambda key, text, direction="IN", user=None, timeout=60: (
@@ -401,3 +409,29 @@ def test_reused_key_that_vanished_gives_clear_error(env):
     ans["providers"]["openai"]["cred_id"] = 555
     with pytest.raises(kit.KitError, match="no longer exists"):
         kit.setup_apply(t, cfg, ans, lambda *a: None)
+
+
+def test_reinstall_with_hidden_detection_keys(env):
+    """Keys exist in AI Guard but not on this machine (new laptop, wiped keychain): setup must replace them
+    without a 409, and teardown must still find the DETECTIONS keys the list API hides."""
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    first = {c["id"] for c in t.db["llm_application_credentials"]}
+    kit._kc.clear()
+    kit._kc["oneapi-client-secret"] = "s"
+    cfg = kit.load_cfg()
+    for a in cfg["state"]["apps"].values():
+        a.pop("das_cred_id", None)
+    kit.save_cfg(cfg)
+    logs = []
+    kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())),
+                    lambda lv, m: logs.append(m))
+    now = {c["id"]: c for c in t.db["llm_application_credentials"]}
+    assert not (first & set(now)), "old keys should be retired"
+    assert all(c["name"].startswith("SE-Demo: ") for c in now.values()) and len(now) == 2
+    assert any("replacement" in m for m in logs) and any("Removed an old key" in m for m in logs)
+    rule = next(r for r in t.db["policy_match_rules"] if r["name"] == "SE-Demo: detection apps")
+    assert {i for a in rule["matchCriteria"]["llmApplications"] for i in a["applicationCredentialsIds"]} == set(now)
+    kit.FORCE = True
+    kit.teardown(t, kit.load_cfg(), log=lambda *a: None)
+    assert t.db["llm_application_credentials"] == [] and t.db["llm_applications"] == []
