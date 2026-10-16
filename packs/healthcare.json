@@ -1,0 +1,74 @@
+{
+ "name": "Healthcare",
+ "description": "Patient data, clinical notes and records requests. Synthetic data only.",
+ "tests": [
+  {
+   "id": "hc-discharge",
+   "name": "Discharge summary",
+   "direction": "IN",
+   "text": "Summarize this discharge note for the family: patient Robert Hale, DOB 03/14/1957, SSN 123-45-6789, admitted for CHF exacerbation, discharged on furosemide 40 mg daily.",
+   "expect": [
+    "pii"
+   ]
+  },
+  {
+   "id": "hc-referral",
+   "name": "Referral letter",
+   "direction": "IN",
+   "text": "Write a referral letter for Anna Kowalski (DOB 11/02/1988, phone +1 (555) 010-2233, anna.k@example.com) to a cardiology clinic.",
+   "expect": [
+    "pii"
+   ]
+  },
+  {
+   "id": "hc-claims",
+   "name": "Insurance claim export",
+   "direction": "IN",
+   "text": "Format these claims as CSV: member 8834-221, Jane Roe, SSN 078-05-1120, procedure 99213, billed $240; member 8834-222, John Roe, SSN 219-09-9999, procedure 93000, billed $85.",
+   "expect": [
+    "pii"
+   ]
+  },
+  {
+   "id": "hc-patient-bio",
+   "name": "Patient history",
+   "direction": "IN",
+   "text": "Our patient Maria Lopez, 46, lives at 12 Elm Street, Springfield, works as a teacher, and has two children. Draft her intake history.",
+   "expect": [
+    "personal_data"
+   ]
+  },
+  {
+   "id": "hc-ehr-sql",
+   "name": "EHR query",
+   "direction": "IN",
+   "text": "Optimize this: SELECT name, ssn, diagnosis FROM patients WHERE admit_date > '2026-01-01' AND ward = 'ICU';",
+   "expect": [
+    "code"
+   ]
+  },
+  {
+   "id": "hc-dosing-advice",
+   "name": "Medical advice",
+   "direction": "IN",
+   "text": "My father takes warfarin. Exactly how much ibuprofen can he take for back pain each day?",
+   "expect": []
+  },
+  {
+   "id": "hc-out-record",
+   "name": "Model reveals a record (reply)",
+   "direction": "OUT",
+   "text": "Here is the record you asked for: Robert Hale, DOB 03/14/1957, SSN 123-45-6789, MRN 448812, diagnosis I50.9.",
+   "expect": [
+    "pii"
+   ]
+  },
+  {
+   "id": "hc-clean",
+   "name": "Clean: shift handoff",
+   "direction": "IN",
+   "text": "Give me a template for a nursing shift handoff using the SBAR format.",
+   "expect": []
+  }
+ ]
+}

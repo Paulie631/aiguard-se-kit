@@ -1,0 +1,1071 @@
+{
+ "description": "AI Guard SE demo kit: every detector on, detect only (allow and monitor).",
+ "inputDetectorPolicies": [
+  {
+   "detector": "toxicity",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.87
+   }
+  },
+  {
+   "detector": "code",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "languages": [
+     {
+      "action": "DETECT",
+      "language": "C"
+     },
+     {
+      "action": "DETECT",
+      "language": "C#"
+     },
+     {
+      "action": "DETECT",
+      "language": "C++"
+     },
+     {
+      "action": "DETECT",
+      "language": "CLI Command"
+     },
+     {
+      "action": "DETECT",
+      "language": "COBOL"
+     },
+     {
+      "action": "DETECT",
+      "language": "DB Logs"
+     },
+     {
+      "action": "DETECT",
+      "language": "Erlang"
+     },
+     {
+      "action": "DETECT",
+      "language": "Fortran"
+     },
+     {
+      "action": "DETECT",
+      "language": "Go"
+     },
+     {
+      "action": "DETECT",
+      "language": "Java"
+     },
+     {
+      "action": "DETECT",
+      "language": "JavaScript"
+     },
+     {
+      "action": "DETECT",
+      "language": "Kotlin"
+     },
+     {
+      "action": "DETECT",
+      "language": "Lua"
+     },
+     {
+      "action": "DETECT",
+      "language": "Mathematica/Wolfram Language"
+     },
+     {
+      "action": "DETECT",
+      "language": "PHP"
+     },
+     {
+      "action": "DETECT",
+      "language": "Pascal"
+     },
+     {
+      "action": "DETECT",
+      "language": "Perl"
+     },
+     {
+      "action": "DETECT",
+      "language": "Python"
+     },
+     {
+      "action": "DETECT",
+      "language": "R"
+     },
+     {
+      "action": "DETECT",
+      "language": "Ruby"
+     },
+     {
+      "action": "DETECT",
+      "language": "Rust"
+     },
+     {
+      "action": "DETECT",
+      "language": "Scala"
+     },
+     {
+      "action": "DETECT",
+      "language": "SQL"
+     },
+     {
+      "action": "DETECT",
+      "language": "Swift"
+     },
+     {
+      "action": "DETECT",
+      "language": "Visual Basic .NET"
+     },
+     {
+      "action": "DETECT",
+      "language": "jq"
+     }
+    ],
+    "threshold": 0.6,
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "language",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "languages": [
+     {
+      "action": "DETECT",
+      "languageCode": "ar"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "bg"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "zh"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "nl"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "en"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "fr"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "de"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "el"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "hi"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "it"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "ja"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "pl"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "pt"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "ru"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "es"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "th"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "tr"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "ur"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "vi"
+     }
+    ],
+    "threshold": 0.6,
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "personal_data",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.8
+   }
+  },
+  {
+   "detector": "pii",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "entities": [
+     {
+      "action": "DETECT",
+      "entityType": "CREDIT_CARD"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "CRYPTO"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "EMAIL_ADDRESS"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "IP_ADDRESS"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "LOCATION"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "PERSON"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "PHONE_NUMBER"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "IBAN_CODE"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_BANK_NUMBER"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "US_DRIVER_LICENSE"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_ITIN"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_PASSPORT"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_SSN"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "DATE_TIME"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "URL"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "MEDICAL_LICENSE"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "SWIFT_CODE"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "STREET_ADDRESS"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "DATE_OF_BIRTH"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "US_DEA_NUMBER"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "JP_MY_NUMBER"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "JP_PASSPORT"
+     }
+    ],
+    "threshold": 0.5,
+    "anonymization": "NONE",
+    "defaultAction": "DETECT",
+    "replaceWithMaskedContent": false
+   }
+  },
+  {
+   "detector": "pii_deepscan",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.87
+   }
+  },
+  {
+   "detector": "prompt_injection",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.8
+   }
+  },
+  {
+   "detector": "secrets",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "secretTypes": [
+     {
+      "action": "DETECT",
+      "secretType": "AMAZON_MWS_AUTH_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "GITHUB_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "GOOGLE_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "GOOGLE_OAUTH_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "JWT_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PAYPAL_BRAINTREE_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PICATIC_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PAN_BASED_CARDS"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PRIVATE_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SENDGRID_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SLACK_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SLACK_WEBHOOK"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SQUARE_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SQUARE_OAUTH_SECRET"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "STRIPE_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "TWO_FACTOR_TOKEN"
+     },
+     {
+      "action": "DISABLE",
+      "secretType": "US_GOVERNMENT_IDS"
+     }
+    ],
+    "anonymization": "NONE",
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "gibberish",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.9
+   }
+  },
+  {
+   "detector": "prompt_tags",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "tags": [
+     {
+      "tag": "ART_AND_CULTURE",
+      "action": "DETECT"
+     },
+     {
+      "tag": "MEDIA_AND_COMMUNICATIONS",
+      "action": "DETECT"
+     },
+     {
+      "tag": "EDUCATION_AND_TRAINING",
+      "action": "DETECT"
+     },
+     {
+      "tag": "GOVERNMENT_AND_POLITICS",
+      "action": "DETECT"
+     },
+     {
+      "tag": "JOBS_EMPLOYMENT_HR",
+      "action": "DETECT"
+     },
+     {
+      "tag": "SHOPPING_AND_RETAIL",
+      "action": "DETECT"
+     },
+     {
+      "tag": "SCIENCE_AND_TECHNOLOGY",
+      "action": "DETECT"
+     },
+     {
+      "tag": "TRAVEL",
+      "action": "DETECT"
+     },
+     {
+      "tag": "RELIGION",
+      "action": "DETECT"
+     },
+     {
+      "tag": "MARKETING",
+      "action": "DETECT"
+     },
+     {
+      "tag": "CUSTOMER_SERVICE",
+      "action": "DETECT"
+     }
+    ],
+    "threshold": 0.8,
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "brand_and_reputation_risk",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.85
+   }
+  },
+  {
+   "detector": "competition",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "threshold": 0.7,
+    "competitors": [
+     {
+      "name": "{COMPETITOR}",
+      "action": "DETECT"
+     }
+    ],
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "finance_advice",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.3
+   }
+  },
+  {
+   "detector": "legal_advice",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.86
+   }
+  },
+  {
+   "detector": "invisible_text",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT"
+   }
+  }
+ ],
+ "outputDetectorPolicies": [
+  {
+   "detector": "pii_deepscan",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.87
+   }
+  },
+  {
+   "detector": "pii",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "entities": [
+     {
+      "action": "DETECT",
+      "entityType": "CREDIT_CARD"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "CRYPTO"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "EMAIL_ADDRESS"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "IP_ADDRESS"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "LOCATION"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "PERSON"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "PHONE_NUMBER"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "IBAN_CODE"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_BANK_NUMBER"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "US_DRIVER_LICENSE"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_ITIN"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_PASSPORT"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "US_SSN"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "DATE_TIME"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "URL"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "MEDICAL_LICENSE"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "SWIFT_CODE"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "STREET_ADDRESS"
+     },
+     {
+      "action": "DETECT",
+      "entityType": "DATE_OF_BIRTH"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "US_DEA_NUMBER"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "JP_MY_NUMBER"
+     },
+     {
+      "action": "DISABLE",
+      "entityType": "JP_PASSPORT"
+     }
+    ],
+    "threshold": 0.5,
+    "anonymization": "NONE",
+    "defaultAction": "DETECT",
+    "replaceWithMaskedContent": false
+   }
+  },
+  {
+   "detector": "secrets",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "secretTypes": [
+     {
+      "action": "DETECT",
+      "secretType": "AMAZON_MWS_AUTH_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "GITHUB_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "GOOGLE_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "GOOGLE_OAUTH_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "JWT_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PAYPAL_BRAINTREE_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PICATIC_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PAN_BASED_CARDS"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "PRIVATE_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SENDGRID_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SLACK_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SLACK_WEBHOOK"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SQUARE_ACCESS_TOKEN"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "SQUARE_OAUTH_SECRET"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "STRIPE_API_KEY"
+     },
+     {
+      "action": "DETECT",
+      "secretType": "TWO_FACTOR_TOKEN"
+     },
+     {
+      "action": "DISABLE",
+      "secretType": "US_GOVERNMENT_IDS"
+     }
+    ],
+    "anonymization": "NONE",
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "toxicity",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.87
+   }
+  },
+  {
+   "detector": "refusal",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT"
+   }
+  },
+  {
+   "detector": "brand_and_reputation_risk",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.85
+   }
+  },
+  {
+   "detector": "finance_advice",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.3
+   }
+  },
+  {
+   "detector": "language",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "languages": [
+     {
+      "action": "DETECT",
+      "languageCode": "ar"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "bg"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "zh"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "nl"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "en"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "fr"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "de"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "el"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "hi"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "it"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "ja"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "pl"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "pt"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "ru"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "es"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "th"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "tr"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "ur"
+     },
+     {
+      "action": "DETECT",
+      "languageCode": "vi"
+     }
+    ],
+    "threshold": 0.6,
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "personal_data",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.8
+   }
+  },
+  {
+   "detector": "response_tags",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "tags": [
+     {
+      "tag": "ART_AND_CULTURE",
+      "action": "DETECT"
+     },
+     {
+      "tag": "MEDIA_AND_COMMUNICATIONS",
+      "action": "DETECT"
+     },
+     {
+      "tag": "EDUCATION_AND_TRAINING",
+      "action": "DETECT"
+     },
+     {
+      "tag": "GOVERNMENT_AND_POLITICS",
+      "action": "DETECT"
+     },
+     {
+      "tag": "JOBS_EMPLOYMENT_HR",
+      "action": "DETECT"
+     },
+     {
+      "tag": "SHOPPING_AND_RETAIL",
+      "action": "DETECT"
+     },
+     {
+      "tag": "SCIENCE_AND_TECHNOLOGY",
+      "action": "DETECT"
+     },
+     {
+      "tag": "TRAVEL",
+      "action": "DETECT"
+     },
+     {
+      "tag": "RELIGION",
+      "action": "DETECT"
+     },
+     {
+      "tag": "MARKETING",
+      "action": "DETECT"
+     },
+     {
+      "tag": "CUSTOMER_SERVICE",
+      "action": "DETECT"
+     }
+    ],
+    "threshold": 0.5,
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "code",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "languages": [
+     {
+      "action": "DETECT",
+      "language": "C"
+     },
+     {
+      "action": "DETECT",
+      "language": "C#"
+     },
+     {
+      "action": "DETECT",
+      "language": "C++"
+     },
+     {
+      "action": "DETECT",
+      "language": "CLI Command"
+     },
+     {
+      "action": "DETECT",
+      "language": "COBOL"
+     },
+     {
+      "action": "DETECT",
+      "language": "DB Logs"
+     },
+     {
+      "action": "DETECT",
+      "language": "Erlang"
+     },
+     {
+      "action": "DETECT",
+      "language": "Fortran"
+     },
+     {
+      "action": "DETECT",
+      "language": "Go"
+     },
+     {
+      "action": "DETECT",
+      "language": "Java"
+     },
+     {
+      "action": "DETECT",
+      "language": "JavaScript"
+     },
+     {
+      "action": "DETECT",
+      "language": "Kotlin"
+     },
+     {
+      "action": "DETECT",
+      "language": "Lua"
+     },
+     {
+      "action": "DETECT",
+      "language": "Mathematica/Wolfram Language"
+     },
+     {
+      "action": "DETECT",
+      "language": "PHP"
+     },
+     {
+      "action": "DETECT",
+      "language": "Pascal"
+     },
+     {
+      "action": "DETECT",
+      "language": "Perl"
+     },
+     {
+      "action": "DETECT",
+      "language": "Python"
+     },
+     {
+      "action": "DETECT",
+      "language": "R"
+     },
+     {
+      "action": "DETECT",
+      "language": "Ruby"
+     },
+     {
+      "action": "DETECT",
+      "language": "Rust"
+     },
+     {
+      "action": "DETECT",
+      "language": "Scala"
+     },
+     {
+      "action": "DETECT",
+      "language": "SQL"
+     },
+     {
+      "action": "DETECT",
+      "language": "Swift"
+     },
+     {
+      "action": "DETECT",
+      "language": "Visual Basic .NET"
+     },
+     {
+      "action": "DETECT",
+      "language": "jq"
+     }
+    ],
+    "threshold": 0.6,
+    "defaultAction": "DETECT"
+   }
+  },
+  {
+   "detector": "gibberish",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.9
+   }
+  },
+  {
+   "detector": "legal_advice",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT",
+    "threshold": 0.86
+   }
+  },
+  {
+   "detector": "url_reachability",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT"
+   }
+  },
+  {
+   "detector": "malicious_url",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT"
+   }
+  },
+  {
+   "detector": "invisible_text",
+   "enabled": true,
+   "severity": "LOW",
+   "configuration": {
+    "action": "DETECT"
+   }
+  }
+ ]
+}

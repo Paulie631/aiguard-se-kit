@@ -1,0 +1,7 @@
+{
+  "name": "aiguard-se-demo",
+  "version": "1.1.0",
+  "description": "Set up, run and present Zscaler AI Guard demos in your own tenant with the AI Guard SE demo kit.",
+  "author": {"name": "Zscaler Solutions Engineering"},
+  "keywords": ["zscaler", "ai guard", "demo", "sales engineering"]
+}

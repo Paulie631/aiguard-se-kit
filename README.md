@@ -1,0 +1,112 @@
+# AI Guard SE Demo Kit
+
+Fill every Zscaler AI Guard dashboard in **your own** tenant in about ten minutes. Then run live tests, a guided customer demo and a leave-behind report from a browser console.
+
+> **Demo and eval tenants only.** Setup creates objects in the tenant. Everything it creates is named `SE-Demo: …`, and `teardown` removes all of it. See [SECURITY.md](SECURITY.md) for what's stored where.
+
+## Quickstart
+
+1. **Install uv** (one time): `brew install uv` (Mac) or see the Windows note below.
+2. **Create a OneAPI client** in ZIdentity → Integration → API Clients, with AI Guard access. Copy the client ID and secret, and note your vanity domain: the `acme` in `acme.zslogin.net`.
+3. **Run setup** from this folder:
+   ```bash
+   ./aiguard-kit setup
+   ```
+   Answer the prompts; the defaults are right for most people. LLM provider keys are optional (see *Modes*).
+4. **Open the console:**
+   ```bash
+   ./aiguard-kit gui
+   ```
+   Pick **Populate every dashboard** and press **Run**.
+5. **Optional: keep dashboards fresh** with a small batch every hour: `./aiguard-kit schedule install`
+6. **Check AI Guard → Insights** after 10–15 minutes.
+
+Windows: install uv with `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, then use `aiguard-kit.cmd` in place of `./aiguard-kit`.
+
+## The console
+
+| Tab | What it's for |
+|---|---|
+| **Test runner** | 72 core tests in 7 groups, presets, industry packs and imported packs. Pick apps, users, rounds and mode. The **Live prompt** box scans anything you type. **Dashboard coverage** shows which console panels you've fed. Results show detector tags (expected-but-missed detectors in amber, which you can hide before a customer demo), and export as CSV or a **Report**. |
+| **Guided demo** | Step-by-step storylines with a talk track: *AI Guard in 8 steps* and *Data protection (3 minutes)*. Use ← → to move and Enter to run. Steps that switch the policy to Enforce wait about 30 seconds for it to apply. Hide the talk track when sharing your screen. |
+| **Test packs** | Healthcare, Financial services and Legal packs, plus **CSV import** of a customer's own prompts for a proof of concept. Imported packs stay on your machine. |
+
+The **Policy** switch in the header moves the kit's demo policy between **Monitor** (detect and log) and **Enforce** (block prompt injection, invisible text, toxicity and malicious URLs). It only ever changes the kit's own policy.
+
+**Report** builds a one-page summary of the session: totals, detections by type and scenario, and examples. Enter the customer's name, then use *Print / save as PDF*.
+
+## What setup creates
+
+| Object | Name | Notes |
+|---|---|---|
+| Detection policy | `SE-Demo: Test all` | Every detector on. Starts in Monitor or Enforce, your choice. You can also reuse an existing policy instead; the policy switch won't touch it. |
+| Apps | `SE-Demo: OpenAI App`, `SE-Demo: Anthropic App` | Event contents included so prompt text shows in the console. |
+| Detection keys | one per app | Mode `DETECTIONS`, for the Detection API. |
+| Proxy keys | one per app, optional | Mode `PROXY`. Created only if you give a provider API key. |
+| Rules | `SE-Demo: detection apps`, `SE-Demo: proxy apps` | Placed after your existing rules. |
+
+Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aiguard-se-kit/config.json`.
+
+## Modes
+
+| | Detection API (default) | LLM proxy |
+|---|---|---|
+| Cost | Free, no LLM calls | Uses your provider credit |
+| Needs | Nothing extra | An OpenAI or Anthropic API key, added in setup |
+| Fills | Every detector panel, Prompt Classifications, **Users tab** | AI Applications, **token usage**, real model replies |
+| Model-reply (OUT) tests | Yes | No (the model writes the reply) |
+
+## Commands
+
+```
+./aiguard-kit setup                      interactive; safe to rerun (fills in anything missing)
+./aiguard-kit gui                        console at http://127.0.0.1:8765 (this machine only)
+./aiguard-kit run                        everything, detection mode
+./aiguard-kit run --preset=attacks       everything leakage attacks rai output topics pack-healthcare …
+./aiguard-kit run --mode=proxy --rounds=2
+./aiguard-kit policy [detect|block]      show or switch Monitor / Enforce
+./aiguard-kit schedule install [--every 60] [--count 12]    also: schedule status, schedule remove
+./aiguard-kit status                     login, policy, keys, Detection API, kit updates
+./aiguard-kit teardown                   deletes every SE-Demo object and the local keys (--force: no prompt)
+
+Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
+```
+
+**Scheduled traffic** uses launchd (Mac), Task Scheduler (Windows) or cron (Linux) and logs to `~/.aiguard-se-kit/trickle.log`. On a Mac, the first scheduled run may ask for keychain access; choose **Always Allow**.
+
+**Several tenants:** run `./aiguard-kit setup --profile acme`, then add `--profile acme` to any command. Each profile has its own credentials, keys, objects and schedule.
+
+## Adding tests
+
+- **Quick:** in the console, open **Test packs** and import a CSV with columns `prompt`, `direction` (IN/OUT), `name` and `expect`. A template is linked there.
+- **Shared with every SE:** add a JSON file to `packs/` (copy an existing one) and open a pull request.
+- In the files, `{COMPETITOR}` becomes the competitor chosen in setup, and `{_}` is removed at run time. It splits fake keys so GitHub secret scanning doesn't block pushes.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `invalid_client` at setup | Wrong client ID or secret. Rerun setup; it lets you re-enter them. |
+| `CERTIFICATE_VERIFY_FAILED` / `UnknownIssuer` | Zscaler SSL inspection. Always start the kit with `./aiguard-kit`, which trusts the system store, and check that the Zscaler root CA is in your keychain. |
+| `401` on OneAPI calls | The API client lacks AI Guard access in ZIdentity. |
+| Detection API `401` or `400 … authenticate-llm-app` | Keys must be mode `DETECTIONS`; proxy keys don't work there. Rerun setup. |
+| Insights shows *No Policy Control* | The traffic didn't match a rule (proxy traffic needs an `APPLICATION` rule; detection traffic a `DAS_APPLICATION` rule). Rerun setup. |
+| Prompt Classifications empty | The policy needs `prompt_tags` (the kit's policy has it). Wait 15 minutes. |
+| Users tab empty | Only Detection API traffic (with a user) or real signed-in Client Connector traffic fills it. Proxy traffic doesn't. |
+| Policy switch says "not a kit policy" | Setup reused an existing policy. Switch it in the console, or rerun setup and create the kit's policy. |
+| Enforce step still shows ALLOW | The change takes about 30 seconds to apply. Run the step again. |
+| Scheduled runs don't appear | `./aiguard-kit schedule status`, then check `~/.aiguard-se-kit/trickle.log`. On a Mac, allow keychain access. |
+| Proxy `402` / `insufficient_quota` | No credit left at the provider. Top it up or use detection mode. |
+
+Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
+
+## For maintainers
+
+- **Advanced:** `AIGUARD_DAS_HOST` (default `https://api.us1.zseclipse.net`) and `AIGUARD_PROXY` (default `https://proxy.zseclipse.net`) point at other AI Guard clouds.
+- **Offline tests:** `uv run --with pytest --with requests --with keyring --with truststore pytest -q tests`. CI runs them on every push (`.github/workflows/ci.yml`).
+- **Claude plugin:** `python tools/build_plugin.py` writes `dist/aiguard-se-demo.plugin`, bundling the kit with a skill so SEs can say "set up the AI Guard demo".
+- **Updates:** SEs who cloned with git see "Update available" in the console and in `status`.
+
+## Files
+
+`aiguard-kit`, `aiguard-kit.cmd`: launchers · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.

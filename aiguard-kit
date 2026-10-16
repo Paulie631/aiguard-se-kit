@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Launcher for the AI Guard SE demo kit (macOS / Linux). Usage: ./aiguard-kit setup|gui|run|status|teardown
+set -e
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UV="$(command -v uv || true)"
+for c in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv" /opt/homebrew/bin/uv /usr/local/bin/uv; do
+  [ -z "$UV" ] && [ -x "$c" ] && UV="$c"
+done
+if [ -z "$UV" ]; then
+  echo "uv is not installed. Install it with ONE of:"
+  echo "  brew install uv"
+  echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+  echo "then run this command again."
+  exit 1
+fi
+# Trust the OS certificate store so Zscaler SSL inspection doesn't break package downloads.
+export UV_SYSTEM_CERTS=1 UV_NATIVE_TLS=1
+exec "$UV" run --quiet --script "$DIR/aiguard_kit.py" "$@"

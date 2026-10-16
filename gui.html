@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Guard Test Console</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--ink:#14171c;--muted:#5d6673;--line:#e3e6eb;--soft:#eef1f5;
+  --accent:#1f5eff;--accent-ink:#fff;--ok:#127a3e;--ok-bg:#e3f4ea;--warn:#9a5b00;--warn-bg:#fdf1dc;
+  --bad:#b42318;--bad-bg:#fde8e6;--chip:#eef2ff;--chip-ink:#2a3f99;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1115;--panel:#171a20;--ink:#e8eaee;--muted:#9aa3b0;--line:#2a2f38;--soft:#1f232b;
+  --accent:#5b8cff;--accent-ink:#0b0d12;--ok:#4cc77f;--ok-bg:#16301f;--warn:#e6a23c;--warn-bg:#33270f;
+  --bad:#ff7a6e;--bad-bg:#3a1714;--chip:#1e2747;--chip-ink:#a9bcff;}}
+:root[data-theme="dark"]{
+  --bg:#0f1115;--panel:#171a20;--ink:#e8eaee;--muted:#9aa3b0;--line:#2a2f38;--soft:#1f232b;
+  --accent:#5b8cff;--accent-ink:#0b0d12;--ok:#4cc77f;--ok-bg:#16301f;--warn:#e6a23c;--warn-bg:#33270f;
+  --bad:#ff7a6e;--bad-bg:#3a1714;--chip:#1e2747;--chip-ink:#a9bcff;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:-.01em}
+header .meta{color:var(--muted);font-size:13px}
+header .sp{flex:1}
+.upd{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--warn-bg);color:var(--warn);display:none}
+.pol{display:flex;align-items:center;gap:8px;font-size:13px}
+.pol .state{color:var(--muted);font-size:12px;min-width:90px}
+nav.tabs{display:flex;gap:4px;padding:0 24px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:57px;z-index:4}
+nav.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 14px;background:none;color:var(--muted);font-weight:600}
+nav.tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.view{display:none}.view.on{display:block}
+main{display:grid;grid-template-columns:330px 1fr;gap:20px;padding:20px 24px;max-width:1500px;margin:0 auto}
+.wrap{padding:20px 24px;max-width:1500px;margin:0 auto}
+main>*,.twocol>*,.demo>*{min-width:0}
+aside.panel{position:sticky;top:110px;max-height:calc(100vh - 130px);overflow:auto;align-self:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px;font-weight:600}
+.stack>*+*{margin-top:16px}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 11px;cursor:pointer}
+button:hover{background:var(--soft)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;padding:8px 18px}
+button.primary:hover{filter:brightness(1.08)}
+button:disabled{opacity:.5;cursor:default}
+.preset.on{border-color:var(--accent);color:var(--accent)}
+.group{border-top:1px solid var(--line);padding:8px 0}
+.group summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-weight:600}
+.group summary::-webkit-details-marker{display:none}
+.group summary .n{margin-left:auto;color:var(--muted);font-weight:400;font-size:12px}
+.test{display:flex;gap:8px;align-items:flex-start;padding:4px 0 4px 22px;font-size:13px;cursor:pointer}
+.test small{color:var(--muted);display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}
+.dir{font:600 10px var(--mono);padding:1px 4px;border-radius:4px;background:var(--soft);color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+.field{display:flex;flex-direction:column;gap:5px}
+.lbl{font-size:12px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:6px 12px}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.seg.enf button.on[data-v="block"]{background:var(--bad);border-color:var(--bad);color:#fff}
+select,input[type=number],input[type=text],textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+textarea{width:100%;min-height:78px;resize:vertical}
+.chk{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:13px}
+.chk.off{opacity:.45}
+.progress{height:6px;background:var(--soft);border-radius:99px;overflow:hidden;margin-top:14px}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.stats{display:flex;gap:22px;margin-top:10px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.stats b{color:var(--ink);font-size:18px;display:block;font-weight:650}
+.cov{display:flex;flex-wrap:wrap;gap:6px}
+.cov span{font-size:12px;padding:3px 9px;border-radius:99px;border:1px dashed var(--line);color:var(--muted)}
+.cov span.hit{border:1px solid transparent;background:var(--ok-bg);color:var(--ok)}
+.chip{display:inline-block;font:500 11.5px var(--mono);padding:2px 7px;border-radius:6px;background:var(--chip);color:var(--chip-ink);margin:1px 3px 1px 0}
+.chip.miss{background:var(--warn-bg);color:var(--warn)}
+.badge{font:600 11px var(--mono);padding:2px 7px;border-radius:6px}
+.ALLOW{background:var(--ok-bg);color:var(--ok)}.BLOCK{background:var(--bad-bg);color:var(--bad)}.ERROR{background:var(--bad-bg);color:var(--bad)}
+.tablewrap{overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{position:sticky;top:0;background:var(--soft);text-align:left;font-weight:600;font-size:12px;color:var(--muted);padding:8px 10px;z-index:1}
+td{padding:7px 10px;border-top:1px solid var(--line);vertical-align:top}
+tr.r{cursor:pointer}tr.r:hover td{background:var(--soft)}
+tr.detail td{background:var(--soft);font-size:12.5px}
+pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:6px 0 0}
+.muted{color:var(--muted)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.live-out{margin-top:12px;padding:12px;border-radius:10px;background:var(--soft);display:none}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+.notice{padding:10px 12px;border-radius:8px;background:var(--warn-bg);color:var(--warn);font-size:13px;margin-bottom:12px;display:none}
+.notice.good{background:var(--ok-bg);color:var(--ok)}
+.twocol{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
+/* guided demo */
+.stories{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.demo{display:grid;grid-template-columns:280px 1fr;gap:20px}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{padding:9px 10px;border-radius:8px;cursor:pointer;display:flex;gap:10px;align-items:flex-start;font-size:13.5px}
+.steps li:hover{background:var(--soft)}
+.steps li.on{background:var(--chip);color:var(--chip-ink);font-weight:600}
+.steps .num{flex:0 0 22px;height:22px;border-radius:99px;background:var(--soft);display:grid;place-items:center;font:600 11px var(--mono);color:var(--muted)}
+.steps li.done .num{background:var(--ok-bg);color:var(--ok)}
+.stage{padding:28px}
+.stage .kicker{font:600 12px var(--mono);color:var(--muted);letter-spacing:.04em}
+.stage h3{font-size:26px;margin:6px 0 14px;letter-spacing:-.02em}
+.talk{font-size:16px;line-height:1.55;border-left:3px solid var(--accent);padding:4px 0 4px 14px;margin:0 0 18px;color:var(--ink)}
+.prompt{background:var(--soft);border-radius:10px;padding:14px 16px;font:13.5px/1.55 var(--mono);white-space:pre-wrap;word-break:break-word}
+.verdict{margin-top:18px;padding:18px;border-radius:12px;border:1px solid var(--line);display:none}
+.verdict .big{font:700 22px var(--mono);padding:4px 12px;border-radius:8px;display:inline-block}
+.polchip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:middle}
+.polchip.block{background:var(--bad-bg);color:var(--bad)}.polchip.detect{background:var(--ok-bg);color:var(--ok)}
+.kbd{font:11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;color:var(--muted)}
+/* packs */
+.packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.pack{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel)}
+.pack h4{margin:0 0 4px;font-size:15px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted)}
+@media (max-width:1200px){.twocol{grid-template-columns:1fr}}
+@media (max-width:900px){main,.demo{grid-template-columns:1fr;padding:16px}.wrap{padding:16px}aside.panel{position:static;max-height:none}header{padding:12px 16px}nav.tabs{padding:0 12px;top:0;position:static}.stage{padding:18px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Guard Test Console</h1>
+  <span class="meta" id="tenant">connecting…</span>
+  <span class="upd" id="upd"></span>
+  <span class="sp"></span>
+  <div class="pol" title="Switches the kit's demo policy. Takes about 30 seconds to apply.">
+    <span class="lbl">Policy</span>
+    <div class="seg enf" id="polseg"><button data-v="detect">Monitor</button><button data-v="block">Enforce</button></div>
+    <span class="state" id="polstate">checking…</span>
+  </div>
+  <a id="console" target="_blank" rel="noopener">Insights ↗</a>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-t="runner" class="on">Test runner</button>
+  <button data-t="demo">Guided demo</button>
+  <button data-t="packs">Test packs</button>
+</nav>
+
+<!-- ============ RUNNER ============ -->
+<div class="view on" id="v-runner">
+<main>
+  <aside class="panel">
+    <h2>Test library</h2>
+    <div class="presets" id="presets"></div>
+    <div id="groups"></div>
+  </aside>
+
+  <section class="stack">
+    <div class="notice" id="notice"></div>
+    <div class="twocol">
+      <div class="panel">
+        <h2>Run</h2>
+        <div class="row">
+          <div class="field"><span class="lbl">Mode</span>
+            <div class="seg" id="mode">
+              <button data-v="detect" class="on" title="Scans with the Detection API. Free; fills every dashboard including Users.">Detection API</button>
+              <button data-v="proxy" title="Real LLM calls through the AI Guard proxy. Uses provider credit; fills token usage.">LLM proxy</button>
+            </div></div>
+          <div class="field"><span class="lbl">Rounds</span><input type="number" id="rounds" min="1" max="20" value="1" style="width:70px"></div>
+          <div class="field"><span class="lbl">&nbsp;</span>
+            <div class="row" style="gap:8px"><button class="primary" id="run">Run selected</button><button id="stop" disabled>Stop</button></div></div>
+        </div>
+        <div class="field" style="margin-top:14px"><span class="lbl">Apps</span><div class="row" id="apps" style="gap:6px"></div></div>
+        <div class="field" style="margin-top:12px"><span class="lbl">Users (rotated across tests)</span><div class="row" id="users" style="gap:6px"></div></div>
+        <div class="progress"><i id="bar"></i></div>
+        <div class="stats">
+          <div><b id="s-done">0</b>run</div><div><b id="s-hits">0</b>with detections</div>
+          <div><b id="s-block">0</b>blocked</div><div><b id="s-miss">0</b>missed expected</div><div><b id="s-err">0</b>errors</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Live prompt</h2>
+        <textarea id="live" placeholder="Type or paste a prompt to scan…"></textarea>
+        <div class="row" style="margin-top:10px;gap:10px">
+          <div class="seg" id="ldir"><button data-v="IN" class="on">Prompt</button><button data-v="OUT">Model reply</button></div>
+          <select id="lapp"></select><select id="luser"></select>
+          <button class="primary" id="scan">Scan</button>
+        </div>
+        <div class="hint">Prompts are stored in your tenant's AI Guard logs. Don't paste real customer data unless the customer has agreed.</div>
+        <div class="live-out" id="liveout"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Dashboard coverage <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">: panels this session has fed</span></h2>
+      <div class="cov" id="cov"></div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <h2 style="margin:0">Results</h2>
+        <div class="row" style="gap:8px">
+          <label class="chk" title="Turn off before a customer demo"><input type="checkbox" id="gaps" checked>Flag missed detectors</label>
+          <input type="text" id="custname" placeholder="Prepared for (customer)" style="width:190px">
+          <button id="report">Report</button><button id="csv">CSV</button><button id="clear">Clear</button>
+        </div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Time</th><th>Test</th><th></th><th>User</th><th>App</th><th>Action</th><th>Detectors</th><th style="text-align:right">ms</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="empty">Pick tests on the left (or a preset) and press Run.</td></tr></tbody>
+      </table></div>
+    </div>
+  </section>
+</main>
+</div>
+
+<!-- ============ GUIDED DEMO ============ -->
+<div class="view" id="v-demo">
+<div class="wrap">
+  <div class="row" style="justify-content:space-between;margin-bottom:6px">
+    <div class="stories" id="stories"></div>
+    <div class="row" style="gap:10px">
+      <label class="chk"><input type="checkbox" id="showtalk" checked>Show talk track</label>
+      <span class="muted" style="font-size:12px"><span class="kbd">←</span> <span class="kbd">→</span> steps · <span class="kbd">Enter</span> run</span>
+    </div>
+  </div>
+  <div class="demo">
+    <div class="panel"><ol class="steps" id="steps"></ol>
+      <div class="hint">Steps that change the policy wait about 30 seconds for it to apply. Start the step a little early and talk while it counts down.</div>
+    </div>
+    <div class="panel stage" id="stage"></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ PACKS ============ -->
+<div class="view" id="v-packs">
+<div class="wrap stack">
+  <div class="panel">
+    <h2>Test packs</h2>
+    <div class="packs" id="packlist"></div>
+  </div>
+  <div class="panel">
+    <h2>Import a customer's prompts (CSV)</h2>
+    <div class="row" style="gap:10px;margin-bottom:12px">
+      <input type="text" id="pname" placeholder="Pack name, e.g. Acme POC" style="width:240px">
+      <input type="file" id="pfile" accept=".csv,text/csv">
+      <button class="primary" id="pimport" disabled>Import</button>
+      <a id="ptemplate" download="aiguard-pack-template.csv">Download template</a>
+    </div>
+    <div class="hint" style="margin-top:0">Columns: <code>prompt</code> (required), <code>direction</code> (IN or OUT), <code>name</code>, <code>expect</code> (detector names). The pack is saved on this machine only.</div>
+    <div id="ppreview" style="margin-top:12px"></div>
+  </div>
+</div>
+</div>
+
+<script>
+const TOKEN="__KIT_TOKEN__";
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const api=(p,b)=>fetch(p,{method:b?"POST":"GET",headers:{"X-Kit-Token":TOKEN,"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error||r.statusText)+(j.fix?" — "+j.fix:""));return j});
+let S={lib:null,apps:[],sel:new Set(),results:[],job:null,mode:"detect",panels:{},policy:null,story:null,step:0,done:new Set()};
+const clean=t=>String(t??"").replace(/\{_\}/g,"").replace(/\{COMPETITOR\}/g,S.competitor||"Palo Alto");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function seg(id,cb){$$(`#${id} button`).forEach(b=>b.onclick=()=>{if(cb&&cb(b.dataset.v)===false)return;$$(`#${id} button`).forEach(x=>x.classList.remove("on"));b.classList.add("on")})}
+const segVal=id=>($(`#${id} button.on`)||{}).dataset?.v;
+function note(h,good){const n=$("#notice");n.innerHTML=h;n.classList.toggle("good",!!good);n.style.display=h?"block":"none"}
+
+/* ---------- tabs ---------- */
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo")drawStage()});
+
+/* ---------- state ---------- */
+async function loadState(){
+  const st=await api("/api/state");
+  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;
+  $("#tenant").textContent=`${st.tenant||"not set up"}${st.profile!="default"?" · profile "+st.profile:""} · kit ${st.version}`;
+  $("#console").href=st.console;
+  if(st.update_behind){const u=$("#upd");u.style.display="inline";u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
+  return st;
+}
+async function init(){
+  let st;try{st=await loadState()}catch(e){$("#tenant").textContent="error: "+e.message;return}
+  if(!st.apps.length)note("This machine isn't set up yet. Run <code>./aiguard-kit setup</code> in a terminal, then reload.");
+  drawPresets();
+  $("#apps").innerHTML=S.apps.map(a=>`<label class="chk" data-a="${esc(a.name)}"><input type="checkbox" checked value="${esc(a.name)}">${esc(a.label)}<span class="muted" style="font-size:11px">${a.proxy?"detect + proxy":"detect"}</span></label>`).join("");
+  $("#users").innerHTML=S.lib.users.map(u=>`<label class="chk"><input type="checkbox" checked value="${esc(u)}">${esc(u.split("@")[0])}</label>`).join("");
+  $("#lapp").innerHTML=S.apps.map(a=>`<option value="${esc(a.name)}">${esc(a.label)}</option>`).join("");
+  $("#luser").innerHTML=S.lib.users.map(u=>`<option>${esc(u)}</option>`).join("");
+  seg("mode",v=>{S.mode=v;$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
+    if(v=="proxy"&&!S.apps.some(a=>a.proxy))note("No app has a proxy key. Add an OpenAI or Anthropic key with <code>./aiguard-kit setup</code> to use proxy mode.");else note("")});
+  seg("ldir");
+  $("#presets .preset").click();
+  drawCov();drawStories();drawPacks();loadPolicy();
+}
+
+/* ---------- policy switch ---------- */
+async function loadPolicy(){
+  try{const p=await api("/api/policy");if(!p.mode){$("#polstate").textContent="unavailable";$("#polstate").title=p.error||"";return}
+    S.policy=p.mode;markPolicy();if(!p.switchable){$$("#polseg button").forEach(b=>b.disabled=true);$("#polstate").textContent="not a kit policy"}}
+  catch(e){$("#polstate").textContent="unavailable"}
+}
+function markPolicy(){$$("#polseg button").forEach(b=>b.classList.toggle("on",b.dataset.v==S.policy));$("#polstate").textContent=S.policy=="block"?"enforcing":"monitoring"}
+async function setPolicy(mode,wait){
+  if(mode==S.policy)return true;
+  $("#polstate").textContent="switching…";
+  try{const p=await api("/api/policy",{mode});S.policy=p.mode;markPolicy();
+    if(wait){for(let i=wait;i>0;i--){$("#polstate").textContent=`applies in ${i}s`;if(typeof wait=="number")await sleep(1000)}markPolicy()}
+    return true}
+  catch(e){markPolicy();note(esc(e.message));return false}
+}
+$$("#polseg button").forEach(b=>b.onclick=()=>setPolicy(b.dataset.v));
+
+/* ---------- library ---------- */
+function drawPresets(){
+  $("#presets").innerHTML=S.lib.presets.map(p=>`<button class="preset" data-p="${p.id}">${p.pack?"▸ ":""}${esc(p.name)}</button>`).join("");
+  $$(".preset").forEach(b=>b.onclick=()=>{const p=S.lib.presets.find(x=>x.id==b.dataset.p);S.sel=new Set(S.lib.tests.filter(t=>p.groups.includes(t.group)).map(t=>t.id));$$(".preset").forEach(x=>x.classList.toggle("on",x===b));drawLib()});
+}
+function drawLib(){
+  $("#groups").innerHTML=S.lib.groups.map(name=>{
+    const ts=S.lib.tests.filter(t=>t.group==name);const on=ts.filter(t=>S.sel.has(t.id)).length;
+    return `<details class="group" ${on?"open":""}><summary><input type="checkbox" data-g="${esc(name)}" ${on==ts.length&&on?"checked":""}>${esc(name)}<span class="n">${on}/${ts.length}</span></summary>
+      ${ts.map(t=>`<label class="test" title="${esc(clean(t.text))}"><input type="checkbox" data-t="${esc(t.id)}" ${S.sel.has(t.id)?"checked":""}><span><span class="dir">${t.direction}</span> ${esc(t.name)}<small>${esc(clean(t.text))}</small></span></label>`).join("")}</details>`}).join("");
+  $$("[data-g]").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onchange=()=>{S.lib.tests.filter(t=>t.group==c.dataset.g).forEach(t=>c.checked?S.sel.add(t.id):S.sel.delete(t.id));$$(".preset").forEach(x=>x.classList.remove("on"));drawLib()}});
+  $$("[data-t]").forEach(c=>c.onchange=()=>{c.checked?S.sel.add(c.dataset.t):S.sel.delete(c.dataset.t);$$(".preset").forEach(x=>x.classList.remove("on"));drawLib()});
+  $("#run").textContent=`Run ${S.sel.size} test${S.sel.size==1?"":"s"}`;
+}
+
+/* ---------- results ---------- */
+function drawCov(){
+  const seen=new Set(S.results.flatMap(r=>r.detectors||[]));
+  const users=new Set(S.results.filter(r=>r.status=="OK"&&r.mode=="detect").map(r=>r.user));
+  const panels={};Object.entries(S.panels).forEach(([d,p])=>{panels[p]=panels[p]||seen.has(d)});
+  $("#cov").innerHTML=Object.entries(panels).map(([p,h])=>`<span class="${h?"hit":""}">${esc(p)}</span>`).join("")+
+    `<span class="${users.size?"hit":""}">Users tab${users.size?` (${users.size})`:""}</span>`+
+    `<span class="${S.results.some(r=>r.action=="BLOCK")?"hit":""}">Blocked prompts</span>`+
+    `<span class="${S.results.some(r=>r.mode=="proxy"&&r.status=="OK")?"hit":""}">Token usage (proxy)</span>`;
+}
+const chips=(r,gaps)=>(r.detectors||[]).map(d=>`<span class="chip">${esc(d)}</span>`).join("")+(gaps?(r.missed||[]):[]).map(d=>`<span class="chip miss" title="expected but not triggered">${esc(d)}?</span>`).join("")+(r.detector_errors?`<span class="chip miss" title="AI Guard reported detector errors; rerun this test">${r.detector_errors} detector error${r.detector_errors>1?"s":""}</span>`:"");
+function rowHTML(r,i){
+  const act=r.status=="ERROR"?"ERROR":(r.action||"");
+  const body=r.mode=="proxy"&&r.status=="OK"&&r.action!="BLOCK"?`<span class="muted">${esc((r.reply||"").slice(0,90))}</span>`:(r.status=="ERROR"?`<span class="muted">${esc(String(r.error).slice(0,120))}</span>`:chips(r,$("#gaps").checked)||'<span class="muted">none</span>');
+  return `<tr class="r" data-i="${i}"><td class="muted">${r.ts}</td><td>${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.category)}</div></td><td><span class="dir">${r.direction}</span></td><td>${esc((r.user||"").split("@")[0])}</td><td>${esc((r.app||"").split(": ").pop())}</td><td><span class="badge ${act}">${act}</span></td><td>${body}</td><td class="muted" style="text-align:right">${r.latency_ms??""}</td></tr>`;
+}
+function drawRows(){
+  const tb=$("#rows");
+  tb.innerHTML=S.results.length?S.results.map((r,i)=>rowHTML(r,i)).reverse().join(""):'<tr><td colspan="8" class="empty">No results yet.</td></tr>';
+  $$("tr.r").forEach(tr=>tr.onclick=()=>{const nx=tr.nextElementSibling;if(nx&&nx.classList.contains("detail")){nx.remove();return}
+    const r=S.results[+tr.dataset.i];const d=document.createElement("tr");d.className="detail";
+    d.innerHTML=`<td colspan="8"><b>Prompt</b><pre>${esc(r.text)}</pre>${r.reply?`<b>${r.action=="BLOCK"?"Proxy response":"Model reply"}</b><pre>${esc(r.reply)}</pre>`:""}${r.error?`<b>Error</b><pre>${esc(r.error)}</pre><b>Fix</b><pre>${esc(r.fix)}</pre>`:""}${r.raw?`<b>Detector responses</b><pre>${esc(JSON.stringify(r.raw,null,1))}</pre>`:""}${r.transaction_id?`<div class="muted">transaction ${esc(r.transaction_id)}</div>`:""}</td>`;tr.after(d)});
+  const ok=S.results.filter(r=>r.status=="OK");
+  $("#s-done").textContent=S.results.length;$("#s-hits").textContent=ok.filter(r=>(r.detectors||[]).length).length;
+  $("#s-block").textContent=ok.filter(r=>r.action=="BLOCK").length;
+  $("#s-miss").textContent=$("#gaps").checked?ok.filter(r=>(r.missed||[]).length).length:"–";$("#s-err").textContent=S.results.length-ok.length;
+  drawCov();
+}
+$("#run").onclick=async()=>{
+  if(!S.sel.size)return note("Select at least one test.");
+  const apps=$$("#apps input:checked").map(i=>i.value),users=$$("#users input:checked").map(i=>i.value);
+  if(!apps.length||!users.length)return note("Pick at least one app and one user.");
+  note("");
+  try{const j=await api("/api/run",{tests:[...S.sel],mode:S.mode,apps,users,rounds:+$("#rounds").value||1});
+    S.job={id:j.id,total:j.total,got:0};$("#run").disabled=true;$("#stop").disabled=false;poll()}
+  catch(e){note(esc(e.message))}
+};
+$("#stop").onclick=()=>S.job&&api("/api/stop",{id:S.job.id});
+async function poll(){
+  if(!S.job)return;
+  try{const j=await api(`/api/job?id=${S.job.id}&since=${S.job.got}`);
+    const first=S.job.got==0&&j.results[0];
+    S.job.got+=j.results.length;S.results.push(...j.results);
+    $("#bar").style.width=Math.round(100*S.job.got/S.job.total)+"%";
+    if(j.results.length)drawRows();
+    if(first&&first.status=="ERROR")note(`<b>First test failed:</b> ${esc(first.error)}<br><b>Fix:</b> ${esc(first.fix)}`);
+    if(j.done){S.job=null;$("#run").disabled=false;$("#stop").disabled=true;
+      if($("#notice").style.display!="block")note(`Done. Dashboards update in 10–15 minutes: <a href="${esc(S.console)}" target="_blank">open Insights</a>.`,true);return}
+  }catch(e){note(esc(e.message))}
+  setTimeout(poll,700);
+}
+async function scanOne(payload){const r=await api("/api/scan",payload);S.results.push(r);drawRows();return r}
+function verdictHTML(r){
+  if(r.status=="ERROR")return `<span class="badge ERROR">ERROR</span> ${esc(r.error)}<div class="muted">${esc(r.fix)}</div>`;
+  if(r.mode=="proxy"&&r.action!="BLOCK")return `<span class="badge ALLOW">${esc(r.action)}</span> <span class="muted">${r.latency_ms} ms</span><pre>${esc(r.reply)}</pre>`;
+  return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.severity?"severity "+esc(r.severity)+" · ":""}${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)||'<span class="muted">No detectors triggered</span>'}</div>`;
+}
+$("#scan").onclick=async()=>{
+  const out=$("#liveout");out.style.display="block";out.innerHTML='<span class="muted">Scanning…</span>';
+  try{const r=await scanOne({text:$("#live").value,direction:segVal("ldir"),app:$("#lapp").value,user:$("#luser").value,mode:segVal("ldir")=="OUT"?"detect":S.mode});out.innerHTML=verdictHTML(r)}
+  catch(e){out.innerHTML=esc(e.message)}
+};
+$("#gaps").onchange=drawRows;
+$("#clear").onclick=()=>{S.results=[];drawRows();$("#bar").style.width="0"};
+$("#csv").onclick=()=>{
+  const cols=["ts","id","name","category","group","direction","user","app","mode","status","action","severity","detectors","missed","detector_errors","latency_ms","transaction_id","text","error"];
+  const q=v=>{let x=String(Array.isArray(v)?v.join(" "):v??"");if(/^[=+\-@\t\r]/.test(x))x="'"+x;return `"${x.replace(/"/g,'""')}"`};
+  download(`aiguard-results-${Date.now()}.csv`,[cols.join(",")].concat(S.results.map(r=>cols.map(c=>q(r[c])).join(","))).join("\n"),"text/csv");
+};
+function download(name,data,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;a.click()}
+
+/* ---------- report ---------- */
+$("#report").onclick=()=>{
+  const ok=S.results.filter(r=>r.status=="OK");
+  if(!ok.length)return note("Run some tests first; the report summarizes this session's results.");
+  const who=$("#custname").value.trim(), date=new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  const det={};ok.forEach(r=>(r.detectors||[]).forEach(d=>det[d]=(det[d]||0)+1));
+  const byG={};ok.forEach(r=>{const g=byG[r.group]=byG[r.group]||{n:0,hit:0,block:0};g.n++;if((r.detectors||[]).length)g.hit++;if(r.action=="BLOCK")g.block++});
+  const max=Math.max(1,...Object.values(det));
+  const label=d=>S.panels[d]||d;
+  const hits=ok.filter(r=>(r.detectors||[]).length), blocked=ok.filter(r=>r.action=="BLOCK").length;
+  const notable=hits.filter(r=>!(r.detectors||[]).every(d=>d=="language"||d=="prompt_tags"||d=="response_tags")).slice(0,14);
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>AI Guard validation summary${who?" – "+esc(who):""}</title><style>
+  body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;color:#14171c;max-width:860px;margin:40px auto;padding:0 28px}
+  h1{font-size:26px;margin:0;letter-spacing:-.02em}h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#5d6673;margin:32px 0 10px}
+  .sub{color:#5d6673;margin-top:6px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:24px}
+  .kpi{border:1px solid #e3e6eb;border-radius:10px;padding:14px}.kpi b{display:block;font-size:26px}
+  table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;border-bottom:1px solid #e3e6eb;text-align:left;vertical-align:top}th{color:#5d6673;font-weight:600;font-size:12px}
+  .bar{height:10px;background:#1f5eff;border-radius:3px}.chip{display:inline-block;font:500 11px ui-monospace,Menlo,monospace;padding:1px 6px;border-radius:5px;background:#eef2ff;color:#2a3f99;margin:1px 3px 1px 0}
+  .BLOCK{color:#b42318;font-weight:600}.foot{margin-top:36px;color:#5d6673;font-size:12px;border-top:1px solid #e3e6eb;padding-top:12px}
+  .btn{position:fixed;top:16px;right:16px;font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #e3e6eb;background:#fff;cursor:pointer}
+  @media print{.btn{display:none}body{margin:0 auto}}</style></head><body>
+  <button class="btn" onclick="print()">Print / save as PDF</button>
+  <h1>AI Guard validation summary</h1>
+  <div class="sub">${who?"Prepared for "+esc(who)+" · ":""}${esc(date)} · ${blocked?"high-risk detectors enforced during the session":"policy in monitor mode (detect and log)"}</div>
+  <div class="kpis"><div class="kpi"><b>${ok.length}</b>prompts and responses tested</div><div class="kpi"><b>${hits.length}</b>with a detection</div>
+  <div class="kpi"><b>${blocked}</b>blocked</div><div class="kpi"><b>${Object.keys(det).length}</b>detector types triggered</div></div>
+  <h2>What was detected</h2><table><tr><th>Detector</th><th style="width:55%"></th><th>Count</th></tr>
+  ${Object.entries(det).sort((a,b)=>b[1]-a[1]).map(([d,n])=>`<tr><td>${esc(label(d))}<div style="color:#5d6673;font-size:11px">${esc(d)}</div></td><td><div class="bar" style="width:${Math.round(100*n/max)}%"></div></td><td>${n}</td></tr>`).join("")}</table>
+  <h2>By scenario</h2><table><tr><th>Scenario</th><th>Tested</th><th>With a detection</th><th>Blocked</th></tr>
+  ${Object.entries(byG).map(([g,v])=>`<tr><td>${esc(g)}</td><td>${v.n}</td><td>${v.hit}</td><td>${v.block}</td></tr>`).join("")}</table>
+  <h2>Examples</h2><table><tr><th>Test</th><th>Detected</th><th>Action</th></tr>
+  ${notable.map(r=>`<tr><td>${esc(r.name)}<div style="color:#5d6673;font-size:12px">${esc(r.direction=="OUT"?"Model response":"Prompt")}: ${esc(r.text.slice(0,110))}${r.text.length>110?"…":""}</div></td><td>${(r.detectors||[]).map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</td><td class="${esc(r.action)}">${esc(r.action)}</td></tr>`).join("")}</table>
+  <div class="foot">All test content is synthetic unless noted. Results come from Zscaler AI Guard detection in the tenant used for this session; detection results can vary with policy settings and thresholds.</div>
+  </body></html>`;
+  const w=window.open(URL.createObjectURL(new Blob([html],{type:"text/html"})),"_blank");
+  if(!w)download(`aiguard-summary-${Date.now()}.html`,html,"text/html");
+};
+
+/* ---------- guided demo ---------- */
+function drawStories(){
+  const st=S.lib.stories||[];
+  $("#stories").innerHTML=st.map(s=>`<button data-s="${esc(s.id)}">${esc(s.name)}</button>`).join("");
+  $$("#stories button").forEach(b=>b.onclick=()=>{S.story=st.find(x=>x.id==b.dataset.s);S.step=0;S.done=new Set();$$("#stories button").forEach(x=>x.classList.toggle("preset",true));$$("#stories button").forEach(x=>x.classList.toggle("on",x===b));drawStage()});
+  if(st.length)$("#stories button").click();
+}
+function drawStage(){
+  if(!S.story){$("#stage").innerHTML='<div class="empty">No storylines found in tests.json.</div>';return}
+  const steps=S.story.steps;
+  $("#steps").innerHTML=steps.map((s,i)=>`<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${s.policy?`<span class="polchip ${s.policy}">${s.policy=="block"?"Enforce":"Monitor"}</span>`:""}</span></li>`).join("");
+  $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()});
+  const s=steps[S.step], t=S.lib.tests.find(x=>x.id==s.test)||{text:"(test not found: "+s.test+")",direction:"IN"};
+  $("#stage").innerHTML=`<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${s.policy=="block"?"ENFORCE":"MONITOR"}`:""}</div>
+    <h3>${esc(s.title)}</h3>
+    ${$("#showtalk").checked?`<p class="talk">${esc(s.talk)}</p>`:""}
+    <div class="lbl" style="margin-bottom:6px">${t.direction=="OUT"?"Model response being checked":"Prompt"}</div>
+    <div class="prompt">${esc(clean(t.text))}</div>
+    <div class="row" style="margin-top:18px;gap:10px">
+      <button id="sback" ${S.step==0?"disabled":""}>‹ Back</button>
+      <button class="primary" id="srun">Run step</button>
+      <button id="snext" ${S.step==steps.length-1?"disabled":""}>Next ›</button>
+      ${S.step==steps.length-1?`<a href="${esc(S.console)}" target="_blank">Show it in Insights ↗</a>`:""}
+    </div>
+    <div class="verdict" id="sverdict"></div>`;
+  $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=runStep;
+}
+async function runStep(){
+  const s=S.story.steps[S.step], t=S.lib.tests.find(x=>x.id==s.test), v=$("#sverdict");
+  if(!t)return;
+  $("#srun").disabled=true;v.style.display="block";
+  if(s.policy&&s.policy!=S.policy){
+    if(S.policy===null){v.innerHTML='<span class="muted">The policy switch is unavailable, so this step runs with the current policy.</span>';await sleep(1200)}
+    else{v.innerHTML=`<span class="muted">Switching the policy to ${s.policy=="block"?"Enforce":"Monitor"}…</span>`;
+      if(!await setPolicy(s.policy)){$("#srun").disabled=false;return}
+      for(let i=30;i>0;i--){v.innerHTML=`<span class="muted">Policy is applying… running in ${i}s</span>`;$("#polstate").textContent=`applies in ${i}s`;await sleep(1000)}
+      markPolicy()}
+  }
+  v.innerHTML='<span class="muted">Scanning…</span>';
+  try{const app=S.apps[0]?.name, user=S.lib.users[S.step%S.lib.users.length];
+    const r=await scanOne({text:clean(t.text),direction:t.direction,app,user,mode:"detect"});
+    const big=r.status=="ERROR"?"ERROR":r.action;
+    v.innerHTML=`<span class="big ${esc(big)}">${esc(big)}</span><div style="margin-top:12px">${r.status=="ERROR"?esc(r.error)+'<div class="muted">'+esc(r.fix)+"</div>":(chips(r,false)||'<span class="muted">No detectors triggered</span>')}</div>`;
+    S.done.add(S.step);$$("#steps li")[S.step].classList.add("done");$$("#steps li")[S.step].querySelector(".num").textContent="✓";
+  }catch(e){v.innerHTML=esc(e.message)}
+  $("#srun").disabled=false;
+}
+$("#showtalk").onchange=drawStage;
+document.addEventListener("keydown",e=>{
+  if(!$("#v-demo").classList.contains("on")||!S.story||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;
+  if(e.key=="ArrowRight"&&S.step<S.story.steps.length-1){S.step++;drawStage()}
+  else if(e.key=="ArrowLeft"&&S.step>0){S.step--;drawStage()}
+  else if(e.key=="Enter"&&!$("#srun").disabled)runStep();
+});
+
+/* ---------- packs ---------- */
+function drawPacks(){
+  const core={name:"Core library",count:S.lib.tests.filter(t=>!t.pack).length,description:"Every detector, every dashboard panel. Synthetic data.",core:true};
+  $("#packlist").innerHTML=[core,...S.lib.packs].map(p=>`<div class="pack"><h4>${esc(p.name)}</h4><div class="muted" style="font-size:13px;min-height:38px">${esc(p.description||"")}</div>
+    <div class="row" style="gap:8px;margin-top:10px"><span class="muted" style="font-size:12px">${p.count} tests${p.custom?" · imported":""}</span><span style="flex:1"></span>
+    <button data-use="${esc(p.name)}" data-core="${p.core?1:""}">Select in runner</button>${p.custom?`<button data-del="${esc(p.file)}">Remove</button>`:""}</div></div>`).join("");
+  $$("[data-use]").forEach(b=>b.onclick=()=>{
+    S.sel=new Set(S.lib.tests.filter(t=>b.dataset.core?!t.pack:t.pack==b.dataset.use).map(t=>t.id));
+    $$(".preset").forEach(x=>x.classList.remove("on"));drawLib();$('#tabs button[data-t="runner"]').click()});
+  $$("[data-del]").forEach(b=>b.onclick=async()=>{try{await api("/api/pack/delete",{file:b.dataset.del});await reloadLib()}catch(e){alert(e.message)}});
+}
+async function reloadLib(){await loadState();drawPresets();drawLib();drawPacks();drawStories()}
+function parseCSV(text){
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c=='"'){if(text[i+1]=='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c=='"')q=true;else if(c==","){row.push(f);f=""}else if(c=="\n"||c=="\r"){if(c=="\r"&&text[i+1]=="\n")i++;row.push(f);rows.push(row);row=[];f=""}else f+=c}
+  if(f||row.length){row.push(f);rows.push(row)}
+  return rows.filter(r=>r.some(x=>x.trim()));
+}
+let pending=null;
+$("#pfile").onchange=async()=>{
+  const file=$("#pfile").files[0];if(!file)return;
+  const rows=parseCSV(await file.text());if(!rows.length){$("#ppreview").textContent="That file is empty.";return}
+  const hdr=rows[0].map(h=>h.trim().toLowerCase());let body=rows.slice(1),idx={};
+  ["prompt","text","direction","name","expect"].forEach(k=>idx[k]=hdr.indexOf(k));
+  if(idx.prompt<0&&idx.text<0){idx.prompt=0;body=rows}   // no header: first column is the prompt
+  const pi=idx.prompt>=0?idx.prompt:idx.text;
+  pending=body.map(r=>({prompt:r[pi]||"",direction:idx.direction>=0?r[idx.direction]:"IN",name:idx.name>=0?r[idx.name]:"",expect:idx.expect>=0?r[idx.expect]:""})).filter(r=>r.prompt.trim());
+  if(!$("#pname").value)$("#pname").value=file.name.replace(/\.csv$/i,"");
+  $("#ppreview").innerHTML=`<div class="muted" style="margin-bottom:6px">${pending.length} prompts found. First ${Math.min(5,pending.length)}:</div><div class="tablewrap"><table><tr><th>Name</th><th>Dir</th><th>Prompt</th></tr>${pending.slice(0,5).map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.direction||"IN")}</td><td>${esc(r.prompt.slice(0,140))}</td></tr>`).join("")}</table></div>`;
+  $("#pimport").disabled=!pending.length;
+};
+$("#pimport").onclick=async()=>{
+  try{const r=await api("/api/import",{name:$("#pname").value,rows:pending});
+    $("#ppreview").innerHTML=`<div class="notice good" style="display:block">Imported ${r.count} prompts. They're in the runner under "${esc($("#pname").value)}".</div>`;
+    pending=null;$("#pimport").disabled=true;$("#pfile").value="";await reloadLib()}
+  catch(e){$("#ppreview").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}
+};
+$("#ptemplate").href=URL.createObjectURL(new Blob(['name,direction,prompt,expect\nCustomer record,IN,"Summarize: Jane Roe, SSN 123-45-6789, DOB 04/15/1980",pii\nAgent reply,OUT,"Here is the API key you asked for: ...",secrets\n'],{type:"text/csv"}));
+
+init();
+</script>
+</body>
+</html>
