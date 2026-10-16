@@ -23,7 +23,7 @@ Use `./aiguard-kit` on Mac/Linux and `aiguard-kit.cmd` on Windows, from the kit 
 | Goal | Command | Who runs it |
 |---|---|---|
 | First-time setup | `./aiguard-kit gui` (Setup tab) or `./aiguard-kit setup` | **The user.** Start the console and point them to its Setup tab, or have them run the terminal wizard themselves. Both ask for the OneAPI client secret and optional LLM keys in a local form or hidden prompt. Never ask for secrets in chat and never pass them as arguments. |
-| Preflight only | `./aiguard-kit preflight` (add `--write-probe` to test create permission) | Claude. Relay each `!` / `✗` line and its fix. |
+| Preflight only | `./aiguard-kit preflight --json` (add `--write-probe` to test create permission) | Claude. Exit 0 = pass, 2 = warnings, 1 = failures. For each warning or failure, read that check's section in the kit's `PREFLIGHT.md` and walk the user through its "Verify by hand" and "Fix" steps. Sections marked "Confirm in your tenant" may not match the console exactly; say so. |
 | Re-run setup with defaults (credentials already saved) | `./aiguard-kit setup --yes` | Claude |
 | Health check | `./aiguard-kit status` | Claude |
 | Populate every dashboard | `./aiguard-kit run --yes` (add `--preset=leakage|attacks|rai|output|topics`, `--rounds=N`, `--mode=proxy`) | Claude |

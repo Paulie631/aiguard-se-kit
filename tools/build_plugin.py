@@ -13,7 +13,7 @@ import zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "plugin" / "aiguard-se-demo"
 KIT_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "policy_template.json",
-             "README.md", "SECURITY.md", "CHANGELOG.md"]
+             "README.md", "SECURITY.md", "CHANGELOG.md", "PREFLIGHT.md", "preflight_help.json"]
 
 
 def check():

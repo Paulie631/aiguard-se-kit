@@ -6,7 +6,7 @@
 
   ./aiguard-kit setup      guided setup in the terminal: preflight checks, choices, review, create, verify
                            (or use the Setup tab in ./aiguard-kit gui)
-  ./aiguard-kit preflight  run the read-only tenant and computer checks on their own
+  ./aiguard-kit preflight  run the read-only checks on their own (--write-probe, --json; see PREFLIGHT.md)
   ./aiguard-kit gui        open the test console in your browser (localhost only)
   ./aiguard-kit run        run tests from the terminal   (--preset everything|leakage|attacks|rai|output|topics,
                            --mode detect|proxy, --rounds N, --tests id1,id2)
@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
@@ -735,21 +735,62 @@ def preflight(cfg, write_probe=False):
     return checks, t
 
 
+def preflight_help():
+    try:
+        return {c["id"]: c for c in json.loads((HERE / "preflight_help.json").read_text(encoding="utf-8"))["checks"]}
+    except Exception:
+        return {}
+
+
+def help_id(cid):
+    return "read" if cid.startswith("read") else cid
+
+
+def preflight_report(cfg, checks):
+    """Shareable report: no secrets (client ID masked, no keys)."""
+    import platform
+    worst = "fail" if any(c["status"] == "fail" for c in checks) else \
+        "warn" if any(c["status"] == "warn" for c in checks) else "pass"
+    return {"kit_version": VERSION, "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "result": worst,
+            "os": f"{platform.system()} {platform.release()}", "python": platform.python_version(),
+            "profile": PROFILE, "prefix": PREFIX, "tenant": cfg.get("vanity_domain"),
+            "client_id": mask(cfg.get("client_id", "")), "das_host": DAS_HOST, "proxy_host": PROXY_HOST,
+            "checks": [{k: c[k] for k in ("id", "label", "status", "detail")} for c in checks]}
+
+
+def report_text(rep_):
+    icon = {"ok": "✓", "warn": "!", "fail": "✗", "info": "·"}
+    lines = [f"AI Guard SE kit {rep_['kit_version']} preflight: {rep_['result'].upper()}",
+             f"tenant {rep_['tenant']} · client {rep_['client_id']} · profile {rep_['profile']} · prefix {rep_['prefix']}",
+             f"{rep_['os']} · Python {rep_['python']} · {rep_['time']}", ""]
+    lines += [f"{icon[c['status']]} {c['label']}" + (f" - {c['detail']}" if c["detail"] else "") for c in rep_["checks"]]
+    return "\n".join(lines)
+
+
 def print_checks(checks):
     icon = {"ok": f"{C['g']}✓{C['x']}", "warn": f"{C['y']}!{C['x']}", "fail": f"{C['r']}✗{C['x']}", "info": "·"}
     for c in checks:
         print(f"  {icon[c['status']]} {c['label']}" + (f"  {C['d']}{c['detail']}{C['x']}" if c["detail"] else ""))
         if c["fix"] and c["status"] in ("warn", "fail"):
             print(f"      {C['y']}Fix:{C['x']} {c['fix']}")
+            print(f"      {C['d']}Details: {HERE / 'PREFLIGHT.md'}#{help_id(c['id'])}{C['x']}")
 
 
 def cmd_preflight():
+    """Exit codes: 0 pass, 2 warnings only, 1 failures."""
     cfg = load_cfg()
-    head("Preflight checks (no changes)")
+    as_json = "--json" in ARGS
+    if not as_json:
+        head("Preflight checks (no changes)")
     checks, _ = preflight(cfg, write_probe="--write-probe" in ARGS)
-    print_checks(checks)
-    if any(c["status"] == "fail" for c in checks):
-        sys.exit(1)
+    rep_ = preflight_report(cfg, checks)
+    if as_json:
+        print(json.dumps(rep_, indent=2))
+    else:
+        print_checks(checks)
+        print(f"\n  Result: {rep_['result'].upper()}.  Runbook: {HERE / 'PREFLIGHT.md'}")
+        print("  Share it: ./aiguard-kit preflight --json  (no secrets)")
+    sys.exit({"pass": 0, "warn": 2, "fail": 1}[rep_["result"]])
 
 
 # ---------------------------------------------------------------- setup (shared by terminal and browser)
@@ -928,7 +969,7 @@ def verify(cfg, log, wait=75):
         key = kc_get(f"{app_name}:detections")
         label = app_name.split(": ", 1)[-1]
         if not key:
-            checks.append({"label": f"{label}: detection key", "status": "fail", "detail": "missing from keychain",
+            checks.append({"id": "verify-policy", "label": f"{label}: detection key", "status": "fail", "detail": "missing from keychain",
                            "fix": "Run setup again."})
             continue
         deadline, last = time.time() + wait, None
@@ -937,18 +978,18 @@ def verify(cfg, log, wait=75):
                 d, ms = das_scan(key, "Setup check: summarize zero trust in one line.", user="setup-check@acme-demo.com")
                 same = (d.get("policyId") == st.get("policy_id")) if d.get("policyId") is not None else None
                 if same is False:
-                    checks.append({"label": f"{label}: handled by the demo policy", "status": "fail",
+                    checks.append({"id": "verify-policy", "label": f"{label}: handled by the demo policy", "status": "fail",
                                    "detail": f"handled by '{d.get('policyName')}' instead",
                                    "fix": "Another rule matched first. Disable or reorder it in AI Guard > Policies, "
                                           "or move the kit's rules higher."})
                 else:
-                    checks.append({"label": f"{label}: Detection API", "status": "ok",
+                    checks.append({"id": "verify-policy", "label": f"{label}: Detection API", "status": "ok",
                                    "detail": f"{ms} ms, policy '{d.get('policyName', '?')}'", "fix": ""})
                 break
             except Exception as e:
                 last = e
                 if time.time() > deadline or not re.search(r"\b(401|403|404)\b", str(e)):
-                    checks.append({"label": f"{label}: Detection API", "status": "fail", "detail": str(e)[:200],
+                    checks.append({"id": "verify-policy", "label": f"{label}: Detection API", "status": "fail", "detail": str(e)[:200],
                                    "fix": hint(e)})
                     break
                 log("info", f"{label}: key not active yet, retrying…")
@@ -1308,7 +1349,7 @@ def cmd_gui():
                     return self._send(404, {"error": "no such job"})
                 since = int(q.get("since", 0))
                 return self._send(200, {"done": j["done"], "total": j["total"], "results": j["results"][since:],
-                                        "verify": j.get("verify"), "error": j.get("error")})
+                                        "verify": j.get("verify"), "error": j.get("error"), "help": j.get("help")})
             if path == "/api/setup/state":
                 c = load_cfg()
                 return self._send(200, {"vanity": c.get("vanity_domain", ""), "client_id": mask(c.get("client_id", "")),
@@ -1358,7 +1399,9 @@ def cmd_gui():
                     tenant_cache[(c.get("client_id"), c.get("vanity_domain"))] = t
                     facts = tenant_facts(t, c)
                     facts["defaults"] = default_answers(facts)
-                return self._send(200, {"checks": checks, "facts": facts})
+                rep_ = preflight_report(c, checks)
+                return self._send(200, {"checks": checks, "facts": facts, "help": preflight_help(),
+                                        "report": rep_, "report_text": report_text(rep_)})
             if path in ("/api/setup/apply", "/api/setup/teardown"):
                 if path.endswith("teardown") and body.get("confirm") != "DELETE":
                     return self._send(400, {"error": "Type DELETE to confirm."})
@@ -1380,6 +1423,7 @@ def cmd_gui():
                             setup_apply(t, cc, answers, log)
                             log("head", "Verifying")
                             job["verify"] = verify(cc, log)
+                            job["help"] = preflight_help()
                     except Exception as e:
                         job["error"] = {"error": str(e), "fix": hint(e)}
                         log("fail", f"{e}")

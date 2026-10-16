@@ -11,3 +11,4 @@ jobs:
       - run: pyflakes aiguard_kit.py tests tools
       - run: pytest -q tests
       - run: python tools/build_plugin.py --check
+      - run: python tools/gen_preflight_doc.py --check

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+- **Preflight runbook** (`PREFLIGHT.md`): for every check, what it checks, why it matters, how to verify by hand,
+  how to fix and how to re-test. Steps not yet confirmed in a real tenant are marked.
+- **How to verify** panels under every check in the console (same content as the runbook).
+- **Copy report** / **Download .json** in the console and `./aiguard-kit preflight --json`: checklist, kit version,
+  OS and tenant, with no secrets. Exit codes: 0 pass, 2 warnings, 1 failures.
+- Terminal output links each warning and failure to its runbook section.
+- **TESTPLAN.md**: break-each-check validation plan and pilot checklist.
+
 ## 1.2.0
 - Guided setup in two forms: a **Setup tab** in the console (browser wizard) and a step-by-step terminal wizard.
 - **Preflight checks** before any change: keychain, Detection API and proxy reachability, login, read access,

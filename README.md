@@ -46,6 +46,8 @@ Preflight runs before anything is created, and on its own with `./aiguard-kit pr
 | Reused policy covers the tests | Lists the missing detectors and the panels that will stay empty |
 | Store Prompts/Responses | Reminder only; it can't be read through the API |
 
+Every check has a **How to verify** panel in the console and a section in **[PREFLIGHT.md](PREFLIGHT.md)**: what it checks, how to confirm it by hand, how to fix it and how to re-test. To share results, use **Copy report** in the console or `./aiguard-kit preflight --json`. Neither includes secrets. Exit codes are 0 pass, 2 warnings, 1 failures.
+
 If creating something fails partway, everything made so far is kept and **Retry** fills in the rest. After setup, **verification** scans once through every app, waits up to about a minute for new keys to activate, and fails if a different policy handled the traffic.
 
 ## What setup creates
@@ -73,7 +75,7 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 
 ```
 ./aiguard-kit setup                      terminal wizard; safe to rerun (fills in anything missing)
-./aiguard-kit preflight [--write-probe]  checks only, no changes
+./aiguard-kit preflight [--write-probe] [--json]   checks only, no changes (exit 0/2/1)
 ./aiguard-kit gui                        console at http://127.0.0.1:8765 (this machine only)
 ./aiguard-kit run                        everything, detection mode
 ./aiguard-kit run --preset=attacks       everything leakage attacks rai output topics pack-healthcare …
@@ -117,6 +119,9 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 
 ## For maintainers
 
+- **Before rollout:** work through [TESTPLAN.md](TESTPLAN.md), which breaks each check on purpose and settles the items the runbook marks as unconfirmed.
+- **Runbook text** lives in `preflight_help.json` (used by the console). After editing it, run `python tools/gen_preflight_doc.py` to regenerate PREFLIGHT.md; CI fails if they drift.
+
 - **Advanced:** `AIGUARD_DAS_HOST` (default `https://api.us1.zseclipse.net`) and `AIGUARD_PROXY` (default `https://proxy.zseclipse.net`) point at other AI Guard clouds.
 - **Offline tests:** `uv run --with pytest --with requests --with keyring --with truststore pytest -q tests`. CI runs them on every push (`.github/workflows/ci.yml`).
 - **Claude plugin:** `python tools/build_plugin.py` writes `dist/aiguard-se-demo.plugin`, bundling the kit with a skill so SEs can say "set up the AI Guard demo".
@@ -124,4 +129,4 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 
 ## Files
 
-`aiguard-kit`, `aiguard-kit.cmd`: launchers · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.
+`aiguard-kit`, `aiguard-kit.cmd`: launchers · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.

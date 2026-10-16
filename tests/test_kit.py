@@ -279,3 +279,44 @@ def test_setup_apply_with_provider_key_creates_proxy_path(env):
     assert any(r.get("matchCriteria", {}).get("type") == "APPLICATION" for r in t.db["policy_match_rules"])
     assert kit.policy_mode(t, cfg)[0] == "block"
     assert "sk-test" not in kit.CFG_FILE.read_text()
+
+
+def test_every_check_has_runbook_help(env):
+    kit, t = env("setup", "--yes")
+    t.db["policy_match_rules"].append({"id": 3, "name": "VIP", "enabled": True, "matchCriteria": {"type": "USER"}})
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    cfg = kit.load_cfg()
+    cfg["state"] = {"apps": {}, "policy_id": 1}
+    kit.save_cfg(cfg)
+    t.db["policies"][0].update(inputDetectorPolicies=[], outputDetectorPolicies=[])
+    checks, _ = kit.preflight(kit.load_cfg(), write_probe=True)
+    helpmap = kit.preflight_help()
+    ids = {kit.help_id(c["id"]) for c in checks} | {"verify-policy"}
+    assert ids <= set(helpmap), ids - set(helpmap)
+    for h in helpmap.values():
+        assert h["what"] and h["why"] and h["verify"] and h["fix"] and h["retest"]
+
+
+def test_preflight_json_and_exit_codes(env, capsys):
+    kit, t = env("preflight", "--json")
+    kit.save_credentials(kit.load_cfg(), "acme", "cid-123456", "supersecret")
+    with pytest.raises(SystemExit) as e:
+        kit.cmd_preflight()
+    out = capsys.readouterr().out
+    rep = json.loads(out)
+    assert e.value.code == 0 and rep["result"] == "pass" and rep["tenant"] == "acme"
+    assert "supersecret" not in out and "cid-123456" not in out
+    t.db["policy_match_rules"].append({"id": 3, "name": "VIP", "enabled": True, "matchCriteria": {"type": "USER"}})
+    with pytest.raises(SystemExit) as e:
+        kit.cmd_preflight()
+    assert e.value.code == 2
+    kit.connect = lambda cfg: (_ for _ in ()).throw(kit.KitError("invalid_client"))
+    with pytest.raises(SystemExit) as e:
+        kit.cmd_preflight()
+    assert e.value.code == 1
+
+
+def test_runbook_doc_in_sync():
+    import subprocess
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_preflight_doc.py"), "--check"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr

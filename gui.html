@@ -122,8 +122,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:
 .form input[type=text],.form input[type=password]{width:100%}
 input[type=password]{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 .checks{list-style:none;margin:0;padding:0}
-.checks li{display:grid;grid-template-columns:22px 1fr;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
-.checks li:first-child{border-top:0}
+.checks>li{display:grid;grid-template-columns:22px 1fr;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.checks>li:first-child{border-top:0}
+details.how li{display:list-item;padding:1px 0;border:0}
 .ic{font-weight:700;text-align:center}.ic.ok{color:var(--ok)}.ic.warn{color:var(--warn)}.ic.fail{color:var(--bad)}.ic.info{color:var(--muted)}
 .checks .d{color:var(--muted);font-size:12.5px}.checks .fx{color:var(--warn);font-size:12.5px;margin-top:2px}
 .opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer}
@@ -131,6 +132,14 @@ input[type=password]{font:inherit;color:var(--ink);background:var(--panel);borde
 .log{font:12.5px/1.6 var(--mono);background:var(--soft);border-radius:10px;padding:12px 14px;max-height:340px;overflow:auto}
 .log .h{font-weight:700;margin-top:6px}.log .ok{color:var(--ok)}.log .warn,.log .fail{color:var(--warn)}.log .info{color:var(--muted)}
 .danger{border-color:var(--bad-bg)}
+details.how{margin-top:4px}
+details.how summary{cursor:pointer;color:var(--accent);font-size:12.5px;list-style:none;display:inline}
+details.how summary::-webkit-details-marker{display:none}
+details.how .body{margin-top:8px;padding:10px 12px;background:var(--soft);border-radius:8px;font-size:13px;line-height:1.5}
+details.how .body b{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:8px 0 3px}
+details.how .body b:first-child{margin-top:0}
+details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono);background:var(--panel);padding:1px 4px;border-radius:4px}
+.confirm{margin-top:8px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn);font-size:12px}
 @media (max-width:1200px){.twocol{grid-template-columns:1fr}}
 @media (max-width:900px){.wiz,.form{grid-template-columns:1fr}}
 @media (max-width:900px){main,.demo{grid-template-columns:1fr;padding:16px}.wrap{padding:16px}aside.panel{position:static;max-height:none}header{padding:12px 16px}nav.tabs{padding:0 12px;top:0;position:static}.stage{padding:18px}}
@@ -566,7 +575,13 @@ const WSTEPS=["Connect","Preflight checks","Choices","Review","Create and verify
 const ICON={ok:"✓",warn:"!",fail:"✗",info:"·"};
 const BLOCKING=["login","creds","keychain","das","write"];
 function wsteps(){$("#wsteps").innerHTML=WSTEPS.map((n,i)=>`<li class="${i==W.step?"on":""} ${i<W.step?"done":""}"><span class="num">${i<W.step?"✓":i+1}</span><span>${n}</span></li>`).join("")}
-function checksHTML(cs){return `<ul class="checks">${cs.map(c=>`<li><span class="ic ${c.status}">${ICON[c.status]}</span><div>${esc(c.label)}${c.detail?`<div class="d">${esc(c.detail)}</div>`:""}${c.fix&&c.status!="ok"?`<div class="fx">${c.status=="info"?"":"Fix: "}${esc(c.fix)}</div>`:""}</div></li>`).join("")}</ul>`}
+const md=t=>esc(t).replace(/`([^`]+)`/g,"<code>$1</code>");
+function howHTML(h,open){if(!h)return "";return `<details class="how" ${open?"open":""}><summary>How to verify ›</summary><div class="body">
+  <b>What it checks</b>${md(h.what)}<b>Why it matters</b>${md(h.why)}
+  <b>Verify by hand</b><ul>${h.verify.map(v=>`<li>${md(v)}</li>`).join("")}</ul>
+  <b>Fix</b><ul>${h.fix.map(v=>`<li>${md(v)}</li>`).join("")}</ul><b>Re-test</b>${md(h.retest)}
+  ${h.confirm?`<div class="confirm">Not yet confirmed in a real tenant: ${md(h.confirm_note||"")}</div>`:""}</div></details>`}
+function checksHTML(cs,help){help=help||{};return `<ul class="checks">${cs.map(c=>{const h=help[(c.id||"").startsWith("read")?"read":c.id];return `<li><span class="ic ${c.status}">${ICON[c.status]}</span><div>${esc(c.label)}${c.detail?`<div class="d">${esc(c.detail)}</div>`:""}${c.fix&&c.status!="ok"?`<div class="fx">${c.status=="info"?"":"Fix: "}${esc(c.fix)}</div>`:""}${howHTML(h,false)}</div></li>`}).join("")}</ul>`}
 function plabel(p){return p=="openai"?"OpenAI":"Anthropic"}
 async function wizard(){
   wsteps();const st=$("#wstage");
@@ -594,22 +609,25 @@ async function wizard(){
     st.innerHTML=`<div class="kicker">STEP 2 OF 5</div><h3>Preflight checks</h3>
       <p class="muted">Read-only checks of this computer and your tenant.</p>
       <label class="chk" style="margin-bottom:12px"><input type="checkbox" id="wprobe" ${W.probe?"checked":""}>Also test create permission (a temporary app, created and deleted)</label>
-      <div id="wchecks">${W.checks?checksHTML(W.checks):'<span class="muted">Running…</span>'}</div>
+      <div id="wchecks">${W.checks?checksHTML(W.checks,W.help):'<span class="muted">Running…</span>'}</div>
       <div id="wgate" style="margin-top:16px"></div>`;
     $("#wprobe").onchange=e=>W.probe=e.target.checked;
     const draw=()=>{
       const fails=W.checks.filter(c=>c.status=="fail"), blocking=fails.some(c=>BLOCKING.includes(c.id))||!W.facts;
-      $("#wchecks").innerHTML=checksHTML(W.checks);
+      $("#wchecks").innerHTML=checksHTML(W.checks,W.help);
       $("#wgate").innerHTML=`${fails.length?`<div class="notice" style="display:block">${fails.length} check${fails.length>1?"s":""} failed. Fix ${fails.length>1?"them":"it"}, then run the checks again.${blocking?"":" You can also continue anyway."}</div>`:""}
         ${W.facts?`<label class="chk" style="margin:6px 0 12px"><input type="checkbox" id="wdemo" ${W.demo?"checked":""}><b>${esc(W.facts.tenant)}</b>&nbsp;is a demo/eval tenant and the kit may create objects in it</label>`:""}
         <div class="row" style="gap:10px"><button id="wback">‹ Back</button><button id="wrerun">Run checks again</button>
+        <button id="wcopy" title="Checklist, kit version and OS. No secrets.">Copy report</button><button id="wjson">Download .json</button>
         <button class="primary" id="wnext" ${blocking?"disabled":""}>Continue ›</button></div>`;
       $("#wback").onclick=()=>{W.step=0;wizard()};$("#wrerun").onclick=run;
+      $("#wcopy").onclick=async()=>{try{await navigator.clipboard.writeText(W.reportText);$("#wcopy").textContent="Copied ✓"}catch(e){download("aiguard-preflight.txt",W.reportText,"text/plain")}setTimeout(()=>$("#wcopy")&&($("#wcopy").textContent="Copy report"),1800)};
+      $("#wjson").onclick=()=>download(`aiguard-preflight-${Date.now()}.json`,JSON.stringify(W.report,null,2),"application/json");
       $("#wdemo")&&($("#wdemo").onchange=e=>W.demo=e.target.checked);
       $("#wnext").onclick=()=>{if(!W.demo){$("#wdemo").parentElement.style.borderColor="var(--bad)";return}W.ans=W.ans||structuredClone(W.facts.defaults);W.step=2;wizard()};
     };
     const run=async()=>{$("#wchecks").innerHTML='<span class="muted">Running…</span>';$("#wgate").innerHTML="";
-      try{const r=await api("/api/setup/preflight",{write_probe:W.probe});W.checks=r.checks;W.facts=r.facts;draw()}
+      try{const r=await api("/api/setup/preflight",{write_probe:W.probe});W.checks=r.checks;W.facts=r.facts;W.help=r.help;W.report=r.report;W.reportText=r.report_text;draw()}
       catch(e){$("#wchecks").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}};
     if(W.checks)draw();else run();
   }
@@ -661,7 +679,7 @@ async function wizard(){
       const v=j.verify||[],bad=v.filter(c=>c.status!="ok");
       if(j.error){$("#wend").innerHTML=`<div class="notice" style="display:block"><b>${esc(j.error.error)}</b><br>Fix: ${esc(j.error.fix)}<br>Everything created so far is kept. Retry fills in the rest.</div><div class="row" style="gap:10px"><button class="primary" id="wretry">Retry</button><button id="wback">‹ Back to choices</button></div>`;
         $("#wretry").onclick=()=>wizard();$("#wback").onclick=()=>{W.step=2;wizard()};return}
-      $("#wend").innerHTML=`<h2 style="margin-top:6px">Verification</h2>${checksHTML(v)}
+      $("#wend").innerHTML=`<h2 style="margin-top:6px">Verification</h2>${checksHTML(v,j.help||W.help)}
         <div class="notice ${bad.length?"":"good"}" style="display:block;margin-top:12px">${bad.length?"Setup finished with warnings. Follow the fixes above, then run <b>Retry checks</b>.":"Setup complete. Dashboards fill 10–15 minutes after your first run."}</div>
         <div class="row" style="gap:10px"><button class="primary" id="wpop">Populate every dashboard now</button><button id="wdemo2">Open the guided demo</button>${bad.length?'<button id="wretry">Retry checks</button>':""}</div>`;
       await refreshAll();
