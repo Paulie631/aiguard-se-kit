@@ -8,16 +8,12 @@ Fill every Zscaler AI Guard dashboard in **your own** tenant in about ten minute
 
 1. **Install uv** (one time): `brew install uv` (Mac) or see the Windows note below.
 2. **Create a OneAPI client** in ZIdentity → Integration → API Clients, with AI Guard access. Copy the client ID and secret, and note your vanity domain: the `acme` in `acme.zslogin.net`.
-3. **Run setup** from this folder:
-   ```bash
-   ./aiguard-kit setup
-   ```
-   Answer the prompts; the defaults are right for most people. LLM provider keys are optional (see *Modes*).
-4. **Open the console:**
+3. **Open the console** from this folder. It starts on the **Setup** tab the first time:
    ```bash
    ./aiguard-kit gui
    ```
-   Pick **Populate every dashboard** and press **Run**.
+   Setup walks through five steps: connect, **preflight checks**, choices, review, create and verify. Nothing changes in the tenant until the last step. Prefer the terminal? `./aiguard-kit setup` runs the same wizard there.
+4. At the end, press **Populate every dashboard now**.
 5. **Optional: keep dashboards fresh** with a small batch every hour: `./aiguard-kit schedule install`
 6. **Check AI Guard → Insights** after 10–15 minutes.
 
@@ -34,6 +30,23 @@ Windows: install uv with `powershell -ExecutionPolicy ByPass -c "irm https://ast
 The **Policy** switch in the header moves the kit's demo policy between **Monitor** (detect and log) and **Enforce** (block prompt injection, invisible text, toxicity and malicious URLs). It only ever changes the kit's own policy.
 
 **Report** builds a one-page summary of the session: totals, detections by type and scenario, and examples. Enter the customer's name, then use *Print / save as PDF*.
+
+## Setup and preflight
+
+Preflight runs before anything is created, and on its own with `./aiguard-kit preflight` (add `--write-probe` to test create permission):
+
+| Check | If it fails |
+|---|---|
+| Keychain works on this computer | Unlock the login keychain (Mac) or install a keyring service (Linux) |
+| Detection API and proxy reachable | Usually TLS inspection or DNS; the fix is shown |
+| OneAPI login and read access | Wrong secret or vanity domain, or the API client lacks AI Guard access |
+| Create and delete permission (optional probe) | The API client can read but not change AI Guard |
+| OpenAI / Anthropic providers present | Proxy mode skipped for that app; detection mode still works |
+| User-based rules ahead of the kit's | Warning: they may apply their own policy to demo traffic |
+| Reused policy covers the tests | Lists the missing detectors and the panels that will stay empty |
+| Store Prompts/Responses | Reminder only; it can't be read through the API |
+
+If creating something fails partway, everything made so far is kept and **Retry** fills in the rest. After setup, **verification** scans once through every app, waits up to about a minute for new keys to activate, and fails if a different policy handled the traffic.
 
 ## What setup creates
 
@@ -59,7 +72,8 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ## Commands
 
 ```
-./aiguard-kit setup                      interactive; safe to rerun (fills in anything missing)
+./aiguard-kit setup                      terminal wizard; safe to rerun (fills in anything missing)
+./aiguard-kit preflight [--write-probe]  checks only, no changes
 ./aiguard-kit gui                        console at http://127.0.0.1:8765 (this machine only)
 ./aiguard-kit run                        everything, detection mode
 ./aiguard-kit run --preset=attacks       everything leakage attacks rai output topics pack-healthcare …
@@ -86,7 +100,8 @@ Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 
 | Symptom | Fix |
 |---|---|
-| `invalid_client` at setup | Wrong client ID or secret. Rerun setup; it lets you re-enter them. |
+| `invalid_client` at setup | Wrong client ID or secret. Go back to step 1 (Connect) and re-enter them. |
+| Verification: "handled by '…' instead" | Another rule matched the demo traffic first. Disable or reorder it in AI Guard → Policies, then press **Retry checks**. |
 | `CERTIFICATE_VERIFY_FAILED` / `UnknownIssuer` | Zscaler SSL inspection. Always start the kit with `./aiguard-kit`, which trusts the system store, and check that the Zscaler root CA is in your keychain. |
 | `401` on OneAPI calls | The API client lacks AI Guard access in ZIdentity. |
 | Detection API `401` or `400 … authenticate-llm-app` | Keys must be mode `DETECTIONS`; proxy keys don't work there. Rerun setup. |

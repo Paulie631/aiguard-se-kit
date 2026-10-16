@@ -4,7 +4,9 @@
 # ///
 """Zscaler AI Guard SE demo kit.
 
-  ./aiguard-kit setup      create the demo policy, apps, keys and rules in YOUR tenant (interactive)
+  ./aiguard-kit setup      guided setup in the terminal: preflight checks, choices, review, create, verify
+                           (or use the Setup tab in ./aiguard-kit gui)
+  ./aiguard-kit preflight  run the read-only tenant and computer checks on their own
   ./aiguard-kit gui        open the test console in your browser (localhost only)
   ./aiguard-kit run        run tests from the terminal   (--preset everything|leakage|attacks|rai|output|topics,
                            --mode detect|proxy, --rounds N, --tests id1,id2)
@@ -32,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
@@ -614,102 +616,237 @@ def import_claude_desktop():
     return None
 
 
-def cmd_setup():
+TEMPLATE_DETECTORS = None
+
+
+def template_detectors():
+    global TEMPLATE_DETECTORS
+    if TEMPLATE_DETECTORS is None:
+        body = json.loads((HERE / "policy_template.json").read_text())
+        TEMPLATE_DETECTORS = {side: [d["detector"] for d in body[side]] for side in ("inputDetectorPolicies",
+                                                                                    "outputDetectorPolicies")}
+    return TEMPLATE_DETECTORS
+
+
+def audit_policy(body):
+    """Detectors the kit's tests rely on that this policy lacks, with the console panels that stay empty."""
+    missing = []
+    for side, want in template_detectors().items():
+        have = {d.get("detector") for d in body.get(side, []) if d.get("enabled")}
+        missing += [(side.startswith("input") and "prompt" or "response", d) for d in want if d not in have]
+    panels = sorted({PANELS.get(d, d) for _, d in missing})
+    return missing, panels
+
+
+def is_mine(o):
+    return str(o.get("name", "")).startswith(PREFIX + ":")
+
+
+# ---------------------------------------------------------------- preflight
+def preflight(cfg, write_probe=False):
+    """Read-only checks (plus an optional create/delete probe). Returns (checks, tenant or None)."""
+    import requests
+    checks = []
+
+    def add(cid, label, status, detail="", fix=""):
+        checks.append({"id": cid, "label": label, "status": status, "detail": detail, "fix": fix})
+
+    # this computer
+    try:
+        kc_set("preflight-test", "ok")
+        good = kc_get("preflight-test") == "ok"
+        kc_del("preflight-test")
+        add("keychain", "Keychain available", "ok" if good else "fail",
+            fix="" if good else "The OS keychain didn't return a test value. On a Mac, unlock the login keychain.")
+    except Exception as e:
+        add("keychain", "Keychain available", "fail", str(e)[:160],
+            "The kit stores keys in the OS keychain. On Linux install a keyring service (e.g. gnome-keyring).")
+    for cid, label, url in (("das", "Detection API reachable", DAS_HOST), ("proxy", "AI Guard proxy reachable", PROXY_HOST)):
+        try:
+            requests.get(url, timeout=8)
+            add(cid, label, "ok", url)
+        except Exception as e:
+            add(cid, label, "fail" if cid == "das" else "warn", f"{url}: {str(e)[:120]}", hint(e))
+
+    # credentials + login
+    if not (cfg.get("client_id") and cfg.get("vanity_domain") and kc_get("oneapi-client-secret")):
+        add("creds", "OneAPI credentials saved", "fail", fix="Enter the vanity domain, client ID and secret first.")
+        return checks, None
+    add("creds", "OneAPI credentials saved", "ok", f"client {mask(cfg['client_id'])} on '{cfg['vanity_domain']}'")
+    try:
+        t = connect(cfg)
+        add("login", "OneAPI login", "ok")
+    except Exception as e:
+        add("login", "OneAPI login", "fail", str(e)[:200], hint(e))
+        return checks, None
+
+    snap = {}
+    for r in ("policies", "policy_match_rules", "llm_providers", "llm_provider_credentials", "llm_applications",
+              "llm_application_credentials"):
+        try:
+            snap[r] = t.list(r)
+        except Exception as e:
+            add("read-" + r, f"Read {r.replace('_', ' ')}", "fail", str(e)[:200],
+                "Give the API client full AI Guard access in ZIdentity.")
+            return checks, None
+    add("read", "Read access to AI Guard", "ok", f"{len(snap['policies'])} policies, {len(snap['policy_match_rules'])} "
+        f"rules, {len(snap['llm_applications'])} apps")
+
+    if write_probe:
+        try:
+            app = t.call("llm_applications", "add_application", name=f"{PREFIX}: preflight probe",
+                         applicationSettings={"includeEventContents": True, "encryptEventContents": False})
+            t.call("llm_applications", "delete_application", app["id"])
+            add("write", "Create and delete permission", "ok", "Created and removed a temporary app")
+        except Exception as e:
+            add("write", "Create and delete permission", "fail", str(e)[:200],
+                "The API client can read but not change AI Guard. Give it full AI Guard access in ZIdentity.")
+
+    types = {p.get("type") for p in snap["llm_providers"]}
+    for ptype, label in (("openai", "OpenAI"), ("anthropic", "Anthropic")):
+        add("prov-" + ptype, f"{label} provider available", "ok" if ptype in types else "warn",
+            "" if ptype in types else "Proxy mode won't be available for this app; detection mode still works.")
+
+    mine = [o for r in ("policies", "policy_match_rules", "llm_applications") for o in snap[r] if is_mine(o)]
+    add("existing", "Earlier kit objects", "info", f"{len(mine)} found" if mine else "none - fresh setup")
+
+    risky = [r for r in snap["policy_match_rules"] if r.get("enabled") and not is_mine(r)
+             and (r.get("matchCriteria") or {}).get("type") not in ("APPLICATION", "DAS_APPLICATION")]
+    add("rules", "No broad rules ahead of the kit's", "warn" if risky else "ok",
+        ", ".join(f"'{r['name']}' ({(r.get('matchCriteria') or {}).get('type')}, order {r.get('ruleOrder')})"
+                  for r in risky[:4]),
+        "These rules match by user, not app, and may apply their own policy to demo traffic. The check after "
+        "setup confirms which policy actually handled it." if risky else "")
+
+    pid = cfg.get("state", {}).get("policy_id")
+    pol = next((p for p in snap["policies"] if p["id"] == pid), None) if pid else None
+    if pol and not is_mine(pol):
+        try:
+            body = t.call("policies", "get_policy", pid)
+            missing, panels = audit_policy(body)
+            add("policy", f"Reused policy '{pol['name']}' covers the tests", "warn" if missing else "ok",
+                f"Missing {len(missing)} detectors; empty panels: {', '.join(panels)}" if missing else "",
+                "Enable those detectors in the console, or let setup create the kit's own policy." if missing else "")
+        except Exception as e:
+            vlog(str(e))
+    add("manual", "Tenant Settings > Security > Store Prompts/Responses", "info", "Can't be read through the API",
+        "Turn it on in the AI Security console so prompt text shows in event details.")
+    t._snap = snap
+    return checks, t
+
+
+def print_checks(checks):
+    icon = {"ok": f"{C['g']}✓{C['x']}", "warn": f"{C['y']}!{C['x']}", "fail": f"{C['r']}✗{C['x']}", "info": "·"}
+    for c in checks:
+        print(f"  {icon[c['status']]} {c['label']}" + (f"  {C['d']}{c['detail']}{C['x']}" if c["detail"] else ""))
+        if c["fix"] and c["status"] in ("warn", "fail"):
+            print(f"      {C['y']}Fix:{C['x']} {c['fix']}")
+
+
+def cmd_preflight():
     cfg = load_cfg()
-    cfg.setdefault("state", {"apps": {}})
-    head(f"AI Guard SE demo kit {VERSION} - setup")
-    print("  Creates a detect-only policy, demo apps, keys and rules in YOUR tenant. Demo/eval tenants only.")
+    head("Preflight checks (no changes)")
+    checks, _ = preflight(cfg, write_probe="--write-probe" in ARGS)
+    print_checks(checks)
+    if any(c["status"] == "fail" for c in checks):
+        sys.exit(1)
 
-    # 1. credentials
-    head("1. OneAPI credentials")
-    existing = kc_get("oneapi-client-secret")
-    if cfg.get("client_id") and existing:
-        ok(f"Saved: client {mask(cfg['client_id'])} on vanity domain '{cfg['vanity_domain']}'")
-        if not yesno("Use these?", True):
-            existing = None
-    if not (cfg.get("client_id") and existing):
-        env = import_claude_desktop()
-        if env and yesno("Found Zscaler OneAPI credentials in Claude Desktop's config. Use them?", True):
-            cfg["client_id"], cfg["vanity_domain"] = env["ZSCALER_CLIENT_ID"], env.get("ZSCALER_VANITY_DOMAIN", "")
-            kc_set("oneapi-client-secret", env["ZSCALER_CLIENT_SECRET"])
-            if env.get("ZSCALER_CLOUD") and env["ZSCALER_CLOUD"].upper() != "PRODUCTION":
-                cfg["cloud"] = env["ZSCALER_CLOUD"]
-        else:
-            info("ZIdentity > Integration > API Clients. The client needs AI Guard access.")
-            cfg["vanity_domain"] = ask("Vanity domain (the part before .zslogin.net)", cfg.get("vanity_domain"))
-            cfg["client_id"] = ask("Client ID", cfg.get("client_id"))
-            sec = ask("Client secret (hidden)", secret=True)
-            if sec:
-                kc_set("oneapi-client-secret", sec)
-        if not cfg.get("vanity_domain") or not cfg.get("client_id") or not kc_get("oneapi-client-secret"):
-            raise KitError("Vanity domain, client ID and secret are all required.")
-        cfg["vanity_domain"] = cfg["vanity_domain"].replace(".zslogin.net", "").replace("https://", "").strip("/")
-        save_cfg(cfg)
 
-    t = connect(cfg)
-    pols, rules = t.list("policies"), t.list("policy_match_rules")
-    apps, providers = t.list("llm_applications"), t.list("llm_providers")
-    head("2. Tenant")
-    ok(f"Connected to '{cfg['vanity_domain']}': {len(pols)} policies, {len(rules)} rules, {len(apps)} apps, "
-       f"{len(providers)} LLM providers")
-    if not yesno("This is a demo/eval tenant and I want the kit to create objects in it?", True):
-        print("  Stopped. Nothing was changed.")
-        return
-
-    mine = [o for o in pols + rules + apps if str(o.get("name", "")).startswith(PREFIX + ":")]
-    if mine:
-        i = menu(f"Found {len(mine)} objects from an earlier '{PREFIX}' setup.",
-                 ["Keep them and fill in anything missing", "Delete them and start fresh", "Cancel"])
-        if i == 2:
-            return
-        if i == 1:
-            teardown(t, cfg, confirm=False)
-            cfg = load_cfg()
-            cfg.setdefault("state", {"apps": {}})
-            pols, rules, apps = t.list("policies"), t.list("policy_match_rules"), t.list("llm_applications")
-
-    st = cfg["state"]
-
-    # 3. policy
-    head("3. Detection policy")
+# ---------------------------------------------------------------- setup (shared by terminal and browser)
+def tenant_facts(t, cfg):
+    snap = getattr(t, "_snap", None) or {r: t.list(r) for r in ("policies", "policy_match_rules", "llm_providers",
+                                                                 "llm_provider_credentials", "llm_applications")}
     pname = f"{PREFIX}: Test all"
-    mypol = next((p for p in pols if p.get("name") == pname), None)
-    others = [p for p in pols if p is not mypol]
-    choices = [f"{'Use' if mypol else 'Create'} '{pname}' - every detector on"] + \
-              [f"Use existing '{p['name']}' (unchanged)" for p in others]
-    i = menu("Which policy should the demo apps use?", choices)
-    if i == 0:
+    st = cfg.get("state", {})
+    pcreds = {c.get("name") for c in snap["llm_provider_credentials"]}
+    return {
+        "tenant": cfg.get("vanity_domain"), "prefix": PREFIX,
+        "existing": [o["name"] for r in ("policies", "policy_match_rules", "llm_applications") for o in snap[r] if is_mine(o)],
+        "kit_policy": next((p["id"] for p in snap["policies"] if p.get("name") == pname), None),
+        "policies": [{"id": p["id"], "name": p["name"]} for p in snap["policies"] if p.get("name") != pname],
+        "current_policy": st.get("policy_id"),
+        "competitor": cfg.get("competitor", "Palo Alto"),
+        "providers": {ptype: {"available": any(p.get("type") == ptype for p in snap["llm_providers"]),
+                              "has_key": f"{PREFIX}: {'OpenAI' if ptype == 'openai' else 'Anthropic'} API key" in pcreds,
+                              "model": (st.get("apps", {}).get(f"{PREFIX}: {'OpenAI' if ptype == 'openai' else 'Anthropic'} App")
+                                        or {}).get("model", default)}
+                      for ptype, (_, _, default) in PROVIDERS.items()},
+    }
+
+
+def describe_plan(facts, ans):
+    lines = []
+    if facts["existing"] and ans.get("existing") == "fresh":
+        lines.append(f"Delete {len(facts['existing'])} earlier kit objects first")
+    if ans.get("policy") == "create":
+        lines.append(("Use" if facts["kit_policy"] else "Create") + f" policy '{PREFIX}: Test all' "
+                     f"({'Enforce' if ans.get('mode') == 'block' else 'Monitor'}; competitor '{ans.get('competitor')}')")
+    else:
+        name = next((p["name"] for p in facts["policies"] if p["id"] == ans.get("policy")), ans.get("policy"))
+        lines.append(f"Use existing policy '{name}' unchanged")
+    for ptype, p in ans.get("providers", {}).items():
+        label = "OpenAI" if ptype == "openai" else "Anthropic"
+        proxy = "with proxy mode (" + p.get("model", "") + ")" if (p.get("key") or facts["providers"][ptype]["has_key"]) \
+            and facts["providers"][ptype]["available"] else "detection mode only"
+        lines.append(f"App '{PREFIX}: {label} App', detection key, {proxy}")
+    lines.append(f"Rules '{PREFIX}: detection apps' (and '{PREFIX}: proxy apps' if any proxy keys), after your rules")
+    lines.append("Then confirm every app's scans are handled by the chosen policy")
+    return lines
+
+
+def default_answers(facts):
+    return {"existing": "keep", "policy": "create", "mode": "detect", "competitor": facts["competitor"],
+            "providers": {k: {"key": None, "model": v["model"]} for k, v in facts["providers"].items()}}
+
+
+def setup_apply(t, cfg, ans, log):
+    """Creates or fills in everything for the answers given. Safe to run again after a failure."""
+    cfg.setdefault("state", {"apps": {}})
+    st = cfg["state"]
+    if ans.get("existing") == "fresh":
+        log("head", "Removing earlier kit objects")
+        teardown(t, cfg, confirm=False, log=log)
+        st = cfg["state"]
+
+    log("head", "Detection policy")
+    pols = t.list("policies")
+    pname = f"{PREFIX}: Test all"
+    if ans.get("policy", "create") == "create":
+        mypol = next((p for p in pols if p.get("name") == pname), None)
+        cfg["competitor"] = ans.get("competitor") or cfg.get("competitor", "Palo Alto")
         if mypol:
             st["policy_id"] = mypol["id"]
-            ok(f"Using '{pname}' (id {mypol['id']})")
+            log("ok", f"Using '{pname}'")
+            mode = ans.get("mode", "detect")
+            if policy_mode(t, cfg)[0] != mode:
+                policy_mode(t, cfg, mode)
+                log("ok", f"Policy set to {'Enforce' if mode == 'block' else 'Monitor'}")
         else:
-            style = menu("Detector actions:", ["Detect only - allow and monitor everything",
-                                               "Enforce - block prompt injection, invisible text, toxicity and "
-                                               "malicious URLs (switch any time with `./aiguard-kit policy`)"])
-            comp = ask("Competitor name for the competition detector", cfg.get("competitor", "Palo Alto"))
-            cfg["competitor"] = comp
-            body = json.loads((HERE / "policy_template.json").read_text().replace("{COMPETITOR}", comp))
-            apply_mode(body, "block" if style == 1 else "detect")
+            body = json.loads((HERE / "policy_template.json").read_text().replace("{COMPETITOR}", cfg["competitor"]))
+            apply_mode(body, ans.get("mode", "detect"))
             body["name"] = pname
             p = t.call("policies", "add_policy", **body)
-            st["policy_id"] = p["id"]
-            st["policy_mode"] = ["detect", "block"][style]
-            ok(f"Created '{pname}' (id {p['id']}), {len(body['inputDetectorPolicies'])} input and "
-               f"{len(body['outputDetectorPolicies'])} output detectors")
+            st["policy_id"], st["policy_mode"] = p["id"], ans.get("mode", "detect")
+            log("ok", f"Created '{pname}' with {len(body['inputDetectorPolicies'])} prompt and "
+                      f"{len(body['outputDetectorPolicies'])} response detectors")
     else:
-        st["policy_id"] = others[i - 1]["id"]
-        ok(f"Using '{others[i - 1]['name']}'")
-        warn("Prompt Classifications only fills if that policy has the prompt_tags detector enabled.")
+        pol = next((p for p in pols if p["id"] == int(ans["policy"])), None)
+        if not pol:
+            raise KitError(f"Policy {ans['policy']} no longer exists.")
+        st["policy_id"] = pol["id"]
+        log("ok", f"Using existing '{pol['name']}' (unchanged)")
+        missing, panels = audit_policy(t.call("policies", "get_policy", pol["id"]))
+        if missing:
+            log("warn", f"It lacks {len(missing)} detectors the tests use; these panels stay empty: {', '.join(panels)}")
     save_cfg(cfg)
 
-    # 4. apps + provider keys
-    head("4. Demo apps")
-    info("Detection mode needs no LLM keys and fills every dashboard, including Users.")
-    info("Add a provider key only if you also want real LLM calls through the AI Guard proxy (token usage).")
+    log("head", "Demo apps and keys")
+    apps, providers = t.list("llm_applications"), t.list("llm_providers")
     pcreds = t.list("llm_provider_credentials")
     for ptype, (ctype, field, model) in PROVIDERS.items():
+        choice = (ans.get("providers") or {}).get(ptype, {})
         prov = next((p for p in providers if p.get("type") == ptype and p.get("public")), None) or \
-               next((p for p in providers if p.get("type") == ptype), None)
+            next((p for p in providers if p.get("type") == ptype), None)
         label = "OpenAI" if ptype == "openai" else "Anthropic"
         app_name = f"{PREFIX}: {label} App"
         a = st["apps"].get(app_name) or {}
@@ -720,59 +857,53 @@ def cmd_setup():
             created = t.call("llm_applications", "add_application", name=app_name,
                              applicationSettings={"includeEventContents": True, "encryptEventContents": False})
             a = {"id": created["id"]}
-            ok(f"Created app '{app_name}'")
-        a.update(provider_type=ptype, model=a.get("model", model), provider_id=prov["id"] if prov else None)
+            log("ok", f"Created app '{app_name}'")
+        a.update(provider_type=ptype, model=choice.get("model") or a.get("model", model),
+                 provider_id=prov["id"] if prov else None)
         st["apps"][app_name] = a
         save_cfg(cfg)
-
-        # detection key
         if not (a.get("das_cred_id") and kc_get(f"{app_name}:detections")):
             cred = t.call("llm_application_credentials", "add_credential", name=f"{PREFIX}: {label} detection key",
                           applicationId=a["id"], mode="DETECTIONS")
             kc_set(f"{app_name}:detections", cred["key"])
             a["das_cred_id"] = cred["id"]
-            ok(f"{label}: detection key created and saved to your keychain")
+            log("ok", f"{label}: detection key created and saved to your keychain")
         else:
-            ok(f"{label}: detection key already in your keychain")
+            log("ok", f"{label}: detection key already in your keychain")
         save_cfg(cfg)
 
-        # proxy key (optional)
         if a.get("proxy_cred_id") and kc_get(f"{app_name}:proxy"):
-            ok(f"{label}: proxy key already in your keychain")
+            log("ok", f"{label}: proxy key already in your keychain")
             continue
         if not prov:
-            warn(f"No {label} provider in this tenant; proxy mode skipped for this app.")
+            log("warn", f"No {label} provider in this tenant, so proxy mode is skipped for this app")
             continue
         mine_pc = next((c for c in pcreds if c.get("name") == f"{PREFIX}: {label} API key"), None)
         pc_id = mine_pc["id"] if mine_pc else None
         if not pc_id:
-            k = "" if YES else ask(f"{label} API key for proxy mode (hidden, Enter to skip)", "", secret=True)
-            if not k:
-                info(f"{label}: skipped proxy mode")
+            if not choice.get("key"):
+                log("info", f"{label}: no provider key, so detection mode only")
                 continue
             pc = t.call("llm_provider_credentials", "add_credential", name=f"{PREFIX}: {label} API key",
-                        providerId=prov["id"], apiCredentials={"type": ctype, field: k})
+                        providerId=prov["id"], apiCredentials={"type": ctype, field: choice["key"]})
             pc_id = pc["id"]
-            ok(f"{label}: provider key stored in AI Guard")
-        a["model"] = ask(f"{label} model for proxy tests", a["model"])
+            log("ok", f"{label}: provider key stored in AI Guard")
         cred = t.call("llm_application_credentials", "add_credential", name=f"{PREFIX}: {label} proxy key",
                       applicationId=a["id"], providerId=prov["id"], providerCredentialsId=pc_id, mode="PROXY")
         kc_set(f"{app_name}:proxy", cred["key"])
         a["proxy_cred_id"], a["provider_cred_id"] = cred["id"], pc_id
-        ok(f"{label}: proxy key created and saved to your keychain")
+        log("ok", f"{label}: proxy key created and saved to your keychain")
         save_cfg(cfg)
 
-    # 5. rules
-    head("5. Policy rules")
+    log("head", "Policy rules")
     rules = t.list("policy_match_rules")
-    order = max([r.get("ruleOrder", 0) for r in rules if not str(r.get("name", "")).startswith(PREFIX + ":")] + [0])
+    order = max([r.get("ruleOrder", 0) for r in rules if not is_mine(r)] + [0])
     for kind, rtype, credkey in (("detection", "DAS_APPLICATION", "das_cred_id"), ("proxy", "APPLICATION", "proxy_cred_id")):
         entries = [{"applicationId": a["id"], "applicationCredentialsIds": [a[credkey]]}
                    for a in st["apps"].values() if a.get(credkey)]
         rname = f"{PREFIX}: {kind} apps"
         existing = next((r for r in rules if r.get("name") == rname), None)
         if not entries:
-            info(f"No {kind} keys, so no {kind} rule needed")
             continue
         order += 1
         body = dict(policyId=st["policy_id"], name=rname, enabled=True,
@@ -781,45 +912,206 @@ def cmd_setup():
         if existing:
             t.call("policy_match_rules", "update_rule", existing["id"], **body)
             st[f"{kind}_rule_id"] = existing["id"]
-            ok(f"Updated rule '{rname}'")
+            log("ok", f"Updated rule '{rname}'")
         else:
             r = t.call("policy_match_rules", "add_rule", **body)
             st[f"{kind}_rule_id"] = r["id"]
-            ok(f"Created rule '{rname}' (order {order})")
+            log("ok", f"Created rule '{rname}' (order {body['ruleOrder']})")
     save_cfg(cfg)
 
-    # 6. verify
-    head("6. Check")
-    first = next(iter(st["apps"]))
-    try:
-        d, ms = das_scan(kc_get(f"{first}:detections"), "hello", user="setup-check@acme-demo.com")
-        ok(f"Detection API answered in {ms} ms (policy '{d.get('policyName', '?')}')")
-    except Exception as e:
-        warn(f"Detection API check failed: {e}")
-        info(hint(e))
-        info("New keys can take a minute to become active. Try `./aiguard-kit status` shortly.")
-    head("Done")
-    print("  Next:  ./aiguard-kit gui        (test console in your browser)")
+
+def verify(cfg, log, wait=75):
+    """Scans once through each app and confirms the chosen policy handled it. Retries while new keys activate."""
+    st = cfg.get("state", {})
+    checks = []
+    for app_name in st.get("apps", {}):
+        key = kc_get(f"{app_name}:detections")
+        label = app_name.split(": ", 1)[-1]
+        if not key:
+            checks.append({"label": f"{label}: detection key", "status": "fail", "detail": "missing from keychain",
+                           "fix": "Run setup again."})
+            continue
+        deadline, last = time.time() + wait, None
+        while True:
+            try:
+                d, ms = das_scan(key, "Setup check: summarize zero trust in one line.", user="setup-check@acme-demo.com")
+                same = (d.get("policyId") == st.get("policy_id")) if d.get("policyId") is not None else None
+                if same is False:
+                    checks.append({"label": f"{label}: handled by the demo policy", "status": "fail",
+                                   "detail": f"handled by '{d.get('policyName')}' instead",
+                                   "fix": "Another rule matched first. Disable or reorder it in AI Guard > Policies, "
+                                          "or move the kit's rules higher."})
+                else:
+                    checks.append({"label": f"{label}: Detection API", "status": "ok",
+                                   "detail": f"{ms} ms, policy '{d.get('policyName', '?')}'", "fix": ""})
+                break
+            except Exception as e:
+                last = e
+                if time.time() > deadline or not re.search(r"\b(401|403|404)\b", str(e)):
+                    checks.append({"label": f"{label}: Detection API", "status": "fail", "detail": str(e)[:200],
+                                   "fix": hint(e)})
+                    break
+                log("info", f"{label}: key not active yet, retrying…")
+                time.sleep(5)
+        vlog(str(last) if last else "")
+    for c in checks:
+        log(c["status"] if c["status"] != "fail" else "warn", f"{c['label']}: {c['detail']}" + (f". Fix: {c['fix']}" if c["fix"] else ""))
+    return checks
+
+
+def save_credentials(cfg, vanity, client_id, secret=None, cloud=None):
+    vanity = (vanity or "").strip().replace("https://", "").split("/")[0].replace(".zslogin.net", "")
+    if not vanity or not client_id:
+        raise KitError("Vanity domain and client ID are required.")
+    cfg["vanity_domain"], cfg["client_id"] = vanity, client_id.strip()
+    if cloud:
+        cfg["cloud"] = cloud
+    if secret:
+        kc_set("oneapi-client-secret", secret.strip())
+    if not kc_get("oneapi-client-secret"):
+        raise KitError("Client secret is required.")
+    save_cfg(cfg)
+
+
+# ---------------------------------------------------------------- setup (terminal)
+def cli_log(level, msg):
+    {"ok": ok, "warn": warn, "info": info, "head": head, "fail": warn}.get(level, info)(msg)
+
+
+def cmd_setup():
+    cfg = load_cfg()
+    cfg.setdefault("state", {"apps": {}})
+    head(f"AI Guard SE demo kit {VERSION} - setup")
+    print("  Checks your tenant, then creates the demo policy, apps, keys and rules. Demo/eval tenants only.")
+    print(f"  {C['d']}Prefer a browser? Run ./aiguard-kit gui and open the Setup tab.{C['x']}")
+
+    head("Step 1 of 5 · OneAPI credentials")
+    if cfg.get("client_id") and kc_get("oneapi-client-secret") and yesno(
+            f"Use saved client {mask(cfg['client_id'])} on '{cfg['vanity_domain']}'?", True):
+        pass
+    else:
+        env = import_claude_desktop()
+        if env and yesno("Found Zscaler OneAPI credentials in Claude Desktop's config. Use them?", True):
+            save_credentials(cfg, env.get("ZSCALER_VANITY_DOMAIN", ""), env["ZSCALER_CLIENT_ID"],
+                             env["ZSCALER_CLIENT_SECRET"],
+                             env.get("ZSCALER_CLOUD") if (env.get("ZSCALER_CLOUD") or "").upper() not in ("", "PRODUCTION") else None)
+        else:
+            info("ZIdentity > Integration > API Clients. The client needs full AI Guard access.")
+            save_credentials(cfg, ask("Vanity domain (the part before .zslogin.net)", cfg.get("vanity_domain")),
+                             ask("Client ID", cfg.get("client_id")), ask("Client secret (hidden)", secret=True))
+
+    head("Step 2 of 5 · Preflight checks (no changes yet)")
+    probe = yesno("Also test create permission with a temporary app (created and deleted)?", True)
+    while True:
+        checks, t = preflight(cfg, write_probe=probe)
+        print_checks(checks)
+        fails = [c for c in checks if c["status"] == "fail"]
+        if not fails:
+            break
+        blocking = t is None or any(c["id"] in ("write", "das", "keychain") for c in fails)
+        opts = ["Fix it, then re-run the checks"] + ([] if blocking else ["Continue anyway"]) + ["Stop"]
+        i = menu(f"{len(fails)} check{'s' if len(fails) > 1 else ''} failed.", opts)
+        if opts[i] == "Stop" or (YES and blocking):
+            print("  Stopped. Nothing was changed.")
+            return
+        if opts[i] == "Continue anyway":
+            break
+        if YES:
+            break
+    if not yesno(f"'{cfg['vanity_domain']}' is a demo/eval tenant and the kit may create objects in it?", True):
+        print("  Stopped. Nothing was changed.")
+        return
+
+    facts = tenant_facts(t, cfg)
+    ans = default_answers(facts)
+
+    def ask_existing():
+        if facts["existing"]:
+            i = menu(f"Found {len(facts['existing'])} objects from an earlier setup.",
+                     ["Keep them and fill in anything missing", "Delete them and start fresh"])
+            ans["existing"] = ["keep", "fresh"][i]
+
+    def ask_policy():
+        opts = [f"{'Use' if facts['kit_policy'] else 'Create'} '{PREFIX}: Test all' - every detector on (recommended)"] + \
+               [f"Use existing '{p['name']}' (unchanged)" for p in facts["policies"]]
+        i = menu("Which policy should the demo apps use?", opts)
+        ans["policy"] = "create" if i == 0 else facts["policies"][i - 1]["id"]
+        if i == 0:
+            ans["mode"] = ["detect", "block"][menu("Start in:", ["Monitor - detect and log everything",
+                                                                 "Enforce - block prompt injection, invisible text, "
+                                                                 "toxicity and malicious URLs"])]
+            ans["competitor"] = ask("Competitor name for the competition detector", ans["competitor"])
+
+    def ask_providers():
+        info("Detection mode needs no LLM keys and fills every dashboard, including Users.")
+        info("A provider key adds real LLM calls through the AI Guard proxy (token usage). Enter to skip.")
+        for ptype, f in facts["providers"].items():
+            label = "OpenAI" if ptype == "openai" else "Anthropic"
+            p = ans["providers"][ptype]
+            if not f["available"]:
+                warn(f"{label}: no provider in this tenant, detection mode only")
+                continue
+            if f["has_key"]:
+                ok(f"{label}: provider key already in AI Guard")
+            elif not YES:
+                p["key"] = ask(f"{label} API key (hidden, Enter to skip)", "", secret=True) or None
+            if f["has_key"] or p["key"]:
+                p["model"] = ask(f"{label} model for proxy tests", p["model"])
+
+    head("Step 3 of 5 · Choices")
+    ask_existing()
+    ask_policy()
+    ask_providers()
+
+    head("Step 4 of 5 · Review")
+    while True:
+        for line in describe_plan(facts, ans):
+            print(f"  • {line}")
+        i = menu("Ready?", ["Create it", "Change the policy choice", "Change provider keys", "Cancel"])
+        if i == 0:
+            break
+        if i == 3:
+            print("  Cancelled. Nothing was changed.")
+            return
+        (ask_policy if i == 1 else ask_providers)()
+
+    head("Step 5 of 5 · Create and verify")
+    while True:
+        try:
+            setup_apply(t, cfg, ans, cli_log)
+            break
+        except KitError as e:
+            print(f"\n  {C['r']}✗{C['x']} {e}\n    {C['y']}Fix:{C['x']} {hint(e)}")
+            info("Everything created so far is saved. Retrying fills in the rest.")
+            if menu("What now?", ["Retry", "Stop (re-run setup later, or ./aiguard-kit teardown)"]) == 1 or YES:
+                return
+    head("Verifying")
+    checks = verify(cfg, lambda lv, m: None)
+    print_checks(checks)
+    head("Done" if all(c["status"] == "ok" for c in checks) else "Done, with warnings above")
+    print("  Next:  ./aiguard-kit gui        (console: test runner, guided demo, packs)")
     print("         ./aiguard-kit run        (populate every dashboard from the terminal)")
     print(f"  Dashboards: {CONSOLE}  - allow 10-15 minutes for events to appear.")
 
 
 # ---------------------------------------------------------------- teardown
-def teardown(t, cfg, confirm=True):
+def teardown(t, cfg, confirm=True, log=None):
+    log = log or cli_log
     pre = PREFIX + ":"
     found = {r: [o for o in t.list(r) if str(o.get("name", "")).startswith(pre)] for r in
              ("policy_match_rules", "llm_application_credentials", "llm_applications", "llm_provider_credentials",
               "policies")}
     total = sum(len(v) for v in found.values())
     if not total:
-        ok(f"Nothing named '{pre} …' in this tenant.")
+        log("ok", f"Nothing named '{pre} …' in this tenant.")
     else:
-        for r, objs in found.items():
-            for o in objs:
-                info(f"{r:28} {o['name']}")
+        if confirm:
+            for r, objs in found.items():
+                for o in objs:
+                    info(f"{r:28} {o['name']}")
         if confirm and not FORCE and not yesno(f"Delete these {total} objects?", False):
             print("  Cancelled.")
-            return
+            return False
         method = {"policy_match_rules": "delete_rule", "llm_application_credentials": "delete_credential",
                   "llm_applications": "delete_application", "llm_provider_credentials": "delete_credential",
                   "policies": "delete_policy"}
@@ -827,14 +1119,15 @@ def teardown(t, cfg, confirm=True):
             for o in objs:
                 try:
                     t.call(r, method[r], o["id"])
-                    ok(f"Deleted {o['name']}")
+                    log("ok", f"Deleted {o['name']}")
                 except Exception as e:
-                    warn(f"Couldn't delete {o['name']}: {e}")
+                    log("warn", f"Couldn't delete {o['name']}: {e}")
     for app in (cfg.get("state") or {}).get("apps", {}):
         kc_del(f"{app}:detections")
         kc_del(f"{app}:proxy")
     cfg["state"] = {"apps": {}}
     save_cfg(cfg)
+    return True
 
 
 def cmd_teardown():
@@ -1014,7 +1307,14 @@ def cmd_gui():
                 if not j:
                     return self._send(404, {"error": "no such job"})
                 since = int(q.get("since", 0))
-                return self._send(200, {"done": j["done"], "total": j["total"], "results": j["results"][since:]})
+                return self._send(200, {"done": j["done"], "total": j["total"], "results": j["results"][since:],
+                                        "verify": j.get("verify"), "error": j.get("error")})
+            if path == "/api/setup/state":
+                c = load_cfg()
+                return self._send(200, {"vanity": c.get("vanity_domain", ""), "client_id": mask(c.get("client_id", "")),
+                                        "saved": bool(c.get("client_id") and kc_get("oneapi-client-secret")),
+                                        "claude_desktop": bool(import_claude_desktop()), "prefix": PREFIX,
+                                        "set_up": bool(c.get("state", {}).get("apps")), "profile": PROFILE})
             self._send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -1036,8 +1336,59 @@ def cmd_gui():
                     f.unlink()
                     return self._send(200, {"ok": True})
                 return self._send(400, {"error": "Only imported packs can be removed here."})
+            if path == "/api/setup/credentials":
+                try:
+                    if body.get("use_claude_desktop"):
+                        env = import_claude_desktop() or {}
+                        save_credentials(c, env.get("ZSCALER_VANITY_DOMAIN"), env.get("ZSCALER_CLIENT_ID"),
+                                         env.get("ZSCALER_CLIENT_SECRET"))
+                    elif body.get("vanity") or body.get("secret"):
+                        save_credentials(c, body.get("vanity"), body.get("client_id") or c.get("client_id"),
+                                         body.get("secret") or None)
+                    tenant_cache.clear()
+                    tenant(load_cfg())
+                    return self._send(200, {"ok": True, "vanity": load_cfg().get("vanity_domain")})
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": hint(e)})
+            if path == "/api/setup/preflight":
+                checks, t = preflight(c, write_probe=bool(body.get("write_probe")))
+                facts = None
+                if t:
+                    tenant_cache.clear()
+                    tenant_cache[(c.get("client_id"), c.get("vanity_domain"))] = t
+                    facts = tenant_facts(t, c)
+                    facts["defaults"] = default_answers(facts)
+                return self._send(200, {"checks": checks, "facts": facts})
+            if path in ("/api/setup/apply", "/api/setup/teardown"):
+                if path.endswith("teardown") and body.get("confirm") != "DELETE":
+                    return self._send(400, {"error": "Type DELETE to confirm."})
+                try:
+                    t = tenant(c)
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": hint(e)})
+                jid = uuid.uuid4().hex[:8]
+                job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
+                log = lambda level, msg: job["results"].append({"level": level, "msg": msg})  # noqa: E731
+                answers = body.get("answers") or {}
+
+                def setup_work():
+                    try:
+                        cc = load_cfg()
+                        if path.endswith("teardown"):
+                            teardown(t, cc, confirm=False, log=log)
+                        else:
+                            setup_apply(t, cc, answers, log)
+                            log("head", "Verifying")
+                            job["verify"] = verify(cc, log)
+                    except Exception as e:
+                        job["error"] = {"error": str(e), "fix": hint(e)}
+                        log("fail", f"{e}")
+                    job["done"] = True
+
+                threading.Thread(target=setup_work, daemon=True).start()
+                return self._send(200, {"id": jid})
             if not c.get("state", {}).get("apps"):
-                return self._send(400, {"error": "Not set up. Run ./aiguard-kit setup in a terminal first."})
+                return self._send(400, {"error": "Not set up yet. Open the Setup tab."})
             if path == "/api/run":
                 tests = pick_tests(lib, ids=body.get("tests"))
                 jobs = plan(c, tests, body.get("mode", "detect"), body.get("apps") or None, body.get("users") or None,
@@ -1092,7 +1443,7 @@ def cmd_gui():
     head("AI Guard test console")
     print(f"  {url}   (this machine only - press Ctrl+C to stop)")
     if not cfg.get("state", {}).get("apps"):
-        warn("Not set up yet: run ./aiguard-kit setup first, then reload the page.")
+        info("Not set up yet: the console opens on its Setup tab.")
     if "--no-browser" not in ARGS:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
@@ -1106,7 +1457,7 @@ def main():
     tls_setup()
     vals = {ARGS[i + 1] for i, a in enumerate(ARGS[:-1]) if a in VALUE_OPTS}
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
-    cmds = {"setup": cmd_setup, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
+    cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule}
     if cmd not in cmds:
         print(__doc__)

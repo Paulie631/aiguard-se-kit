@@ -66,6 +66,8 @@ class FakeTenant:
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     def make(*argv):
+        import requests
+        monkeypatch.setattr(requests, "get", lambda *a, **k: types.SimpleNamespace(status_code=404))
         kit = load_kit(monkeypatch, tmp_path, list(argv))
         t = FakeTenant()
         kit.Tenant = lambda cfg: t
@@ -217,3 +219,63 @@ def test_hints_cover_known_failures(env):
     assert "API role" in kit.hint("HTTP 401 NOT_AUTHORIZED")
     assert "credit" in kit.hint("402 Insufficient Balance")
     assert "TLS" in kit.hint("SSLError CERTIFICATE_VERIFY_FAILED")
+
+
+def test_preflight_probe_leaves_nothing_and_flags_user_rules(env):
+    kit, t = env("setup", "--yes")
+    t.db["policy_match_rules"].append({"id": 3, "name": "VIP", "enabled": True, "ruleOrder": 1, "matchCriteria": {"type": "USER"}})
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    checks, tenant = kit.preflight(kit.load_cfg(), write_probe=True)
+    by = {c["id"]: c for c in checks}
+    assert tenant is t and by["write"]["status"] == "ok" and t.db["llm_applications"] == []
+    assert by["rules"]["status"] == "warn" and "VIP" in by["rules"]["detail"]
+
+
+def test_preflight_stops_on_bad_login(env):
+    kit, _ = env("setup", "--yes")
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    def boom(cfg):
+        raise kit.KitError("Couldn't connect: invalid_client")
+    kit.connect = boom
+    checks, tenant = kit.preflight(kit.load_cfg())
+    assert tenant is None and checks[-1]["id"] == "login" and checks[-1]["status"] == "fail" and "secret" in checks[-1]["fix"]
+
+
+def test_verify_catches_wrong_policy(env):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    cfg = kit.load_cfg()
+    kit.das_scan = lambda *a, **k: ({"policyId": 999, "policyName": "Someone else's", "action": "ALLOW"}, 5)
+    res = kit.verify(cfg, lambda *a: None, wait=0)
+    assert all(c["status"] == "fail" and "Someone else's" in c["detail"] for c in res)
+    kit.das_scan = lambda *a, **k: ({"policyId": cfg["state"]["policy_id"], "policyName": "SE-Demo: Test all"}, 5)
+    assert all(c["status"] == "ok" for c in kit.verify(cfg, lambda *a: None, wait=0))
+
+
+def test_reused_policy_is_audited_and_untouched(env):
+    kit, t = env("setup", "--yes")
+    t.db["policies"][0].update(inputDetectorPolicies=[{"detector": "pii", "enabled": True}], outputDetectorPolicies=[])
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    cfg, logs = kit.load_cfg(), []
+    ans = kit.default_answers(kit.tenant_facts(t, cfg))
+    ans["policy"] = 1
+    kit.setup_apply(t, cfg, ans, lambda lv, m: logs.append((lv, m)))
+    assert cfg["state"]["policy_id"] == 1 and len(t.db["policies"]) == 1
+    assert any(lv == "warn" and "Prompt Classifications" in m for lv, m in logs)
+    with pytest.raises(kit.KitError):
+        kit.policy_mode(t, cfg, "block")
+
+
+def test_setup_apply_with_provider_key_creates_proxy_path(env):
+    kit, t = env("setup", "--yes")
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    cfg = kit.load_cfg()
+    ans = kit.default_answers(kit.tenant_facts(t, cfg))
+    ans["providers"]["openai"]["key"] = "sk-test"
+    ans["mode"] = "block"
+    kit.setup_apply(t, cfg, ans, lambda *a: None)
+    pc = t.db["llm_provider_credentials"][0]
+    assert pc["apiCredentials"] == {"type": "BEARER", "token": "sk-test"}
+    assert any(r.get("matchCriteria", {}).get("type") == "APPLICATION" for r in t.db["policy_match_rules"])
+    assert kit.policy_mode(t, cfg)[0] == "block"
+    assert "sk-test" not in kit.CFG_FILE.read_text()

@@ -114,7 +114,25 @@ pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:
 .pack{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel)}
 .pack h4{margin:0 0 4px;font-size:15px}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted)}
+/* setup */
+.wiz{display:grid;grid-template-columns:240px 1fr;gap:20px;max-width:1100px}
+.wiz .steps li{cursor:default}
+.wiz .steps li.on{cursor:default}
+.form{display:grid;grid-template-columns:200px 1fr;gap:10px 14px;align-items:center;max-width:620px}
+.form input[type=text],.form input[type=password]{width:100%}
+input[type=password]{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.checks{list-style:none;margin:0;padding:0}
+.checks li{display:grid;grid-template-columns:22px 1fr;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.checks li:first-child{border-top:0}
+.ic{font-weight:700;text-align:center}.ic.ok{color:var(--ok)}.ic.warn{color:var(--warn)}.ic.fail{color:var(--bad)}.ic.info{color:var(--muted)}
+.checks .d{color:var(--muted);font-size:12.5px}.checks .fx{color:var(--warn);font-size:12.5px;margin-top:2px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer}
+.opt:has(input:checked){border-color:var(--accent);background:var(--chip)}
+.log{font:12.5px/1.6 var(--mono);background:var(--soft);border-radius:10px;padding:12px 14px;max-height:340px;overflow:auto}
+.log .h{font-weight:700;margin-top:6px}.log .ok{color:var(--ok)}.log .warn,.log .fail{color:var(--warn)}.log .info{color:var(--muted)}
+.danger{border-color:var(--bad-bg)}
 @media (max-width:1200px){.twocol{grid-template-columns:1fr}}
+@media (max-width:900px){.wiz,.form{grid-template-columns:1fr}}
 @media (max-width:900px){main,.demo{grid-template-columns:1fr;padding:16px}.wrap{padding:16px}aside.panel{position:static;max-height:none}header{padding:12px 16px}nav.tabs{padding:0 12px;top:0;position:static}.stage{padding:18px}}
 </style>
 </head>
@@ -132,10 +150,28 @@ pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:
   <a id="console" target="_blank" rel="noopener">Insights ↗</a>
 </header>
 <nav class="tabs" id="tabs">
+  <button data-t="setup">Setup</button>
   <button data-t="runner" class="on">Test runner</button>
   <button data-t="demo">Guided demo</button>
   <button data-t="packs">Test packs</button>
 </nav>
+
+<!-- ============ SETUP ============ -->
+<div class="view" id="v-setup">
+<div class="wrap stack">
+  <div class="wiz">
+    <div class="panel"><ol class="steps" id="wsteps"></ol>
+      <div class="hint">Nothing changes in your tenant until step 5. Everything created is named <code id="wprefix">SE-Demo:</code> and can be removed below.</div></div>
+    <div class="panel stage" id="wstage"></div>
+  </div>
+  <div class="panel danger" style="max-width:1100px">
+    <h2>Remove the demo</h2>
+    <div class="row" style="gap:10px"><span class="muted" style="font-size:13px">Deletes every kit object in the tenant and the keys on this machine.</span>
+      <input type="text" id="tdconfirm" placeholder="Type DELETE" style="width:130px"><button id="tdgo">Remove everything</button></div>
+    <div class="log" id="tdlog" style="display:none;margin-top:12px"></div>
+  </div>
+</div>
+</div>
 
 <!-- ============ RUNNER ============ -->
 <div class="view on" id="v-runner">
@@ -258,7 +294,7 @@ const segVal=id=>($(`#${id} button.on`)||{}).dataset?.v;
 function note(h,good){const n=$("#notice");n.innerHTML=h;n.classList.toggle("good",!!good);n.style.display=h?"block":"none"}
 
 /* ---------- tabs ---------- */
-$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo")drawStage()});
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo")drawStage();if(b.dataset.t=="setup")wizard()});
 
 /* ---------- state ---------- */
 async function loadState(){
@@ -271,17 +307,20 @@ async function loadState(){
 }
 async function init(){
   let st;try{st=await loadState()}catch(e){$("#tenant").textContent="error: "+e.message;return}
-  if(!st.apps.length)note("This machine isn't set up yet. Run <code>./aiguard-kit setup</code> in a terminal, then reload.");
-  drawPresets();
+  drawPresets();refreshRunner();
+  seg("mode",v=>{S.mode=v;$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
+    if(v=="proxy"&&!S.apps.some(a=>a.proxy))note("No app has a proxy key. Add an OpenAI or Anthropic key in the Setup tab to use proxy mode.");else note("")});
+  seg("ldir");
+  $("#presets .preset").click();
+  drawCov();drawStories();drawPacks();loadPolicy();
+  if(!st.apps.length){$('#tabs button[data-t="setup"]').click();}
+}
+function refreshRunner(){
   $("#apps").innerHTML=S.apps.map(a=>`<label class="chk" data-a="${esc(a.name)}"><input type="checkbox" checked value="${esc(a.name)}">${esc(a.label)}<span class="muted" style="font-size:11px">${a.proxy?"detect + proxy":"detect"}</span></label>`).join("");
   $("#users").innerHTML=S.lib.users.map(u=>`<label class="chk"><input type="checkbox" checked value="${esc(u)}">${esc(u.split("@")[0])}</label>`).join("");
   $("#lapp").innerHTML=S.apps.map(a=>`<option value="${esc(a.name)}">${esc(a.label)}</option>`).join("");
   $("#luser").innerHTML=S.lib.users.map(u=>`<option>${esc(u)}</option>`).join("");
-  seg("mode",v=>{S.mode=v;$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
-    if(v=="proxy"&&!S.apps.some(a=>a.proxy))note("No app has a proxy key. Add an OpenAI or Anthropic key with <code>./aiguard-kit setup</code> to use proxy mode.");else note("")});
-  seg("ldir");
-  $("#presets .preset").click();
-  drawCov();drawStories();drawPacks();loadPolicy();
+  if(!S.apps.length)note("Not set up yet. Open the <b>Setup</b> tab.");else if($("#notice").textContent.startsWith("Not set up"))note("");
 }
 
 /* ---------- policy switch ---------- */
@@ -520,6 +559,131 @@ $("#pimport").onclick=async()=>{
   catch(e){$("#ppreview").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}
 };
 $("#ptemplate").href=URL.createObjectURL(new Blob(['name,direction,prompt,expect\nCustomer record,IN,"Summarize: Jane Roe, SSN 123-45-6789, DOB 04/15/1980",pii\nAgent reply,OUT,"Here is the API key you asked for: ...",secrets\n'],{type:"text/csv"}));
+
+/* ---------- setup wizard ---------- */
+const W={step:0,setup:null,checks:null,facts:null,ans:null,probe:true,demo:false};
+const WSTEPS=["Connect","Preflight checks","Choices","Review","Create and verify"];
+const ICON={ok:"✓",warn:"!",fail:"✗",info:"·"};
+const BLOCKING=["login","creds","keychain","das","write"];
+function wsteps(){$("#wsteps").innerHTML=WSTEPS.map((n,i)=>`<li class="${i==W.step?"on":""} ${i<W.step?"done":""}"><span class="num">${i<W.step?"✓":i+1}</span><span>${n}</span></li>`).join("")}
+function checksHTML(cs){return `<ul class="checks">${cs.map(c=>`<li><span class="ic ${c.status}">${ICON[c.status]}</span><div>${esc(c.label)}${c.detail?`<div class="d">${esc(c.detail)}</div>`:""}${c.fix&&c.status!="ok"?`<div class="fx">${c.status=="info"?"":"Fix: "}${esc(c.fix)}</div>`:""}</div></li>`).join("")}</ul>`}
+function plabel(p){return p=="openai"?"OpenAI":"Anthropic"}
+async function wizard(){
+  wsteps();const st=$("#wstage");
+  if(W.step==0){
+    W.setup=await api("/api/setup/state");$("#wprefix").textContent=W.setup.prefix+":";
+    st.innerHTML=`<div class="kicker">STEP 1 OF 5</div><h3>Connect to your tenant</h3>
+      <p class="muted">Use a OneAPI client from ZIdentity → Integration → API Clients with full AI Guard access. The secret goes straight to your keychain.</p>
+      ${W.setup.saved?`<div class="notice good" style="display:block">Saved: client ${esc(W.setup.client_id)} on <b>${esc(W.setup.vanity)}</b></div><div class="row" style="gap:10px;margin-bottom:18px"><button class="primary" id="wuse">Continue with these</button><button id="wchange">Use different credentials</button></div>`:""}
+      <div id="wform" style="${W.setup.saved?"display:none":""}">
+        ${W.setup.claude_desktop?`<div class="row" style="gap:10px;margin-bottom:14px"><button id="wcd">Use the credentials in Claude Desktop</button><span class="muted" style="font-size:12px">found on this computer</span></div>`:""}
+        <div class="form"><label class="lbl">Vanity domain</label><input type="text" id="wvan" placeholder="acme (from acme.zslogin.net)" value="${esc(W.setup.vanity)}">
+        <label class="lbl">Client ID</label><input type="text" id="wcid" autocomplete="off">
+        <label class="lbl">Client secret</label><input type="password" id="wsec" autocomplete="new-password"></div>
+        <div class="row" style="margin-top:14px"><button class="primary" id="wsave">Save and test</button></div></div>
+      <div id="wmsg" style="margin-top:12px"></div>`;
+    const saved=async payload=>{$("#wmsg").innerHTML='<span class="muted">Connecting…</span>';
+      try{await api("/api/setup/credentials",payload);$("#wsec")&&($("#wsec").value="");loadState().catch(()=>{});W.step=1;W.checks=null;wizard()}
+      catch(e){$("#wmsg").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}};
+    $("#wuse")&&($("#wuse").onclick=()=>saved({}));
+    $("#wchange")&&($("#wchange").onclick=()=>{$("#wform").style.display="block"});
+    $("#wcd")&&($("#wcd").onclick=()=>saved({use_claude_desktop:true}));
+    $("#wsave").onclick=()=>saved({vanity:$("#wvan").value,client_id:$("#wcid").value,secret:$("#wsec").value});
+  }
+  else if(W.step==1){
+    st.innerHTML=`<div class="kicker">STEP 2 OF 5</div><h3>Preflight checks</h3>
+      <p class="muted">Read-only checks of this computer and your tenant.</p>
+      <label class="chk" style="margin-bottom:12px"><input type="checkbox" id="wprobe" ${W.probe?"checked":""}>Also test create permission (a temporary app, created and deleted)</label>
+      <div id="wchecks">${W.checks?checksHTML(W.checks):'<span class="muted">Running…</span>'}</div>
+      <div id="wgate" style="margin-top:16px"></div>`;
+    $("#wprobe").onchange=e=>W.probe=e.target.checked;
+    const draw=()=>{
+      const fails=W.checks.filter(c=>c.status=="fail"), blocking=fails.some(c=>BLOCKING.includes(c.id))||!W.facts;
+      $("#wchecks").innerHTML=checksHTML(W.checks);
+      $("#wgate").innerHTML=`${fails.length?`<div class="notice" style="display:block">${fails.length} check${fails.length>1?"s":""} failed. Fix ${fails.length>1?"them":"it"}, then run the checks again.${blocking?"":" You can also continue anyway."}</div>`:""}
+        ${W.facts?`<label class="chk" style="margin:6px 0 12px"><input type="checkbox" id="wdemo" ${W.demo?"checked":""}><b>${esc(W.facts.tenant)}</b>&nbsp;is a demo/eval tenant and the kit may create objects in it</label>`:""}
+        <div class="row" style="gap:10px"><button id="wback">‹ Back</button><button id="wrerun">Run checks again</button>
+        <button class="primary" id="wnext" ${blocking?"disabled":""}>Continue ›</button></div>`;
+      $("#wback").onclick=()=>{W.step=0;wizard()};$("#wrerun").onclick=run;
+      $("#wdemo")&&($("#wdemo").onchange=e=>W.demo=e.target.checked);
+      $("#wnext").onclick=()=>{if(!W.demo){$("#wdemo").parentElement.style.borderColor="var(--bad)";return}W.ans=W.ans||structuredClone(W.facts.defaults);W.step=2;wizard()};
+    };
+    const run=async()=>{$("#wchecks").innerHTML='<span class="muted">Running…</span>';$("#wgate").innerHTML="";
+      try{const r=await api("/api/setup/preflight",{write_probe:W.probe});W.checks=r.checks;W.facts=r.facts;draw()}
+      catch(e){$("#wchecks").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}};
+    if(W.checks)draw();else run();
+  }
+  else if(W.step==2){
+    const F=W.facts,A=W.ans;
+    st.innerHTML=`<div class="kicker">STEP 3 OF 5</div><h3>Choices</h3>
+      ${F.existing.length?`<div class="lbl" style="margin-bottom:6px">${F.existing.length} objects from an earlier setup</div>
+        <label class="opt"><input type="radio" name="wex" value="keep" ${A.existing=="keep"?"checked":""}><span><b>Keep them</b> and fill in anything missing</span></label>
+        <label class="opt"><input type="radio" name="wex" value="fresh" ${A.existing=="fresh"?"checked":""}><span><b>Delete them</b> and start fresh</span></label>`:""}
+      <div class="lbl" style="margin:14px 0 6px">Detection policy</div>
+      <select id="wpol" style="width:100%;max-width:620px"><option value="create">${F.kit_policy?"Use":"Create"} '${esc(F.prefix)}: Test all': every detector on (recommended)</option>${F.policies.map(p=>`<option value="${p.id}" ${A.policy==p.id?"selected":""}>Use existing '${esc(p.name)}' (unchanged)</option>`).join("")}</select>
+      <div id="wpolopts" style="margin-top:10px"></div>
+      <div class="lbl" style="margin:18px 0 6px">LLM providers <span class="muted">(optional: adds real LLM calls through the AI Guard proxy for token usage; detection mode needs no keys)</span></div>
+      <div class="form">${Object.entries(F.providers).map(([p,f])=>`<label class="lbl">${plabel(p)} API key</label>
+        ${!f.available?'<span class="muted">No provider in this tenant: detection mode only</span>':f.has_key?'<span class="muted">✓ already stored in AI Guard</span>':`<input type="password" data-key="${p}" placeholder="Optional" autocomplete="new-password">`}
+        ${f.available?`<label class="lbl">${plabel(p)} model</label><input type="text" data-model="${p}" value="${esc(A.providers[p].model)}">`:""}`).join("")}</div>
+      <div class="row" style="gap:10px;margin-top:20px"><button id="wback">‹ Back</button><button class="primary" id="wnext">Review ›</button></div>`;
+    const polopts=()=>{const create=$("#wpol").value=="create";
+      $("#wpolopts").innerHTML=create?`<div class="row" style="gap:16px"><div class="seg" id="wmode"><button data-v="detect" class="${A.mode!="block"?"on":""}">Start in Monitor</button><button data-v="block" class="${A.mode=="block"?"on":""}">Start in Enforce</button></div>
+        <label class="lbl">Competitor</label><input type="text" id="wcomp" value="${esc(A.competitor)}" style="width:200px"></div>`:'<div class="muted" style="font-size:13px">The kit won\'t change this policy, and the Policy switch stays off. Preflight lists anything it lacks.</div>';
+      if(create)seg("wmode",v=>{A.mode=v})};
+    $("#wpol").value=A.policy=="create"?"create":String(A.policy);$("#wpol").onchange=polopts;polopts();
+    $("#wback").onclick=()=>{W.step=1;wizard()};
+    $("#wnext").onclick=()=>{
+      const ex=$('input[name="wex"]:checked');if(ex)A.existing=ex.value;
+      A.policy=$("#wpol").value=="create"?"create":+$("#wpol").value;
+      if($("#wcomp"))A.competitor=$("#wcomp").value||A.competitor;
+      $$("[data-key]").forEach(i=>{A.providers[i.dataset.key].key=i.value||null});
+      $$("[data-model]").forEach(i=>{A.providers[i.dataset.model].model=i.value});
+      W.step=3;wizard()};
+  }
+  else if(W.step==3){
+    const F=W.facts,A=W.ans,L=[];
+    if(F.existing.length&&A.existing=="fresh")L.push(`Delete ${F.existing.length} earlier kit objects first`);
+    L.push(A.policy=="create"?`${F.kit_policy?"Use":"Create"} policy '${F.prefix}: Test all' in ${A.mode=="block"?"Enforce":"Monitor"} mode (competitor '${A.competitor}')`:`Use existing policy '${(F.policies.find(p=>p.id==A.policy)||{}).name}' unchanged`);
+    Object.entries(F.providers).forEach(([p,f])=>L.push(`App '${F.prefix}: ${plabel(p)} App' with a detection key${f.available&&(f.has_key||A.providers[p].key)?` and proxy mode (${A.providers[p].model})`:", detection mode only"}`));
+    L.push(`Rules '${F.prefix}: detection apps'${Object.entries(F.providers).some(([p,f])=>f.available&&(f.has_key||A.providers[p].key))?` and '${F.prefix}: proxy apps'`:""}, placed after your existing rules`);
+    L.push("Then scan once through each app and confirm the chosen policy handled it");
+    st.innerHTML=`<div class="kicker">STEP 4 OF 5</div><h3>Review</h3>
+      <p class="muted">This is what will be created in <b>${esc(F.tenant)}</b>.</p>
+      <ul style="line-height:1.9">${L.map(l=>`<li>${esc(l)}</li>`).join("")}</ul>
+      <div class="row" style="gap:10px;margin-top:16px"><button id="wback">‹ Change choices</button><button class="primary" id="wgo">Create it</button></div>`;
+    $("#wback").onclick=()=>{W.step=2;wizard()};$("#wgo").onclick=()=>{W.step=4;wizard()};
+  }
+  else if(W.step==4){
+    st.innerHTML=`<div class="kicker">STEP 5 OF 5</div><h3>Create and verify</h3><div class="log" id="wlog"></div><div id="wend" style="margin-top:16px"></div>`;
+    runJob("/api/setup/apply",{answers:W.ans},$("#wlog"),async j=>{
+      Object.values(W.ans.providers).forEach(p=>p.key=null);   // don't keep provider keys in the page
+      const v=j.verify||[],bad=v.filter(c=>c.status!="ok");
+      if(j.error){$("#wend").innerHTML=`<div class="notice" style="display:block"><b>${esc(j.error.error)}</b><br>Fix: ${esc(j.error.fix)}<br>Everything created so far is kept. Retry fills in the rest.</div><div class="row" style="gap:10px"><button class="primary" id="wretry">Retry</button><button id="wback">‹ Back to choices</button></div>`;
+        $("#wretry").onclick=()=>wizard();$("#wback").onclick=()=>{W.step=2;wizard()};return}
+      $("#wend").innerHTML=`<h2 style="margin-top:6px">Verification</h2>${checksHTML(v)}
+        <div class="notice ${bad.length?"":"good"}" style="display:block;margin-top:12px">${bad.length?"Setup finished with warnings. Follow the fixes above, then run <b>Retry checks</b>.":"Setup complete. Dashboards fill 10–15 minutes after your first run."}</div>
+        <div class="row" style="gap:10px"><button class="primary" id="wpop">Populate every dashboard now</button><button id="wdemo2">Open the guided demo</button>${bad.length?'<button id="wretry">Retry checks</button>':""}</div>`;
+      await refreshAll();
+      $("#wpop").onclick=()=>{$('#tabs button[data-t="runner"]').click();const b=$$("#presets .preset")[0];b&&b.click();$("#run").click()};
+      $("#wdemo2").onclick=()=>$('#tabs button[data-t="demo"]').click();
+      $("#wretry")&&($("#wretry").onclick=()=>wizard());
+    });
+  }
+}
+function runJob(url,payload,logEl,onDone){
+  logEl.style.display="block";logEl.innerHTML='<div class="info">Starting…</div>';let got=0;
+  api(url,payload).then(({id})=>{const tick=async()=>{
+    const j=await api(`/api/job?id=${id}&since=${got}`);if(got==0)logEl.innerHTML="";got+=j.results.length;
+    logEl.insertAdjacentHTML("beforeend",j.results.map(e=>e.level=="head"?`<div class="h">${esc(e.msg)}</div>`:`<div class="${e.level}">${ICON[e.level]||"·"} ${esc(e.msg)}</div>`).join(""));
+    logEl.scrollTop=logEl.scrollHeight;
+    if(j.done)onDone(j);else setTimeout(tick,600)};tick()}).catch(e=>{logEl.innerHTML=`<div class="fail">✗ ${esc(e.message)}</div>`});
+}
+$("#tdgo").onclick=()=>{
+  if($("#tdconfirm").value!="DELETE")return alert("Type DELETE to confirm.");
+  runJob("/api/setup/teardown",{confirm:"DELETE"},$("#tdlog"),async()=>{$("#tdconfirm").value="";$("#tdlog").insertAdjacentHTML("beforeend",'<div class="h">Done. Run setup again any time.</div>');W.step=0;W.checks=null;W.ans=null;await refreshAll();wizard()});
+};
+async function refreshAll(){try{await loadState();refreshRunner();drawPresets();drawLib();drawStories();drawPacks();loadPolicy()}catch(e){}}
 
 init();
 </script>
