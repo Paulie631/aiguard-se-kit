@@ -320,3 +320,35 @@ def test_runbook_doc_in_sync():
     import subprocess
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen_preflight_doc.py"), "--check"], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_reuses_existing_provider_key_and_teardown_keeps_it(env):
+    kit, t = env("setup", "--yes")
+    t.db["llm_provider_credentials"] += [{"id": 901, "providerId": 10, "name": "OpenAI API Key"},
+                                         {"id": 902, "providerId": 99, "name": "DeepSeek API Key"}]
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    cfg = kit.load_cfg()
+    facts = kit.tenant_facts(t, cfg)
+    assert [c["name"] for c in facts["providers"]["openai"]["creds"]] == ["OpenAI API Key"]  # DeepSeek excluded
+    assert facts["providers"]["anthropic"]["creds"] == []
+    ans = kit.default_answers(facts)
+    assert ans["providers"]["openai"]["cred_id"] == 901 and ans["providers"]["anthropic"]["cred_id"] is None
+    logs = []
+    kit.setup_apply(t, cfg, ans, lambda lv, m: logs.append(m))
+    proxy = [c for c in t.db["llm_application_credentials"] if c.get("mode") == "PROXY"]
+    assert len(proxy) == 1 and proxy[0]["providerCredentialsId"] == 901
+    assert len(t.db["llm_provider_credentials"]) == 2  # nothing new created
+    assert any("no Anthropic key is configured" in m for m in logs)
+    kit.FORCE = True
+    kit.teardown(t, kit.load_cfg())
+    assert [c["name"] for c in t.db["llm_provider_credentials"]] == ["OpenAI API Key", "DeepSeek API Key"]
+
+
+def test_reused_key_that_vanished_gives_clear_error(env):
+    kit, t = env("setup", "--yes")
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    cfg = kit.load_cfg()
+    ans = kit.default_answers(kit.tenant_facts(t, cfg))
+    ans["providers"]["openai"]["cred_id"] = 555
+    with pytest.raises(kit.KitError, match="no longer exists"):
+        kit.setup_apply(t, cfg, ans, lambda *a: None)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1
+- Setup finds LLM provider keys already configured in the tenant and offers to reuse them (Reuse / Enter a new
+  key / Skip). When none exist, it says so and asks for one, or runs detection-only.
+- Teardown never deletes reused keys: only objects named with the kit's prefix.
+
 ## 1.3.0
 - **Preflight runbook** (`PREFLIGHT.md`): for every check, what it checks, why it matters, how to verify by hand,
   how to fix and how to re-test. Steps not yet confirmed in a real tenant are marked.

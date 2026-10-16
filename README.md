@@ -57,7 +57,7 @@ If creating something fails partway, everything made so far is kept and **Retry*
 | Detection policy | `SE-Demo: Test all` | Every detector on. Starts in Monitor or Enforce, your choice. You can also reuse an existing policy instead; the policy switch won't touch it. |
 | Apps | `SE-Demo: OpenAI App`, `SE-Demo: Anthropic App` | Event contents included so prompt text shows in the console. |
 | Detection keys | one per app | Mode `DETECTIONS`, for the Detection API. |
-| Proxy keys | one per app, optional | Mode `PROXY`. Created only if you give a provider API key. |
+| Proxy keys | one per app, optional | Mode `PROXY`. Setup offers any OpenAI/Anthropic key already in the tenant (reuse it, enter a new one, or skip). If there's none, it asks for one or runs detection-only. Reused keys are never deleted by teardown. |
 | Rules | `SE-Demo: detection apps`, `SE-Demo: proxy apps` | Placed after your existing rules. |
 
 Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aiguard-se-kit/config.json`.

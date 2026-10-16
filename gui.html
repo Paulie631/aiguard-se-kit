@@ -583,6 +583,16 @@ function howHTML(h,open){if(!h)return "";return `<details class="how" ${open?"op
   ${h.confirm?`<div class="confirm">Not yet confirmed in a real tenant: ${md(h.confirm_note||"")}</div>`:""}</div></details>`}
 function checksHTML(cs,help){help=help||{};return `<ul class="checks">${cs.map(c=>{const h=help[(c.id||"").startsWith("read")?"read":c.id];return `<li><span class="ic ${c.status}">${ICON[c.status]}</span><div>${esc(c.label)}${c.detail?`<div class="d">${esc(c.detail)}</div>`:""}${c.fix&&c.status!="ok"?`<div class="fx">${c.status=="info"?"":"Fix: "}${esc(c.fix)}</div>`:""}${howHTML(h,false)}</div></li>`}).join("")}</ul>`}
 function plabel(p){return p=="openai"?"OpenAI":"Anthropic"}
+function provHTML(p,f,P){
+  const L=plabel(p), model=`<div id="wmodel-${p}" class="row" style="gap:8px;margin-top:8px"><span class="lbl" style="width:110px">Model</span><input type="text" data-model="${p}" value="${esc(P.model)}" style="width:260px"></div>`;
+  const key=(show)=>`<div id="wkey-${p}" style="margin-top:8px;${show?"":"display:none"}"><input type="password" data-key="${p}" placeholder="Paste your ${L} API key" autocomplete="new-password" style="width:380px"></div>`;
+  let body;
+  if(!f.available)body=`<div class="muted" style="font-size:13px">No ${L} provider in this tenant, so this app runs in detection mode only.</div>`;
+  else if(f.creds.length)body=`<select data-provuse="${p}" style="width:100%;max-width:520px">${f.creds.map(c=>`<option value="${c.id}" ${P.cred_id==c.id?"selected":""}>Reuse '${esc(c.name)}' (already in AI Guard)</option>`).join("")}
+      <option value="new" ${!P.cred_id&&P.key?"selected":""}>Enter a new key</option><option value="skip" ${!P.cred_id&&!P.key?"selected":""}>Skip: detection mode only</option></select>${key(false)}${model}`;
+  else body=`<div class="notice" style="display:block;margin:0">No ${L} key is configured in this tenant. Paste one below to enable proxy mode, or leave it blank for detection mode only.</div>${key(true)}${model}`;
+  return `<div class="opt" style="display:block;cursor:default"><b>${L}</b>${f.provider_name?` <span class="muted" style="font-size:12px">· ${esc(f.provider_name)}</span>`:""}<div style="margin-top:8px">${body}</div></div>`;
+}
 async function wizard(){
   wsteps();const st=$("#wstage");
   if(W.step==0){
@@ -641,21 +651,26 @@ async function wizard(){
       <select id="wpol" style="width:100%;max-width:620px"><option value="create">${F.kit_policy?"Use":"Create"} '${esc(F.prefix)}: Test all': every detector on (recommended)</option>${F.policies.map(p=>`<option value="${p.id}" ${A.policy==p.id?"selected":""}>Use existing '${esc(p.name)}' (unchanged)</option>`).join("")}</select>
       <div id="wpolopts" style="margin-top:10px"></div>
       <div class="lbl" style="margin:18px 0 6px">LLM providers <span class="muted">(optional: adds real LLM calls through the AI Guard proxy for token usage; detection mode needs no keys)</span></div>
-      <div class="form">${Object.entries(F.providers).map(([p,f])=>`<label class="lbl">${plabel(p)} API key</label>
-        ${!f.available?'<span class="muted">No provider in this tenant: detection mode only</span>':f.has_key?'<span class="muted">✓ already stored in AI Guard</span>':`<input type="password" data-key="${p}" placeholder="Optional" autocomplete="new-password">`}
-        ${f.available?`<label class="lbl">${plabel(p)} model</label><input type="text" data-model="${p}" value="${esc(A.providers[p].model)}">`:""}`).join("")}</div>
+      <div id="wprov">${Object.entries(F.providers).map(([p,f])=>provHTML(p,f,A.providers[p])).join("")}</div>
       <div class="row" style="gap:10px;margin-top:20px"><button id="wback">‹ Back</button><button class="primary" id="wnext">Review ›</button></div>`;
     const polopts=()=>{const create=$("#wpol").value=="create";
       $("#wpolopts").innerHTML=create?`<div class="row" style="gap:16px"><div class="seg" id="wmode"><button data-v="detect" class="${A.mode!="block"?"on":""}">Start in Monitor</button><button data-v="block" class="${A.mode=="block"?"on":""}">Start in Enforce</button></div>
         <label class="lbl">Competitor</label><input type="text" id="wcomp" value="${esc(A.competitor)}" style="width:200px"></div>`:'<div class="muted" style="font-size:13px">The kit won\'t change this policy, and the Policy switch stays off. Preflight lists anything it lacks.</div>';
       if(create)seg("wmode",v=>{A.mode=v})};
     $("#wpol").value=A.policy=="create"?"create":String(A.policy);$("#wpol").onchange=polopts;polopts();
+    const provSync=()=>$$("[data-provuse]").forEach(sel=>{const p=sel.dataset.provuse;$(`#wkey-${p}`).style.display=sel.value=="new"?"":"none";
+      $(`#wmodel-${p}`).style.display=sel.value=="skip"?"none":""});
+    $$("[data-provuse]").forEach(sel=>sel.onchange=provSync);provSync();
     $("#wback").onclick=()=>{W.step=1;wizard()};
     $("#wnext").onclick=()=>{
       const ex=$('input[name="wex"]:checked');if(ex)A.existing=ex.value;
       A.policy=$("#wpol").value=="create"?"create":+$("#wpol").value;
       if($("#wcomp"))A.competitor=$("#wcomp").value||A.competitor;
-      $$("[data-key]").forEach(i=>{A.providers[i.dataset.key].key=i.value||null});
+      Object.keys(F.providers).forEach(p=>{const P=A.providers[p],sel=$(`[data-provuse="${p}"]`),key=$(`[data-key="${p}"]`);
+        const use=sel?sel.value:(key&&key.value?"new":"skip");
+        P.cred_id=/^\d+$/.test(use)?+use:null;P.key=use=="new"&&key?(key.value.trim()||null):null});
+      const missing=Object.entries(F.providers).find(([p])=>{const sel=$(`[data-provuse="${p}"]`);return sel&&sel.value=="new"&&!A.providers[p].key});
+      if(missing){$(`[data-key="${missing[0]}"]`).focus();$(`[data-key="${missing[0]}"]`).style.borderColor="var(--bad)";return}
       $$("[data-model]").forEach(i=>{A.providers[i.dataset.model].model=i.value});
       W.step=3;wizard()};
   }
@@ -663,8 +678,10 @@ async function wizard(){
     const F=W.facts,A=W.ans,L=[];
     if(F.existing.length&&A.existing=="fresh")L.push(`Delete ${F.existing.length} earlier kit objects first`);
     L.push(A.policy=="create"?`${F.kit_policy?"Use":"Create"} policy '${F.prefix}: Test all' in ${A.mode=="block"?"Enforce":"Monitor"} mode (competitor '${A.competitor}')`:`Use existing policy '${(F.policies.find(p=>p.id==A.policy)||{}).name}' unchanged`);
-    Object.entries(F.providers).forEach(([p,f])=>L.push(`App '${F.prefix}: ${plabel(p)} App' with a detection key${f.available&&(f.has_key||A.providers[p].key)?` and proxy mode (${A.providers[p].model})`:", detection mode only"}`));
-    L.push(`Rules '${F.prefix}: detection apps'${Object.entries(F.providers).some(([p,f])=>f.available&&(f.has_key||A.providers[p].key))?` and '${F.prefix}: proxy apps'`:""}, placed after your existing rules`);
+    const proxyOf=(p,f)=>{const P=A.providers[p],c=f.creds.find(c=>c.id==P.cred_id);
+      return !f.available?"":c?` and proxy mode (${P.model}) using the existing key '${c.name}'`:P.key?` and proxy mode (${P.model}) with the new key you entered`:""};
+    Object.entries(F.providers).forEach(([p,f])=>L.push(`App '${F.prefix}: ${plabel(p)} App' with a detection key${proxyOf(p,f)||", detection mode only"}`));
+    L.push(`Rules '${F.prefix}: detection apps'${Object.entries(F.providers).some(([p,f])=>proxyOf(p,f))?` and '${F.prefix}: proxy apps'`:""}, placed after your existing rules`);
     L.push("Then scan once through each app and confirm the chosen policy handled it");
     st.innerHTML=`<div class="kicker">STEP 4 OF 5</div><h3>Review</h3>
       <p class="muted">This is what will be created in <b>${esc(F.tenant)}</b>.</p>

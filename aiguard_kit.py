@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
@@ -799,7 +799,6 @@ def tenant_facts(t, cfg):
                                                                  "llm_provider_credentials", "llm_applications")}
     pname = f"{PREFIX}: Test all"
     st = cfg.get("state", {})
-    pcreds = {c.get("name") for c in snap["llm_provider_credentials"]}
     return {
         "tenant": cfg.get("vanity_domain"), "prefix": PREFIX,
         "existing": [o["name"] for r in ("policies", "policy_match_rules", "llm_applications") for o in snap[r] if is_mine(o)],
@@ -807,12 +806,25 @@ def tenant_facts(t, cfg):
         "policies": [{"id": p["id"], "name": p["name"]} for p in snap["policies"] if p.get("name") != pname],
         "current_policy": st.get("policy_id"),
         "competitor": cfg.get("competitor", "Palo Alto"),
-        "providers": {ptype: {"available": any(p.get("type") == ptype for p in snap["llm_providers"]),
-                              "has_key": f"{PREFIX}: {'OpenAI' if ptype == 'openai' else 'Anthropic'} API key" in pcreds,
-                              "model": (st.get("apps", {}).get(f"{PREFIX}: {'OpenAI' if ptype == 'openai' else 'Anthropic'} App")
-                                        or {}).get("model", default)}
-                      for ptype, (_, _, default) in PROVIDERS.items()},
+        "providers": {ptype: provider_facts(snap, st, ptype, default) for ptype, (_, _, default) in PROVIDERS.items()},
     }
+
+
+def pick_provider(providers, ptype):
+    """The tenant's provider of this type: the built-in (public) one first."""
+    return next((p for p in providers if p.get("type") == ptype and p.get("public")), None) or \
+        next((p for p in providers if p.get("type") == ptype), None)
+
+
+def provider_facts(snap, st, ptype, default_model):
+    label = "OpenAI" if ptype == "openai" else "Anthropic"
+    prov = pick_provider(snap["llm_providers"], ptype)
+    creds = [{"id": c["id"], "name": c.get("name", f"credential {c['id']}"), "mine": is_mine(c)}
+             for c in snap["llm_provider_credentials"] if prov and c.get("providerId") == prov["id"]]
+    creds.sort(key=lambda c: (not c["mine"], c["name"].lower()))   # the kit's own key first
+    return {"label": label, "available": bool(prov), "provider_name": (prov or {}).get("name"), "creds": creds,
+            "has_key": bool(creds),
+            "model": (st.get("apps", {}).get(f"{PREFIX}: {label} App") or {}).get("model", default_model)}
 
 
 def describe_plan(facts, ans):
@@ -826,10 +838,15 @@ def describe_plan(facts, ans):
         name = next((p["name"] for p in facts["policies"] if p["id"] == ans.get("policy")), ans.get("policy"))
         lines.append(f"Use existing policy '{name}' unchanged")
     for ptype, p in ans.get("providers", {}).items():
-        label = "OpenAI" if ptype == "openai" else "Anthropic"
-        proxy = "with proxy mode (" + p.get("model", "") + ")" if (p.get("key") or facts["providers"][ptype]["has_key"]) \
-            and facts["providers"][ptype]["available"] else "detection mode only"
-        lines.append(f"App '{PREFIX}: {label} App', detection key, {proxy}")
+        f = facts["providers"][ptype]
+        cred = next((c for c in f["creds"] if c["id"] == p.get("cred_id")), None)
+        if f["available"] and cred:
+            proxy = f"proxy mode ({p.get('model')}) using the existing key '{cred['name']}'"
+        elif f["available"] and p.get("key"):
+            proxy = f"proxy mode ({p.get('model')}) with the new key you entered"
+        else:
+            proxy = "detection mode only"
+        lines.append(f"App '{PREFIX}: {f['label']} App', detection key, {proxy}")
     lines.append(f"Rules '{PREFIX}: detection apps' (and '{PREFIX}: proxy apps' if any proxy keys), after your rules")
     lines.append("Then confirm every app's scans are handled by the chosen policy")
     return lines
@@ -837,7 +854,8 @@ def describe_plan(facts, ans):
 
 def default_answers(facts):
     return {"existing": "keep", "policy": "create", "mode": "detect", "competitor": facts["competitor"],
-            "providers": {k: {"key": None, "model": v["model"]} for k, v in facts["providers"].items()}}
+            "providers": {k: {"key": None, "model": v["model"], "cred_id": v["creds"][0]["id"] if v["creds"] else None}
+                          for k, v in facts["providers"].items()}}
 
 
 def setup_apply(t, cfg, ans, log):
@@ -886,8 +904,7 @@ def setup_apply(t, cfg, ans, log):
     pcreds = t.list("llm_provider_credentials")
     for ptype, (ctype, field, model) in PROVIDERS.items():
         choice = (ans.get("providers") or {}).get(ptype, {})
-        prov = next((p for p in providers if p.get("type") == ptype and p.get("public")), None) or \
-            next((p for p in providers if p.get("type") == ptype), None)
+        prov = pick_provider(providers, ptype)
         label = "OpenAI" if ptype == "openai" else "Anthropic"
         app_name = f"{PREFIX}: {label} App"
         a = st["apps"].get(app_name) or {}
@@ -919,16 +936,26 @@ def setup_apply(t, cfg, ans, log):
         if not prov:
             log("warn", f"No {label} provider in this tenant, so proxy mode is skipped for this app")
             continue
-        mine_pc = next((c for c in pcreds if c.get("name") == f"{PREFIX}: {label} API key"), None)
-        pc_id = mine_pc["id"] if mine_pc else None
-        if not pc_id:
-            if not choice.get("key"):
-                log("info", f"{label}: no provider key, so detection mode only")
-                continue
+        usable = {c["id"]: c for c in pcreds if c.get("providerId") == prov["id"]}
+        pc_id = None
+        if choice.get("key"):
             pc = t.call("llm_provider_credentials", "add_credential", name=f"{PREFIX}: {label} API key",
                         providerId=prov["id"], apiCredentials={"type": ctype, field: choice["key"]})
             pc_id = pc["id"]
-            log("ok", f"{label}: provider key stored in AI Guard")
+            log("ok", f"{label}: new provider key stored in AI Guard")
+        elif choice.get("cred_id") is not None:
+            if int(choice["cred_id"]) not in usable:
+                raise KitError(f"The {label} provider key chosen in setup (id {choice['cred_id']}) no longer exists "
+                               f"for '{prov.get('name')}'. Go back to Choices and pick another, or enter a new key.")
+            pc_id = int(choice["cred_id"])
+            log("ok", f"{label}: reusing the provider key '{usable[pc_id].get('name')}' already in AI Guard")
+        else:
+            if usable:
+                log("info", f"{label}: proxy mode skipped (you chose detection only)")
+            else:
+                log("info", f"{label}: no {label} key is configured in this tenant, so detection mode only. "
+                            f"To add proxy mode later, rerun setup and enter a key in Choices.")
+            continue
         cred = t.call("llm_application_credentials", "add_credential", name=f"{PREFIX}: {label} proxy key",
                       applicationId=a["id"], providerId=prov["id"], providerCredentialsId=pc_id, mode="PROXY")
         kc_set(f"{app_name}:proxy", cred["key"])
@@ -1085,18 +1112,30 @@ def cmd_setup():
 
     def ask_providers():
         info("Detection mode needs no LLM keys and fills every dashboard, including Users.")
-        info("A provider key adds real LLM calls through the AI Guard proxy (token usage). Enter to skip.")
+        info("A provider key adds real LLM calls through the AI Guard proxy (token usage).")
         for ptype, f in facts["providers"].items():
-            label = "OpenAI" if ptype == "openai" else "Anthropic"
-            p = ans["providers"][ptype]
+            label, p = f["label"], ans["providers"][ptype]
             if not f["available"]:
-                warn(f"{label}: no provider in this tenant, detection mode only")
+                warn(f"{label}: no {label} provider in this tenant, so detection mode only")
+                p.update(cred_id=None, key=None)
                 continue
-            if f["has_key"]:
-                ok(f"{label}: provider key already in AI Guard")
-            elif not YES:
-                p["key"] = ask(f"{label} API key (hidden, Enter to skip)", "", secret=True) or None
-            if f["has_key"] or p["key"]:
+            if f["creds"]:
+                opts = [f"Reuse '{c['name']}' (already in AI Guard)" for c in f["creds"]] + \
+                       ["Enter a new key", "Skip: detection mode only"]
+                cur = next((i for i, c in enumerate(f["creds"]) if c["id"] == p.get("cred_id")), 0)
+                i = menu(f"{label} key for proxy mode:", opts, default=cur + 1)
+                if i < len(f["creds"]):
+                    p.update(cred_id=f["creds"][i]["id"], key=None)
+                elif i == len(f["creds"]):
+                    p.update(cred_id=None, key=ask(f"{label} API key (hidden)", "", secret=True) or None)
+                else:
+                    p.update(cred_id=None, key=None)
+            else:
+                warn(f"{label}: no {label} key is configured in this tenant.")
+                info(f"Paste one to enable proxy mode for {label}, or press Enter for detection mode only.")
+                p.update(cred_id=None, key=None if YES else (ask(f"{label} API key (hidden, Enter to skip)", "",
+                                                                    secret=True) or None))
+            if p.get("cred_id") or p.get("key"):
                 p["model"] = ask(f"{label} model for proxy tests", p["model"])
 
     head("Step 3 of 5 · Choices")
