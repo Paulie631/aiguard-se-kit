@@ -39,6 +39,7 @@ The runbook marks some steps as not yet confirmed in a real tenant. Settle each 
 - [ ] Whether user-matched rules apply to Detection API scans that carry a user (row 11)
 - [ ] Whether the Detection API returns which policy handled a scan (verification relies on it: if it doesn't, verification shows ✓ with "policy '?'")
 - [ ] Detection API host names for clouds other than us1
+- [ ] What the AI Guard **proxy** returns when it blocks (HTTP status and body). The console treats an HTTP 4xx whose body mentions block, policy, guard or violation as a block. If the proxy instead returns 200 with a replacement message, the guided demo shows that message as a normal reply and the detector tags show BLOCK. Run step 5 of the guided demo with **Send to the model** on and record what you see.
 
 ## Pilot
 

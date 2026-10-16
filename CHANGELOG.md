@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+- Guided demo can **send each prompt to the real model** through the AI Guard proxy (Send to the model) and shows
+  the model's reply, or the block message when AI Guard stops it in Enforce.
+- With **Detector tags** on, each step also runs a Detection API scan for the tags, and the model's reply is
+  scanned as a response so response detectors show too (extra events in Insights).
+- "Risky model output" steps ask the live model to generate the risky content when proxy mode is on.
+
 ## 1.3.1
 - Setup finds LLM provider keys already configured in the tenant and offers to reuse them (Reuse / Enter a new
   key / Skip). When none exist, it says so and asks for one, or runs detection-only.

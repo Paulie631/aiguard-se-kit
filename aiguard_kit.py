@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"

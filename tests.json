@@ -890,7 +890,8 @@
     {
      "title": "Risky model output",
      "test": "out-output-pii",
-     "talk": "AI Guard inspects the response too. If a model or an agent returns personal data, it's caught on the way back."
+     "talk": "AI Guard inspects the response too. If a model or an agent returns personal data, it's caught on the way back.",
+     "proxy_test": "output-pii-generate-fake-record"
     },
     {
      "title": "Brand and competitive risk",
@@ -924,7 +925,8 @@
     {
      "title": "The model leaks it back",
      "test": "out-output-secret",
-     "talk": "Responses are checked as well, so a model can't hand secrets back out."
+     "talk": "Responses are checked as well, so a model can't hand secrets back out.",
+     "proxy_test": "output-secret-generate-sample-config"
     }
    ]
   }

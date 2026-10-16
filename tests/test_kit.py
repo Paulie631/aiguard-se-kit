@@ -91,6 +91,9 @@ def test_library_is_consistent():
     assert all(t["group"] in lib["groups"] for t in lib["tests"])
     assert all(t["direction"] in ("IN", "OUT") for t in lib["tests"])
     assert all(s["test"] in ids for st in lib["stories"] for s in st["steps"])
+    assert all(s.get("proxy_test", s["test"]) in ids for st in lib["stories"] for s in st["steps"])
+    by_id = {t["id"]: t for t in lib["tests"]}
+    assert all(by_id[s["proxy_test"]]["direction"] == "IN" for st in lib["stories"] for s in st["steps"] if s.get("proxy_test"))
     for p in (ROOT / "packs").glob("*.json"):
         pack = json.loads(p.read_text(encoding="utf-8"))
         assert pack["name"] and pack["tests"]

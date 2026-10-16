@@ -108,6 +108,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:
 .verdict .big{font:700 22px var(--mono);padding:4px 12px;border-radius:8px;display:inline-block}
 .polchip{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:middle}
 .polchip.block{background:var(--bad-bg);color:var(--bad)}.polchip.detect{background:var(--ok-bg);color:var(--ok)}
+.reply{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--panel)}
+.reply .who{font:600 11px var(--mono);letter-spacing:.05em;color:var(--muted);margin-bottom:6px;text-transform:uppercase}
+.reply .txt{white-space:pre-wrap;word-break:break-word;font-size:14.5px;line-height:1.55;max-height:280px;overflow:auto}
+.reply.blocked{border-color:var(--bad);background:var(--bad-bg)}
 .kbd{font:11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;color:var(--muted)}
 /* packs */
 .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
@@ -256,6 +260,9 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <div class="row" style="justify-content:space-between;margin-bottom:6px">
     <div class="stories" id="stories"></div>
     <div class="row" style="gap:10px">
+      <label class="chk" title="Sends each prompt to the real model through the AI Guard proxy and shows its reply. Uses provider credit."><input type="checkbox" id="dproxy">Send to the model (LLM proxy)</label>
+      <select id="dapp" title="App whose proxy key is used"></select>
+      <label class="chk" title="Also runs a Detection API scan so detector tags show. Logs a second event per step."><input type="checkbox" id="dtags" checked>Detector tags</label>
       <label class="chk"><input type="checkbox" id="showtalk" checked>Show talk track</label>
       <span class="muted" style="font-size:12px"><span class="kbd">←</span> <span class="kbd">→</span> steps · <span class="kbd">Enter</span> run</span>
     </div>
@@ -475,6 +482,7 @@ $("#report").onclick=()=>{
 
 /* ---------- guided demo ---------- */
 function drawStories(){
+  demoControls();
   const st=S.lib.stories||[];
   $("#stories").innerHTML=st.map(s=>`<button data-s="${esc(s.id)}">${esc(s.name)}</button>`).join("");
   $$("#stories button").forEach(b=>b.onclick=()=>{S.story=st.find(x=>x.id==b.dataset.s);S.step=0;S.done=new Set();$$("#stories button").forEach(x=>x.classList.toggle("preset",true));$$("#stories button").forEach(x=>x.classList.toggle("on",x===b));drawStage()});
@@ -485,11 +493,12 @@ function drawStage(){
   const steps=S.story.steps;
   $("#steps").innerHTML=steps.map((s,i)=>`<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${s.policy?`<span class="polchip ${s.policy}">${s.policy=="block"?"Enforce":"Monitor"}</span>`:""}</span></li>`).join("");
   $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()});
-  const s=steps[S.step], t=S.lib.tests.find(x=>x.id==s.test)||{text:"(test not found: "+s.test+")",direction:"IN"};
+  const s=steps[S.step], t=stepTest(s)||{text:"(test not found: "+s.test+")",direction:"IN"};
+  const viaProxy=demoProxy()&&t.direction=="IN";
   $("#stage").innerHTML=`<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${s.policy=="block"?"ENFORCE":"MONITOR"}`:""}</div>
     <h3>${esc(s.title)}</h3>
     ${$("#showtalk").checked?`<p class="talk">${esc(s.talk)}</p>`:""}
-    <div class="lbl" style="margin-bottom:6px">${t.direction=="OUT"?"Model response being checked":"Prompt"}</div>
+    <div class="lbl" style="margin-bottom:6px">${t.direction=="OUT"?"Model response being checked":"Prompt"}<span class="muted"> · ${viaProxy?`sent to ${esc(demoAppLabel())} through the AI Guard proxy`:t.direction=="OUT"?"sample reply scanned by the Detection API":"scanned by the Detection API (no model call)"}</span></div>
     <div class="prompt">${esc(clean(t.text))}</div>
     <div class="row" style="margin-top:18px;gap:10px">
       <button id="sback" ${S.step==0?"disabled":""}>‹ Back</button>
@@ -511,16 +520,53 @@ async function runStep(){
       for(let i=30;i>0;i--){v.innerHTML=`<span class="muted">Policy is applying… running in ${i}s</span>`;$("#polstate").textContent=`applies in ${i}s`;await sleep(1000)}
       markPolicy()}
   }
-  v.innerHTML='<span class="muted">Scanning…</span>';
-  try{const app=S.apps[0]?.name, user=S.lib.users[S.step%S.lib.users.length];
-    const r=await scanOne({text:clean(t.text),direction:t.direction,app,user,mode:"detect"});
-    const big=r.status=="ERROR"?"ERROR":r.action;
-    v.innerHTML=`<span class="big ${esc(big)}">${esc(big)}</span><div style="margin-top:12px">${r.status=="ERROR"?esc(r.error)+'<div class="muted">'+esc(r.fix)+"</div>":(chips(r,false)||'<span class="muted">No detectors triggered</span>')}</div>`;
+  const tt=stepTest(s)||t, viaProxy=demoProxy()&&tt.direction=="IN", tags=$("#dtags").checked||!viaProxy;
+  v.innerHTML=`<span class="muted">${viaProxy?"Sending to "+esc(demoAppLabel())+" through AI Guard…":"Scanning…"}</span>`;
+  try{const user=S.lib.users[S.step%S.lib.users.length], text=clean(tt.text);
+    const proxyApp=$("#dapp").value, detectApp=viaProxy?proxyApp:(S.apps[0]?.name);
+    const [d,p]=await Promise.all([
+      tags?scanOne({text,direction:tt.direction,app:detectApp,user,mode:"detect"}):Promise.resolve(null),
+      viaProxy?scanOne({text,direction:"IN",app:proxyApp,user,mode:"proxy"}):Promise.resolve(null)]);
+    const err=[p,d].find(r=>r&&r.status=="ERROR");
+    const blocked=p?p.action=="BLOCK":!!(d&&d.action=="BLOCK");
+    const big=err&&!(p&&p.status=="OK")&&!(d&&d.status=="OK")?"ERROR":blocked?"BLOCK":"ALLOW";
+    let html=`<span class="big ${big}">${big}</span>`;
+    if(d&&d.status=="OK")html+=`<div style="margin-top:12px">${chips(d,false)||'<span class="muted">No detectors triggered</span>'}</div>`;
+    if(p&&p.status=="OK"){
+      if(p.action=="BLOCK")html+=`<div class="reply blocked"><div class="who">AI Guard · blocked before reaching ${esc(demoAppLabel())}</div><div class="txt">${esc(blockMsg(p.reply))}</div></div>`;
+      else{
+        html+=`<div class="reply"><div class="who">${esc(demoAppLabel())} reply · ${p.latency_ms} ms</div><div class="txt">${esc(p.reply||"(empty reply)")}</div><div id="sresp" style="margin-top:10px"></div></div>`;
+        if(d&&d.action=="BLOCK")html+=`<div class="hint">The scan says BLOCK but the model answered. The policy change may still be applying; run the step again.</div>`;
+      }
+    } else if(!viaProxy&&tt.direction=="IN"&&S.apps.some(a=>a.proxy)){
+      html+=`<div class="hint">Turn on <b>Send to the model</b> to see the model's real reply.</div>`}
+    if(err)html+=`<div class="notice" style="display:block;margin-top:12px">${esc(err.error)}<br>Fix: ${esc(err.fix)}</div>`;
+    v.innerHTML=html;
+    if(p&&p.status=="OK"&&p.action!="BLOCK"&&tags&&p.reply){   // check the model's reply too (response detectors)
+      $("#sresp").innerHTML='<span class="muted" style="font-size:12px">Checking the reply…</span>';
+      scanOne({text:p.reply,direction:"OUT",app:proxyApp,user,mode:"detect"}).then(o=>{const el=$("#sresp");if(!el)return;
+        el.innerHTML=o.status=="OK"?`<span class="lbl">Response check:</span> ${o.action=="BLOCK"?'<span class="badge BLOCK">BLOCK</span> ':""}${chips(o,false)||'<span class="muted">no detectors triggered</span>'}`:`<span class="muted">${esc(o.error)}</span>`}).catch(()=>{});
+    }
     S.done.add(S.step);$$("#steps li")[S.step].classList.add("done");$$("#steps li")[S.step].querySelector(".num").textContent="✓";
   }catch(e){v.innerHTML=esc(e.message)}
   $("#srun").disabled=false;
 }
 $("#showtalk").onchange=drawStage;
+function blockMsg(raw){   // "HTTP 403: {...json...}" -> the message inside, else the raw text
+  const m=String(raw||"").match(/^HTTP (\d+):\s*([\s\S]*)$/);if(!m)return raw||"Blocked by policy.";
+  try{const j=JSON.parse(m[2]);const msg=j.error?.message||j.message||j.error||j.detail;if(msg)return `${typeof msg=="string"?msg:JSON.stringify(msg)} (HTTP ${m[1]})`}catch(e){}
+  return `${m[2]||"Blocked by policy."} (HTTP ${m[1]})`}
+function stepTest(s){const id=demoProxy()&&s.proxy_test?s.proxy_test:s.test;return S.lib.tests.find(x=>x.id==id)}
+function demoProxy(){return $("#dproxy").checked&&!!$("#dapp").value}
+function demoAppLabel(){const a=S.apps.find(x=>x.name==$("#dapp").value);return a?`${a.label.replace(/ App$/,"")} (${a.model})`:"the model"}
+function demoControls(){
+  const px=S.apps.filter(a=>a.proxy);
+  $("#dapp").innerHTML=px.map(a=>`<option value="${esc(a.name)}">${esc(a.label)} · ${esc(a.model)}</option>`).join("");
+  $("#dproxy").disabled=!px.length;$("#dproxy").parentElement.title=px.length?"Sends each prompt to the real model through the AI Guard proxy and shows its reply. Uses provider credit.":"No app has a proxy key. Add an OpenAI or Anthropic key in Setup.";
+  if(!px.length)$("#dproxy").checked=false;
+  $("#dapp").style.display=$("#dproxy").checked?"":"none";$("#dtags").parentElement.style.display=$("#dproxy").checked?"":"none";
+}
+$("#dproxy").onchange=()=>{demoControls();drawStage()};$("#dapp").onchange=drawStage;
 document.addEventListener("keydown",e=>{
   if(!$("#v-demo").classList.contains("on")||!S.story||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;
   if(e.key=="ArrowRight"&&S.step<S.story.steps.length-1){S.step++;drawStage()}
