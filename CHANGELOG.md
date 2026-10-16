@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+- **Policy profiles** replace the single Monitor/Enforce switch: Monitor, Block attacks, Block attacks + data
+  leakage (secrets and regulated PII: cards, SSNs, bank, IBAN/SWIFT, passport, ITIN), Block everything risky.
+- **Custom policy** editor in the console: choose Detect or Block per detector, separately for prompts and
+  responses. Topic and language classifiers always stay on detect.
+- New guided storyline **"Blocking, step by step"** walks through each profile; the Data protection story now
+  ends with the same card blocked and everyday data still allowed.
+- **Detector tags in LLM proxy runs**: each row shows what was detected in the prompt, the model's reply (or the
+  block message) and what was detected in the reply. `./aiguard-kit run --mode=proxy --tags` in the terminal.
+- Fixed: blocking is set per item (entity, secret type, language); the AI Guard API rejects `defaultAction: BLOCK`.
+
 ## 1.4.0
 - Guided demo can **send each prompt to the real model** through the AI Guard proxy (Send to the model) and shows
   the model's reply, or the block message when AI Guard stops it in Enforce.

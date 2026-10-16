@@ -28,7 +28,7 @@ Use `./aiguard-kit` on Mac/Linux and `aiguard-kit.cmd` on Windows, from the kit 
 | Health check | `./aiguard-kit status` | Claude |
 | Populate every dashboard | `./aiguard-kit run --yes` (add `--preset=leakage|attacks|rai|output|topics`, `--rounds=N`, `--mode=proxy`) | Claude |
 | Test console (GUI) | `./aiguard-kit gui` | Start it in the background and tell the user the printed `http://127.0.0.1:…` address. It runs until stopped. |
-| Monitor vs enforce | `./aiguard-kit policy` (show), `./aiguard-kit policy block`, `./aiguard-kit policy detect` | Claude, when asked. Changes take ~30 s. |
+| What blocks | `./aiguard-kit policy` (show), then `policy monitor`, `policy attacks`, `policy data` (attacks + secrets + regulated PII) or `policy everything` | Claude, when asked. Changes take ~30 s. Per-detector choices are in the console's Policy → Custom. |
 | Keep dashboards fresh | `./aiguard-kit schedule install --every 60 --count 12`, `schedule status`, `schedule remove` | Claude, when asked. Mention the one-time keychain "Always Allow" prompt on Mac. |
 | Remove everything | `./aiguard-kit teardown --force` | Claude, only after the user explicitly confirms deletion in chat. |
 | Several tenants | add `--profile NAME` to any command | |

@@ -858,7 +858,7 @@
     {
      "title": "Everyday work flows through",
      "test": "prompt-tag-marketing",
-     "policy": "detect",
+     "policy": "monitor",
      "talk": "Most prompts are ordinary work. AI Guard lets them through with no friction, but it still classifies the topic, so you can see what your people use AI for."
     },
     {
@@ -879,7 +879,7 @@
     {
      "title": "Turn on enforcement, same prompt",
      "test": "prompt-injection-ignore-instructions",
-     "policy": "block",
+     "policy": "attacks",
      "talk": "Same prompt, one policy change. AI Guard now blocks it before it reaches the model. Customers usually start in monitor mode, learn their baseline, then enforce the high-risk detectors."
     },
     {
@@ -896,20 +896,20 @@
     {
      "title": "Brand and competitive risk",
      "test": "competition-competitor-compare",
-     "policy": "detect",
+     "policy": "monitor",
      "talk": "Beyond security: responsible-AI detectors flag competitor talk, brand risk and regulated advice. We're back in monitor mode now, and everything we just did is on the dashboard."
     }
    ]
   },
   {
    "id": "leakage",
-   "name": "Data protection (3 minutes)",
-   "minutes": 3,
+   "name": "Data protection (4 minutes)",
+   "minutes": 4,
    "steps": [
     {
      "title": "Card number",
      "test": "pii-credit-card",
-     "policy": "detect",
+     "policy": "monitor",
      "talk": "Payment data in a prompt is detected before it leaves."
     },
     {
@@ -927,6 +927,70 @@
      "test": "out-output-secret",
      "talk": "Responses are checked as well, so a model can't hand secrets back out.",
      "proxy_test": "output-secret-generate-sample-config"
+    },
+    {
+     "title": "Turn on data protection, same card",
+     "test": "pii-credit-card",
+     "policy": "data",
+     "talk": "One change: block attacks and data leakage. The same card number is now stopped before it reaches the model. Regulated data like cards, SSNs and bank details is blocked; everyday details like email addresses are still allowed and logged."
+    },
+    {
+     "title": "Everyday details still flow",
+     "test": "pii-email-phone",
+     "talk": "An email address and phone number aren't regulated, so the prompt goes through and is logged. Blocking only what matters keeps people productive."
+    },
+    {
+     "title": "Back to monitor",
+     "test": "clean-clean",
+     "policy": "monitor",
+     "talk": "We're back in monitor mode. Every step is in AI Guard Insights, with who sent it and which detectors fired."
+    }
+   ]
+  },
+  {
+   "id": "blocking",
+   "name": "Blocking, step by step (5 minutes)",
+   "minutes": 5,
+   "steps": [
+    {
+     "title": "Monitor: see everything, block nothing",
+     "test": "prompt-injection-ignore-instructions",
+     "policy": "monitor",
+     "talk": "Most customers start here. A prompt injection is detected and logged, but allowed, so you learn your baseline without disrupting anyone."
+    },
+    {
+     "title": "Block attacks",
+     "test": "prompt-injection-ignore-instructions",
+     "policy": "attacks",
+     "talk": "Turn on blocking for attacks only: prompt injection, hidden instructions, toxicity and malicious links. The same injection is now stopped."
+    },
+    {
+     "title": "Data still flows under 'attacks'",
+     "test": "secret-github-token",
+     "talk": "A developer pastes a token. With only attacks blocked, it's detected and logged but allowed. That's a deliberate choice you control."
+    },
+    {
+     "title": "Block attacks + data leakage",
+     "test": "secret-github-token",
+     "policy": "data",
+     "talk": "Add data leakage: secrets and regulated personal data. The same token is now blocked before it leaves the company."
+    },
+    {
+     "title": "Precision: everyday data still allowed",
+     "test": "pii-email-phone",
+     "talk": "Email addresses and phone numbers aren't regulated, so they're logged but allowed. Policies can be as precise as each PII type."
+    },
+    {
+     "title": "Block everything risky",
+     "test": "competition-competitor-compare",
+     "policy": "everything",
+     "talk": "For the strictest teams, every risk detector blocks, including competitor discussions, legal and financial advice and brand risk."
+    },
+    {
+     "title": "Back to monitor",
+     "test": "clean-clean",
+     "policy": "monitor",
+     "talk": "Back to monitor. In the console you can also pick exactly which detectors block, for prompts and responses separately."
     }
    ]
   }

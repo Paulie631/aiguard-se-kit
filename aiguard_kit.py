@@ -11,7 +11,7 @@
   ./aiguard-kit run        run tests from the terminal   (--preset everything|leakage|attacks|rai|output|topics,
                            --mode detect|proxy, --rounds N, --tests id1,id2)
   ./aiguard-kit run --trickle [--count 12]   a small random batch (used by the scheduler)
-  ./aiguard-kit policy [detect|block]        show or switch the demo policy between monitor and enforce
+  ./aiguard-kit policy [monitor|attacks|data|everything]   show or switch what the demo policy blocks
   ./aiguard-kit schedule install|remove|status [--every 60] [--count 12]
                            keep dashboards fresh with a small batch every N minutes
   ./aiguard-kit status     check credentials, tenant objects, the detection API and kit updates
@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
@@ -400,8 +400,15 @@ def pick_tests(lib, preset=None, ids=None):
     return tests
 
 
-def run_one(cfg, test, app_name, user, mode):
-    """Runs a single test. Returns a result dict (never raises)."""
+def _hits(d):
+    dets = d.get("detectorResponses") or {}
+    return [k for k, v in dets.items() if isinstance(v, dict) and v.get("triggered")], dets
+
+
+def run_one(cfg, test, app_name, user, mode, tags=False):
+    """Runs a single test. Returns a result dict (never raises).
+    tags=True in proxy mode also scans the prompt and the model's reply with the Detection API, so the result
+    carries detector tags (two extra events in Insights)."""
     app = cfg["state"]["apps"].get(app_name) or {}
     text = test["text"].replace("{COMPETITOR}", cfg.get("competitor", "Palo Alto")).replace("{_}", "")
     res = {"ts": time.strftime("%H:%M:%S"), "id": test.get("id", "custom"), "name": test.get("name", "Custom prompt"),
@@ -415,6 +422,7 @@ def run_one(cfg, test, app_name, user, mode):
                 raise KitError("This app has no proxy key (no LLM provider key was added in setup).")
             if res["direction"] == "OUT":
                 raise KitError("Model-reply tests only run in detection mode.")
+            dkey = kc_get(f"{app_name}:detections") if tags else None
             try:
                 reply, ms = proxy_chat(app["provider_type"], key, app["model"], text, user=user)
                 res.update(status="OK", action="ALLOW", severity="", detectors=[], latency_ms=ms, reply=reply[:600],
@@ -424,13 +432,24 @@ def run_one(cfg, test, app_name, user, mode):
                     res.update(status="OK", action="BLOCK", severity="", detectors=[], missed=[], reply=str(e)[:600])
                 else:
                     raise
+            if dkey:
+                try:
+                    d, _ = das_scan(dkey, text, "IN", user)
+                    hits, _ = _hits(d)
+                    res.update(detectors=hits, severity=d.get("severity", ""), scan_action=d.get("action"),
+                               missed=[x for x in res["expect"] if x not in hits])
+                    if res["action"] == "ALLOW" and res.get("reply"):
+                        o, _ = das_scan(dkey, res["reply"], "OUT", user)
+                        res["resp_detectors"], _ = _hits(o)
+                        res["resp_action"] = o.get("action")
+                except Exception as e:
+                    res["tag_error"] = str(e)[:200]
         else:
             key = kc_get(f"{app_name}:detections")
             if not key:
                 raise KitError("This app has no detection key. Run `./aiguard-kit setup`.")
             d, ms = das_scan(key, text, res["direction"], user)
-            dets = d.get("detectorResponses") or {}
-            hits = [k for k, v in dets.items() if isinstance(v, dict) and v.get("triggered")]
+            hits, dets = _hits(d)
             res.update(status="OK", action=d.get("action", ""), severity=d.get("severity", ""), detectors=hits,
                        latency_ms=ms, transaction_id=d.get("transactionId"),
                        detector_errors=d.get("detectorErrorCount") or 0,
@@ -465,50 +484,149 @@ def plan(cfg, tests, mode, apps=None, users=None, rounds=1):
 
 
 # ---------------------------------------------------------------- policy switch
-def apply_mode(body, mode):
-    for side, names in BLOCKABLE.items():
+REGULATED_PII = {"CREDIT_CARD", "US_SSN", "US_BANK_NUMBER", "IBAN_CODE", "SWIFT_CODE", "US_PASSPORT", "US_ITIN"}
+NEVER_BLOCK = {"language", "prompt_tags", "response_tags", "refusal", "url_reachability"}  # classification only
+ATTACKS = {"inputDetectorPolicies": {"prompt_injection", "invisible_text", "toxicity"},
+           "outputDetectorPolicies": {"malicious_url", "toxicity"}}
+DATA = {"inputDetectorPolicies": {"secrets", "pii"}, "outputDetectorPolicies": {"secrets", "pii"}}
+PROFILES = {
+    "monitor": "Monitor: detect and log everything, block nothing",
+    "attacks": "Block attacks: prompt injection, hidden text, toxicity, malicious URLs",
+    "data": "Block attacks + data leakage: also secrets and regulated PII (cards, SSNs, bank, passport, ITIN)",
+    "everything": "Block everything risky: every detector except topic and language classification",
+}
+ALIASES = {"detect": "monitor", "block": "attacks", "enforce": "attacks"}
+SIDES = ("inputDetectorPolicies", "outputDetectorPolicies")
+SIDE_NAME = {"inputDetectorPolicies": "prompt", "outputDetectorPolicies": "response"}
+
+
+def _set_action(det, action, only=None):
+    """Sets a detector's action; for list-style detectors (PII entities, secret types, tags…) every enabled
+    item follows, or only the item types in `only` (others go back to DETECT)."""
+    cfg = det.get("configuration")
+    if not isinstance(cfg, dict):
+        return
+    if "action" in cfg:
+        cfg["action"] = action
+    for key in ("entities", "secretTypes", "languages", "tags", "competitors"):
+        for item in cfg.get(key, []) or []:
+            if item.get("action") == "DISABLE":
+                continue
+            kind = item.get("entityType") or item.get("secretType")
+            item["action"] = action if only is None or kind in only else "DETECT"
+    if "defaultAction" in cfg:  # the API rejects defaultAction BLOCK (tested); blocking is set per item
+        cfg["defaultAction"] = "DETECT"
+    det["severity"] = "HIGH" if action == "BLOCK" else "LOW"
+
+
+def profile_blocks(profile):
+    """{side: {detector: entity-filter or None}} that a named profile blocks."""
+    out = {side: {} for side in SIDES}
+    if profile in ("attacks", "data"):
+        for side in SIDES:
+            out[side].update({d: None for d in ATTACKS[side]})
+    if profile == "data":
+        for side in SIDES:
+            out[side].update({"secrets": None, "pii": REGULATED_PII})
+    if profile == "everything":
+        names = template_detectors()
+        for side in SIDES:
+            out[side].update({d: None for d in names[side] if d not in NEVER_BLOCK})
+    return out
+
+
+def apply_profile(body, target):
+    """target: a profile name (or alias) or {"prompt": [detectors], "response": [detectors]} for custom."""
+    if isinstance(target, dict):
+        blocks = {side: {d: (REGULATED_PII if d == "pii" and target.get("pii_regulated_only", True) else None)
+                         for d in target.get(SIDE_NAME[side], []) if d not in NEVER_BLOCK} for side in SIDES}
+    else:
+        blocks = profile_blocks(ALIASES.get(target, target))
+    for side in SIDES:
         for d in body.get(side, []):
-            if d.get("detector") in names and isinstance(d.get("configuration"), dict):
-                d["configuration"]["action"] = "BLOCK" if mode == "block" else "DETECT"
-                d["severity"] = "HIGH" if mode == "block" else "LOW"
+            if not d.get("enabled"):
+                continue
+            name = d.get("detector")
+            if name in blocks[side]:
+                _set_action(d, "BLOCK", blocks[side][name])
+            else:
+                _set_action(d, "DETECT")
     return body
 
 
-def current_mode(body):
-    return "block" if any(d.get("detector") in names and (d.get("configuration") or {}).get("action") == "BLOCK"
-                          for side, names in BLOCKABLE.items() for d in body.get(side, [])) else "detect"
+def apply_mode(body, mode):  # kept for setup: "detect"/"block" or a profile name
+    return apply_profile(body, mode)
+
+
+def blocked_map(body):
+    """{"prompt": [...], "response": [...]} detectors with anything set to BLOCK."""
+    def blocking(d):
+        cfg = d.get("configuration") or {}
+        return cfg.get("action") == "BLOCK" or any(
+            i.get("action") == "BLOCK" for k in ("entities", "secretTypes", "languages", "tags", "competitors")
+            for i in cfg.get(k, []) or [])
+    return {SIDE_NAME[side]: sorted(d["detector"] for d in body.get(side, []) if d.get("enabled") and blocking(d))
+            for side in SIDES}
+
+
+def current_profile(body):
+    have = blocked_map(body)
+    for name in PROFILES:
+        want = profile_blocks(name)
+        if all(sorted(want[side]) == have[SIDE_NAME[side]] for side in SIDES):
+            return name
+    return "custom"
+
+
+def current_mode(body):  # "block" when anything blocks
+    return "block" if any(blocked_map(body).values()) else "detect"
 
 
 def policy_mode(t, cfg, target=None):
-    """Returns (mode, policy name, switchable). Switches the kit's own policy when target is given."""
+    """Returns (profile, policy name, switchable). Applies target (profile name, alias or custom dict) when given."""
     pid = cfg.get("state", {}).get("policy_id")
     if not pid:
         raise KitError("No demo policy yet. Run ./aiguard-kit setup")
     body = t.call("policies", "get_policy", pid)
     name = body.get("name", "")
     switchable = name.startswith(PREFIX + ":")
-    mode = current_mode(body)
-    if target and target != mode:
+    profile = current_profile(body)
+    if isinstance(target, str):
+        target = ALIASES.get(target, target)
+        if target not in PROFILES:
+            raise KitError(f"Unknown policy profile '{target}'. Use one of: {', '.join(PROFILES)}.")
+    if target and target != profile:
         if not switchable:
             raise KitError(f"'{name}' isn't a kit policy, so the kit won't change it. Switch it in the console.")
         for k in ("id", "createTimeMillis", "updateTimeMillis"):
             body.pop(k, None)
-        t.call("policies", "update_policy", pid, **apply_mode(body, target))
-        cfg["state"]["policy_mode"] = mode = target
+        t.call("policies", "update_policy", pid, **apply_profile(body, target))
+        profile = current_profile(body)
+        cfg["state"]["policy_mode"] = profile
         save_cfg(cfg)
-    return mode, name, switchable
+    return profile, name, switchable
+
+
+def policy_details(t, cfg):
+    """For the console: profile, what blocks, and every detector on each side."""
+    profile, name, sw = policy_mode(t, cfg)
+    body = t.call("policies", "get_policy", cfg["state"]["policy_id"])
+    dets = {SIDE_NAME[side]: [d["detector"] for d in body.get(side, []) if d.get("enabled")
+                              and d["detector"] not in NEVER_BLOCK] for side in SIDES}
+    return {"mode": profile, "name": name, "switchable": sw, "blocked": blocked_map(body), "detectors": dets,
+            "profiles": PROFILES, "regulated_pii": sorted(REGULATED_PII)}
 
 
 def cmd_policy():
     cfg = load_cfg()
-    target = next((a for a in ARGS if a in ("detect", "block")), None)
+    target = next((a for a in ARGS if a in PROFILES or a in ALIASES), None)
     t = connect(cfg)
-    mode, name, switchable = policy_mode(t, cfg, target)
-    (ok if switchable else warn)(f"'{name}' is in {'BLOCK (enforce)' if mode == 'block' else 'DETECT (monitor)'} mode")
+    profile, name, switchable = policy_mode(t, cfg, target)
+    (ok if switchable else warn)(f"'{name}': {PROFILES.get(profile, 'custom: a hand-picked set of detectors block')}")
     if target:
         info("Allow about 30 seconds before the change shows in scans.")
     elif switchable:
-        info("Switch with: ./aiguard-kit policy block   or   ./aiguard-kit policy detect")
+        info("Switch with: ./aiguard-kit policy monitor | attacks | data | everything")
 
 
 # ---------------------------------------------------------------- updates
@@ -833,7 +951,8 @@ def describe_plan(facts, ans):
         lines.append(f"Delete {len(facts['existing'])} earlier kit objects first")
     if ans.get("policy") == "create":
         lines.append(("Use" if facts["kit_policy"] else "Create") + f" policy '{PREFIX}: Test all' "
-                     f"({'Enforce' if ans.get('mode') == 'block' else 'Monitor'}; competitor '{ans.get('competitor')}')")
+                     f"({PROFILES[ALIASES.get(ans.get('mode', 'monitor'), ans.get('mode', 'monitor'))].split(':')[0]}; "
+                     f"competitor '{ans.get('competitor')}')")
     else:
         name = next((p["name"] for p in facts["policies"] if p["id"] == ans.get("policy")), ans.get("policy"))
         lines.append(f"Use existing policy '{name}' unchanged")
@@ -853,7 +972,7 @@ def describe_plan(facts, ans):
 
 
 def default_answers(facts):
-    return {"existing": "keep", "policy": "create", "mode": "detect", "competitor": facts["competitor"],
+    return {"existing": "keep", "policy": "create", "mode": "monitor", "competitor": facts["competitor"],
             "providers": {k: {"key": None, "model": v["model"], "cred_id": v["creds"][0]["id"] if v["creds"] else None}
                           for k, v in facts["providers"].items()}}
 
@@ -876,16 +995,16 @@ def setup_apply(t, cfg, ans, log):
         if mypol:
             st["policy_id"] = mypol["id"]
             log("ok", f"Using '{pname}'")
-            mode = ans.get("mode", "detect")
+            mode = ALIASES.get(ans.get("mode", "monitor"), ans.get("mode", "monitor"))
             if policy_mode(t, cfg)[0] != mode:
                 policy_mode(t, cfg, mode)
-                log("ok", f"Policy set to {'Enforce' if mode == 'block' else 'Monitor'}")
+                log("ok", f"Policy set to {PROFILES[mode].split(':')[0]}")
         else:
             body = json.loads((HERE / "policy_template.json").read_text().replace("{COMPETITOR}", cfg["competitor"]))
             apply_mode(body, ans.get("mode", "detect"))
             body["name"] = pname
             p = t.call("policies", "add_policy", **body)
-            st["policy_id"], st["policy_mode"] = p["id"], ans.get("mode", "detect")
+            st["policy_id"], st["policy_mode"] = p["id"], ALIASES.get(ans.get("mode", "monitor"), ans.get("mode", "monitor"))
             log("ok", f"Created '{pname}' with {len(body['inputDetectorPolicies'])} prompt and "
                       f"{len(body['outputDetectorPolicies'])} response detectors")
     else:
@@ -1105,9 +1224,9 @@ def cmd_setup():
         i = menu("Which policy should the demo apps use?", opts)
         ans["policy"] = "create" if i == 0 else facts["policies"][i - 1]["id"]
         if i == 0:
-            ans["mode"] = ["detect", "block"][menu("Start in:", ["Monitor - detect and log everything",
-                                                                 "Enforce - block prompt injection, invisible text, "
-                                                                 "toxicity and malicious URLs"])]
+            names = list(PROFILES)
+            ans["mode"] = names[menu("Start with:", [PROFILES[n] for n in names])]
+            info("You can change this any time from the console's Policy menu or ./aiguard-kit policy.")
             ans["competitor"] = ask("Competitor name for the competition detector", ans["competitor"])
 
     def ask_providers():
@@ -1237,7 +1356,7 @@ def cmd_status():
     if pol:
         try:
             mode, _, _ = policy_mode(t, cfg)
-            info(f"Policy mode: {'BLOCK (enforce)' if mode == 'block' else 'DETECT (monitor)'}")
+            info(f"Policy: {PROFILES.get(mode, 'custom')}")
         except Exception as e:
             vlog(str(e))
     behind = update_check()
@@ -1270,7 +1389,7 @@ def cmd_run():
     head(f"Running {len(jobs)} tests in {mode} mode")
     totals, seen = {}, set()
     for n, (t, app, user) in enumerate(jobs, 1):
-        r = run_one(cfg, t, app, user, mode)
+        r = run_one(cfg, t, app, user, mode, tags="--tags" in ARGS)
         totals[r["status"]] = totals.get(r["status"], 0) + 1
         seen.update(r["detectors"])
         tag = f"{C['g']}OK{C['x']}  " if r["status"] == "OK" else f"{C['r']}ERR{C['x']} "
@@ -1365,8 +1484,7 @@ def cmd_gui():
             if path == "/api/policy":
                 c = load_cfg()
                 try:
-                    mode, name, sw = policy_mode(tenant(c), c)
-                    return self._send(200, {"mode": mode, "name": name, "switchable": sw})
+                    return self._send(200, policy_details(tenant(c), c))
                 except Exception as e:
                     return self._send(200, {"mode": None, "error": str(e), "fix": hint(e)})
             if path == "/api/state":
@@ -1485,7 +1603,8 @@ def cmd_gui():
                     for t, app, user in jobs:
                         if JOBS[jid]["stop"]:
                             break
-                        JOBS[jid]["results"].append(run_one(c, t, app, user, body.get("mode", "detect")))
+                        JOBS[jid]["results"].append(run_one(c, t, app, user, body.get("mode", "detect"),
+                                                            tags=bool(body.get("tags"))))
                         time.sleep(0.15)
                     JOBS[jid]["done"] = True
 
@@ -1493,8 +1612,8 @@ def cmd_gui():
                 return self._send(200, {"id": jid, "total": len(jobs)})
             if path == "/api/policy":
                 try:
-                    mode, name, sw = policy_mode(tenant(c), c, body.get("mode"))
-                    return self._send(200, {"mode": mode, "name": name, "switchable": sw})
+                    policy_mode(tenant(c), c, body.get("custom") or body.get("mode"))
+                    return self._send(200, policy_details(tenant(c), c))
                 except Exception as e:
                     return self._send(400, {"error": str(e), "fix": hint(e)})
             if path == "/api/stop":
@@ -1509,7 +1628,7 @@ def cmd_gui():
                 t = {"text": text, "direction": body.get("direction", "IN"), "id": "custom", "name": "Live prompt",
                      "category": "Live", "group": "Live", "expect": []}
                 return self._send(200, run_one(c, t, app, body.get("user") or lib["users"][0],
-                                               body.get("mode", "detect")))
+                                               body.get("mode", "detect"), tags=bool(body.get("tags"))))
             self._send(404, {"error": "not found"})
 
     srv = None

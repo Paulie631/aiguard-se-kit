@@ -127,20 +127,66 @@ def test_setup_is_idempotent_and_teardown_cleans(env):
     assert "SE-Demo: OpenAI App:detections" not in kit._kc
 
 
-def test_policy_switch_only_touches_kit_policy(env):
+def test_policy_profiles_and_custom(env):
     kit, t = env("setup", "--yes")
     kit.cmd_setup()
     cfg = kit.load_cfg()
-    assert kit.policy_mode(t, cfg)[0] == "detect"
-    mode, name, sw = kit.policy_mode(t, cfg, "block")
-    pol = next(p for p in t.db["policies"] if p["name"] == "SE-Demo: Test all")
-    pi = next(d for d in pol["inputDetectorPolicies"] if d["detector"] == "prompt_injection")
-    assert mode == "block" and sw and pi["configuration"]["action"] == "BLOCK"
-    assert "id" not in t.calls[-1][3]  # body sent without id/timestamps
-    assert kit.policy_mode(t, cfg, "detect")[0] == "detect"
+    pol = lambda: next(p for p in t.db["policies"] if p["name"] == "SE-Demo: Test all")  # noqa: E731
+    det = lambda side, name: next(d for d in pol()[side] if d["detector"] == name)  # noqa: E731
+    assert kit.policy_mode(t, cfg)[0] == "monitor"
+    for prof in ("attacks", "data", "everything", "monitor"):
+        assert kit.policy_mode(t, cfg, prof)[0] == prof          # each profile round-trips
+    assert "id" not in t.calls[-1][3]                            # body sent without id/timestamps
+    kit.policy_mode(t, cfg, "block")                             # alias
+    assert kit.policy_mode(t, cfg)[0] == "attacks"
+    assert det("inputDetectorPolicies", "secrets")["configuration"]["defaultAction"] == "DETECT"
+    kit.policy_mode(t, cfg, "data")
+    pii = {e["entityType"]: e["action"] for e in det("inputDetectorPolicies", "pii")["configuration"]["entities"]}
+    assert pii["US_SSN"] == "BLOCK" and pii["CREDIT_CARD"] == "BLOCK" and pii["EMAIL_ADDRESS"] == "DETECT"
+    assert pii["CRYPTO"] == "DISABLE"                            # disabled entities stay disabled
+    assert {s["secretType"]: s["action"] for s in det("inputDetectorPolicies", "secrets")["configuration"]["secretTypes"]}["GITHUB_TOKEN"] == "BLOCK"
+    assert det("inputDetectorPolicies", "secrets")["configuration"]["defaultAction"] == "DETECT"
+    kit.policy_mode(t, cfg, "everything")
+    assert det("inputDetectorPolicies", "competition")["configuration"]["competitors"][0]["action"] == "BLOCK"
+    assert all(t_["action"] == "DETECT" for t_ in det("inputDetectorPolicies", "prompt_tags")["configuration"]["tags"])
+    assert all(x["action"] == "DETECT" for x in det("inputDetectorPolicies", "language")["configuration"]["languages"])
+    # the AI Guard API rejects defaultAction BLOCK: never send it
+    assert all((d.get("configuration") or {}).get("defaultAction") != "BLOCK" for side in kit.SIDES for d in pol()[side])
+    prof, _, _ = kit.policy_mode(t, cfg, {"prompt": ["code", "prompt_tags"], "response": ["malicious_url"]})
+    assert prof == "custom"
+    assert kit.blocked_map(pol()) == {"prompt": ["code"], "response": ["malicious_url"]}
+    d = kit.policy_details(t, cfg)
+    assert d["mode"] == "custom" and "prompt_tags" not in d["detectors"]["prompt"]
     cfg["state"]["policy_id"] = 1  # someone else's policy
     with pytest.raises(kit.KitError):
-        kit.policy_mode(t, cfg, "block")
+        kit.policy_mode(t, cfg, "attacks")
+    with pytest.raises(kit.KitError):
+        kit.policy_mode(t, kit.load_cfg(), "nonsense")
+
+
+def test_proxy_run_with_tags(env):
+    kit, t = env("setup", "--yes")
+    kit.save_credentials(kit.load_cfg(), "acme", "cid", "sec")
+    cfg = kit.load_cfg()
+    ans = kit.default_answers(kit.tenant_facts(t, cfg))
+    ans["providers"]["openai"]["key"] = "sk-test"
+    kit.setup_apply(t, cfg, ans, lambda *a: None)
+    kit.proxy_chat = lambda *a, **k: ("Here is a record: SSN 123-45-6789", 10)
+    scans = []
+    kit.das_scan = lambda key, text, direction="IN", user=None, timeout=60: (scans.append(direction) or {
+        "action": "ALLOW", "detectorResponses": {"pii": {"triggered": True}, "secrets": {"triggered": direction == "IN"}}}, 5)
+    test = {"id": "x", "text": "make a record", "direction": "IN", "expect": ["secrets"]}
+    r = kit.run_one(cfg, test, "SE-Demo: OpenAI App", "a@b.c", "proxy", tags=True)
+    assert r["status"] == "OK" and r["reply"].startswith("Here") and r["detectors"] == ["pii", "secrets"]
+    assert r["resp_detectors"] == ["pii"] and scans == ["IN", "OUT"] and r["missed"] == []
+    def blocked(*a, **k):
+        raise kit.KitError('HTTP 403: {"error":"blocked by policy"}')
+    kit.proxy_chat = blocked
+    scans.clear()
+    r = kit.run_one(cfg, test, "SE-Demo: OpenAI App", "a@b.c", "proxy", tags=True)
+    assert r["action"] == "BLOCK" and scans == ["IN"] and "resp_detectors" not in r
+    r = kit.run_one(cfg, test, "SE-Demo: OpenAI App", "a@b.c", "proxy")
+    assert r["detectors"] == [] and r["action"] == "BLOCK"
 
 
 def test_run_substitutes_placeholders(env):
@@ -280,7 +326,7 @@ def test_setup_apply_with_provider_key_creates_proxy_path(env):
     pc = t.db["llm_provider_credentials"][0]
     assert pc["apiCredentials"] == {"type": "BEARER", "token": "sk-test"}
     assert any(r.get("matchCriteria", {}).get("type") == "APPLICATION" for r in t.db["policy_match_rules"])
-    assert kit.policy_mode(t, cfg)[0] == "block"
+    assert kit.policy_mode(t, cfg)[0] == "attacks"
     assert "sk-test" not in kit.CFG_FILE.read_text()
 
 

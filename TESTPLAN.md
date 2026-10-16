@@ -41,6 +41,12 @@ The runbook marks some steps as not yet confirmed in a real tenant. Settle each 
 - [ ] Detection API host names for clouds other than us1
 - [ ] What the AI Guard **proxy** returns when it blocks (HTTP status and body). The console treats an HTTP 4xx whose body mentions block, policy, guard or violation as a block. If the proxy instead returns 200 with a replacement message, the guided demo shows that message as a normal reply and the detector tags show BLOCK. Run step 5 of the guided demo with **Send to the model** on and record what you see.
 
+## Policy profiles
+
+- [ ] Switch to each profile from the console header and confirm in the AI Security console that the kit policy's actions match the README table.
+- [ ] Run the guided storyline **Blocking, step by step** with Send to the model on and off. Each step's outcome should change as its talk track says.
+- [ ] Custom: block only `code` for prompts. A Python snippet should be blocked and everything else allowed.
+
 ## Pilot
 
 - [ ] Two or three SEs on different setups (Mac on Zscaler Client Connector, Windows, a personal network) run the Setup tab cold, using only the README.

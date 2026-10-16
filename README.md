@@ -27,7 +27,17 @@ Windows: install uv with `powershell -ExecutionPolicy ByPass -c "irm https://ast
 | **Guided demo** | Step-by-step storylines with a talk track: *AI Guard in 8 steps* and *Data protection (3 minutes)*. Use ← → to move and Enter to run. By default each step is a Detection API scan (no model call). Turn on **Send to the model** to send prompts to OpenAI or Anthropic through the AI Guard proxy and show the real reply, or AI Guard's block message in Enforce. **Detector tags** adds a Detection API scan of the prompt and of the model's reply, so you see which detectors fired (this logs extra events). Steps that switch the policy wait about 30 seconds for it to apply. Hide the talk track when sharing your screen. |
 | **Test packs** | Healthcare, Financial services and Legal packs, plus **CSV import** of a customer's own prompts for a proof of concept. Imported packs stay on your machine. |
 
-The **Policy** switch in the header moves the kit's demo policy between **Monitor** (detect and log) and **Enforce** (block prompt injection, invisible text, toxicity and malicious URLs). It only ever changes the kit's own policy.
+The **Policy** menu in the header sets what the kit's demo policy blocks. It only ever changes the kit's own policy, and changes take about 30 seconds to apply.
+
+| Profile | Blocks | Still detected and logged |
+|---|---|---|
+| Monitor | Nothing | Everything |
+| Block attacks | Prompt injection, hidden (invisible) text, toxicity; malicious URLs and toxicity in responses | Secrets, PII, everything else |
+| Block attacks + data leakage | The above, plus secrets and **regulated** PII (cards, SSNs, bank numbers, IBAN/SWIFT, passport, ITIN) in prompts and responses | Email, phone, IP, personal details, topics |
+| Block everything risky | Every risk detector, including code, competitor talk, brand risk, legal and financial advice | Topic and language classification |
+| Custom… | Your choice of Detect or Block for each detector, separately for prompts and responses | The rest |
+
+For a granular demo, use the guided storyline **Blocking, step by step**. It walks through each profile with a prompt that changes outcome at that level.
 
 **Report** builds a one-page summary of the session: totals, detections by type and scenario, and examples. Enter the customer's name, then use *Print / save as PDF*.
 
@@ -80,7 +90,7 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ./aiguard-kit run                        everything, detection mode
 ./aiguard-kit run --preset=attacks       everything leakage attacks rai output topics pack-healthcare …
 ./aiguard-kit run --mode=proxy --rounds=2
-./aiguard-kit policy [detect|block]      show or switch Monitor / Enforce
+./aiguard-kit policy [monitor|attacks|data|everything]   show or switch what blocks
 ./aiguard-kit schedule install [--every 60] [--count 12]    also: schedule status, schedule remove
 ./aiguard-kit status                     login, policy, keys, Detection API, kit updates
 ./aiguard-kit teardown                   deletes every SE-Demo object and the local keys (--force: no prompt)
@@ -111,7 +121,7 @@ Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 | Prompt Classifications empty | The policy needs `prompt_tags` (the kit's policy has it). Wait 15 minutes. |
 | Users tab empty | Only Detection API traffic (with a user) or real signed-in Client Connector traffic fills it. Proxy traffic doesn't. |
 | Policy switch says "not a kit policy" | Setup reused an existing policy. Switch it in the console, or rerun setup and create the kit's policy. |
-| Enforce step still shows ALLOW | The change takes about 30 seconds to apply. Run the step again. |
+| A blocking step still shows ALLOW | The change takes about 30 seconds to apply; run the step again. Also check the profile covers that detector: secrets and PII only block in *Block attacks + data leakage* or higher. |
 | Scheduled runs don't appear | `./aiguard-kit schedule status`, then check `~/.aiguard-se-kit/trickle.log`. On a Mac, allow keychain access. |
 | Proxy `402` / `insufficient_quota` | No credit left at the provider. Top it up or use detection mode. |
 

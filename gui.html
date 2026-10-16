@@ -60,7 +60,16 @@ button:disabled{opacity:.5;cursor:default}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{border:0;border-radius:0;padding:6px 12px}
 .seg button.on{background:var(--accent);color:var(--accent-ink)}
-.seg.enf button.on[data-v="block"]{background:var(--bad);border-color:var(--bad);color:#fff}
+.polsel{font-weight:600}
+.polsel.blocking{border-color:var(--bad);color:var(--bad)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:20;padding:60px 16px;overflow:auto}
+.modal.on{display:flex}
+.modal .panel{width:min(760px,100%)}
+.dettable td,.dettable th{padding:7px 10px}
+.dettable .tg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.dettable .tg button{border:0;border-radius:0;padding:3px 10px;font-size:12px}
+.dettable .tg button.on[data-a="DETECT"]{background:var(--ok-bg);color:var(--ok)}
+.dettable .tg button.on[data-a="BLOCK"]{background:var(--bad);color:#fff}
 select,input[type=number],input[type=text],textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
 textarea{width:100%;min-height:78px;resize:vertical}
 .chk{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:13px}
@@ -157,7 +166,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <span class="sp"></span>
   <div class="pol" title="Switches the kit's demo policy. Takes about 30 seconds to apply.">
     <span class="lbl">Policy</span>
-    <div class="seg enf" id="polseg"><button data-v="detect">Monitor</button><button data-v="block">Enforce</button></div>
+    <select id="polsel" class="polsel"><option value="monitor">Monitor (log only)</option><option value="attacks">Block attacks</option><option value="data">Block attacks + data leakage</option><option value="everything">Block everything risky</option><option value="custom">Custom…</option></select>
     <span class="state" id="polstate">checking…</span>
   </div>
   <a id="console" target="_blank" rel="noopener">Insights ↗</a>
@@ -206,6 +215,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
               <button data-v="detect" class="on" title="Scans with the Detection API. Free; fills every dashboard including Users.">Detection API</button>
               <button data-v="proxy" title="Real LLM calls through the AI Guard proxy. Uses provider credit; fills token usage.">LLM proxy</button>
             </div></div>
+          <div class="field" id="rtagsf" style="display:none"><span class="lbl">Proxy options</span><label class="chk" title="Also scans each prompt and the model's reply with the Detection API so detector tags show (extra events in Insights)."><input type="checkbox" id="rtags" checked>Detector tags</label></div>
           <div class="field"><span class="lbl">Rounds</span><input type="number" id="rounds" min="1" max="20" value="1" style="width:70px"></div>
           <div class="field"><span class="lbl">&nbsp;</span>
             <div class="row" style="gap:8px"><button class="primary" id="run">Run selected</button><button id="stop" disabled>Stop</button></div></div>
@@ -297,6 +307,15 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 </div>
 </div>
 
+<div class="modal" id="polmodal"><div class="panel">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">Custom policy: choose what blocks</h2><button id="pmclose">Close</button></div>
+  <p class="muted" style="font-size:13px;margin:8px 0 12px">Everything else detects and logs. Topic and language classifiers always stay on detect. Changes take about 30 seconds to apply.</p>
+  <div class="row" style="gap:8px;margin-bottom:10px"><span class="lbl">Start from</span><button data-preset="monitor">Monitor</button><button data-preset="attacks">Attacks</button><button data-preset="data">Attacks + data</button><button data-preset="everything">Everything</button></div>
+  <div class="tablewrap" style="max-height:55vh"><table class="dettable"><thead><tr><th>Detector</th><th>Dashboard panel</th><th>Prompt</th><th>Response</th></tr></thead><tbody id="pmrows"></tbody></table></div>
+  <label class="chk" style="margin-top:12px"><input type="checkbox" id="pmreg" checked>PII: block only regulated types (cards, SSNs, bank, IBAN/SWIFT, passport, ITIN); email, phone and IP stay on detect</label>
+  <div class="row" style="gap:10px;margin-top:14px"><button class="primary" id="pmapply">Apply</button><span class="muted" id="pmmsg" style="font-size:13px"></span></div>
+</div></div>
+
 <script>
 const TOKEN="__KIT_TOKEN__";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -324,7 +343,7 @@ async function loadState(){
 async function init(){
   let st;try{st=await loadState()}catch(e){$("#tenant").textContent="error: "+e.message;return}
   drawPresets();refreshRunner();
-  seg("mode",v=>{S.mode=v;$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
+  seg("mode",v=>{S.mode=v;$("#rtagsf").style.display=v=="proxy"?"":"none";$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
     if(v=="proxy"&&!S.apps.some(a=>a.proxy))note("No app has a proxy key. Add an OpenAI or Anthropic key in the Setup tab to use proxy mode.");else note("")});
   seg("ldir");
   $("#presets .preset").click();
@@ -340,21 +359,48 @@ function refreshRunner(){
 }
 
 /* ---------- policy switch ---------- */
+const PLABEL={monitor:"Monitor",attacks:"Block attacks",data:"Block attacks + data",everything:"Block everything",custom:"Custom"};
+const normPol=p=>({detect:"monitor",block:"attacks",enforce:"attacks"}[p]||p);
 async function loadPolicy(){
-  try{const p=await api("/api/policy");if(!p.mode){$("#polstate").textContent="unavailable";$("#polstate").title=p.error||"";return}
-    S.policy=p.mode;markPolicy();if(!p.switchable){$$("#polseg button").forEach(b=>b.disabled=true);$("#polstate").textContent="not a kit policy"}}
+  try{const p=await api("/api/policy");if(!p.mode){$("#polstate").textContent="unavailable";$("#polstate").title=p.error||"";$("#polsel").disabled=true;return}
+    S.pol=p;S.policy=p.mode;markPolicy();$("#polsel").disabled=!p.switchable;if(!p.switchable)$("#polstate").textContent="not a kit policy"}
   catch(e){$("#polstate").textContent="unavailable"}
 }
-function markPolicy(){$$("#polseg button").forEach(b=>b.classList.toggle("on",b.dataset.v==S.policy));$("#polstate").textContent=S.policy=="block"?"enforcing":"monitoring"}
-async function setPolicy(mode,wait){
-  if(mode==S.policy)return true;
+function markPolicy(){
+  $("#polsel").value=S.policy||"monitor";$("#polsel").classList.toggle("blocking",!!S.policy&&S.policy!="monitor");
+  const b=S.pol?.blocked;$("#polstate").textContent=S.policy=="monitor"?"logging only":b?`blocking ${new Set([...b.prompt,...b.response]).size} detector${new Set([...b.prompt,...b.response]).size==1?"":"s"}`:"";
+  $("#polstate").title=b?`Prompt: ${b.prompt.join(", ")||"none"}\nResponse: ${b.response.join(", ")||"none"}`:"";
+}
+async function setPolicy(target){
+  const body=typeof target=="string"?{mode:normPol(target)}:{custom:target};
+  if(typeof target=="string"&&normPol(target)==S.policy)return true;
   $("#polstate").textContent="switching…";
-  try{const p=await api("/api/policy",{mode});S.policy=p.mode;markPolicy();
-    if(wait){for(let i=wait;i>0;i--){$("#polstate").textContent=`applies in ${i}s`;if(typeof wait=="number")await sleep(1000)}markPolicy()}
-    return true}
+  try{const p=await api("/api/policy",body);S.pol=p;S.policy=p.mode;markPolicy();S.polChanged=Date.now();return true}
   catch(e){markPolicy();note(esc(e.message));return false}
 }
-$$("#polseg button").forEach(b=>b.onclick=()=>setPolicy(b.dataset.v));
+$("#polsel").onchange=e=>{if(e.target.value=="custom"){openCustom();markPolicy();return}setPolicy(e.target.value)};
+let PM=null;
+function openCustom(preset){
+  if(!S.pol?.detectors)return;
+  const want=preset?presetMap(preset):{prompt:new Set(S.pol.blocked.prompt),response:new Set(S.pol.blocked.response)};PM=want;
+  const all=[...new Set([...S.pol.detectors.prompt,...S.pol.detectors.response])];
+  const tg=(side,d)=>S.pol.detectors[side].includes(d)?`<span class="tg" data-side="${side}" data-d="${d}"><button data-a="DETECT" class="${want[side].has(d)?"":"on"}">Detect</button><button data-a="BLOCK" class="${want[side].has(d)?"on":""}">Block</button></span>`:'<span class="muted">–</span>';
+  $("#pmrows").innerHTML=all.map(d=>`<tr><td><code>${esc(d)}</code></td><td class="muted">${esc(S.panels[d]||"")}</td><td>${tg("prompt",d)}</td><td>${tg("response",d)}</td></tr>`).join("");
+  $$("#pmrows .tg button").forEach(b=>b.onclick=()=>{const t=b.parentElement,side=t.dataset.side,d=t.dataset.d;
+    t.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));b.dataset.a=="BLOCK"?PM[side].add(d):PM[side].delete(d)});
+  $("#pmmsg").textContent="";$("#polmodal").classList.add("on");
+}
+function presetMap(p){const A={prompt:["prompt_injection","invisible_text","toxicity"],response:["malicious_url","toxicity"]};
+  const m={prompt:new Set(),response:new Set()};
+  if(p=="attacks"||p=="data"){A.prompt.forEach(x=>m.prompt.add(x));A.response.forEach(x=>m.response.add(x))}
+  if(p=="data")["secrets","pii"].forEach(x=>{m.prompt.add(x);m.response.add(x)});
+  if(p=="everything"){S.pol.detectors.prompt.forEach(x=>m.prompt.add(x));S.pol.detectors.response.forEach(x=>m.response.add(x))}
+  return m}
+$$("[data-preset]").forEach(b=>b.onclick=()=>openCustom(b.dataset.preset));
+$("#pmclose").onclick=()=>$("#polmodal").classList.remove("on");
+$("#pmapply").onclick=async()=>{$("#pmmsg").textContent="Applying…";
+  if(await setPolicy({prompt:[...PM.prompt],response:[...PM.response],pii_regulated_only:$("#pmreg").checked})){$("#pmmsg").textContent="Applied. Allow about 30 seconds.";setTimeout(()=>$("#polmodal").classList.remove("on"),900)}
+  else $("#pmmsg").textContent="Couldn't apply; see the message above."};
 
 /* ---------- library ---------- */
 function drawPresets(){
@@ -373,7 +419,7 @@ function drawLib(){
 
 /* ---------- results ---------- */
 function drawCov(){
-  const seen=new Set(S.results.flatMap(r=>r.detectors||[]));
+  const seen=new Set(S.results.flatMap(r=>[...(r.detectors||[]),...(r.resp_detectors||[])]));
   const users=new Set(S.results.filter(r=>r.status=="OK"&&r.mode=="detect").map(r=>r.user));
   const panels={};Object.entries(S.panels).forEach(([d,p])=>{panels[p]=panels[p]||seen.has(d)});
   $("#cov").innerHTML=Object.entries(panels).map(([p,h])=>`<span class="${h?"hit":""}">${esc(p)}</span>`).join("")+
@@ -384,7 +430,10 @@ function drawCov(){
 const chips=(r,gaps)=>(r.detectors||[]).map(d=>`<span class="chip">${esc(d)}</span>`).join("")+(gaps?(r.missed||[]):[]).map(d=>`<span class="chip miss" title="expected but not triggered">${esc(d)}?</span>`).join("")+(r.detector_errors?`<span class="chip miss" title="AI Guard reported detector errors; rerun this test">${r.detector_errors} detector error${r.detector_errors>1?"s":""}</span>`:"");
 function rowHTML(r,i){
   const act=r.status=="ERROR"?"ERROR":(r.action||"");
-  const body=r.mode=="proxy"&&r.status=="OK"&&r.action!="BLOCK"?`<span class="muted">${esc((r.reply||"").slice(0,90))}</span>`:(r.status=="ERROR"?`<span class="muted">${esc(String(r.error).slice(0,120))}</span>`:chips(r,$("#gaps").checked)||'<span class="muted">none</span>');
+  const rc=(r.resp_detectors||[]).map(d=>`<span class="chip">${esc(d)}</span>`).join("");
+  const body=r.status=="ERROR"?`<span class="muted">${esc(String(r.error).slice(0,120))}</span>`
+    :r.mode=="proxy"?`${chips(r,$("#gaps").checked)}<div class="muted" style="font-size:12.5px;margin-top:3px">${r.action=="BLOCK"?"⛔ "+esc(blockMsg(r.reply)):"↩ "+esc((r.reply||"").slice(0,110))}</div>${rc?`<div style="margin-top:3px"><span class="lbl">reply:</span> ${rc}</div>`:""}`
+    :chips(r,$("#gaps").checked)||'<span class="muted">none</span>';
   return `<tr class="r" data-i="${i}"><td class="muted">${r.ts}</td><td>${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.category)}</div></td><td><span class="dir">${r.direction}</span></td><td>${esc((r.user||"").split("@")[0])}</td><td>${esc((r.app||"").split(": ").pop())}</td><td><span class="badge ${act}">${act}</span></td><td>${body}</td><td class="muted" style="text-align:right">${r.latency_ms??""}</td></tr>`;
 }
 function drawRows(){
@@ -404,7 +453,7 @@ $("#run").onclick=async()=>{
   const apps=$$("#apps input:checked").map(i=>i.value),users=$$("#users input:checked").map(i=>i.value);
   if(!apps.length||!users.length)return note("Pick at least one app and one user.");
   note("");
-  try{const j=await api("/api/run",{tests:[...S.sel],mode:S.mode,apps,users,rounds:+$("#rounds").value||1});
+  try{const j=await api("/api/run",{tests:[...S.sel],mode:S.mode,apps,users,rounds:+$("#rounds").value||1,tags:S.mode=="proxy"&&$("#rtags").checked});
     S.job={id:j.id,total:j.total,got:0};$("#run").disabled=true;$("#stop").disabled=false;poll()}
   catch(e){note(esc(e.message))}
 };
@@ -425,12 +474,12 @@ async function poll(){
 async function scanOne(payload){const r=await api("/api/scan",payload);S.results.push(r);drawRows();return r}
 function verdictHTML(r){
   if(r.status=="ERROR")return `<span class="badge ERROR">ERROR</span> ${esc(r.error)}<div class="muted">${esc(r.fix)}</div>`;
-  if(r.mode=="proxy"&&r.action!="BLOCK")return `<span class="badge ALLOW">${esc(r.action)}</span> <span class="muted">${r.latency_ms} ms</span><pre>${esc(r.reply)}</pre>`;
+  if(r.mode=="proxy")return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)}</div><pre>${esc(r.action=="BLOCK"?blockMsg(r.reply):r.reply)}</pre>${(r.resp_detectors||[]).length?`<div><span class="lbl">Reply check:</span> ${r.resp_detectors.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</div>`:""}`;
   return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.severity?"severity "+esc(r.severity)+" · ":""}${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)||'<span class="muted">No detectors triggered</span>'}</div>`;
 }
 $("#scan").onclick=async()=>{
   const out=$("#liveout");out.style.display="block";out.innerHTML='<span class="muted">Scanning…</span>';
-  try{const r=await scanOne({text:$("#live").value,direction:segVal("ldir"),app:$("#lapp").value,user:$("#luser").value,mode:segVal("ldir")=="OUT"?"detect":S.mode});out.innerHTML=verdictHTML(r)}
+  try{const r=await scanOne({text:$("#live").value,direction:segVal("ldir"),app:$("#lapp").value,user:$("#luser").value,mode:segVal("ldir")=="OUT"?"detect":S.mode,tags:S.mode=="proxy"&&$("#rtags").checked});out.innerHTML=verdictHTML(r)}
   catch(e){out.innerHTML=esc(e.message)}
 };
 $("#gaps").onchange=drawRows;
@@ -491,11 +540,11 @@ function drawStories(){
 function drawStage(){
   if(!S.story){$("#stage").innerHTML='<div class="empty">No storylines found in tests.json.</div>';return}
   const steps=S.story.steps;
-  $("#steps").innerHTML=steps.map((s,i)=>`<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${s.policy?`<span class="polchip ${s.policy}">${s.policy=="block"?"Enforce":"Monitor"}</span>`:""}</span></li>`).join("");
+  $("#steps").innerHTML=steps.map((s,i)=>`<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${s.policy?`<span class="polchip ${normPol(s.policy)=="monitor"?"detect":"block"}">${PLABEL[normPol(s.policy)]}</span>`:""}</span></li>`).join("");
   $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()});
   const s=steps[S.step], t=stepTest(s)||{text:"(test not found: "+s.test+")",direction:"IN"};
   const viaProxy=demoProxy()&&t.direction=="IN";
-  $("#stage").innerHTML=`<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${s.policy=="block"?"ENFORCE":"MONITOR"}`:""}</div>
+  $("#stage").innerHTML=`<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${PLABEL[normPol(s.policy)].toUpperCase()}`:""}</div>
     <h3>${esc(s.title)}</h3>
     ${$("#showtalk").checked?`<p class="talk">${esc(s.talk)}</p>`:""}
     <div class="lbl" style="margin-bottom:6px">${t.direction=="OUT"?"Model response being checked":"Prompt"}<span class="muted"> · ${viaProxy?`sent to ${esc(demoAppLabel())} through the AI Guard proxy`:t.direction=="OUT"?"sample reply scanned by the Detection API":"scanned by the Detection API (no model call)"}</span></div>
@@ -513,9 +562,9 @@ async function runStep(){
   const s=S.story.steps[S.step], t=S.lib.tests.find(x=>x.id==s.test), v=$("#sverdict");
   if(!t)return;
   $("#srun").disabled=true;v.style.display="block";
-  if(s.policy&&s.policy!=S.policy){
+  if(s.policy&&normPol(s.policy)!=S.policy){
     if(S.policy===null){v.innerHTML='<span class="muted">The policy switch is unavailable, so this step runs with the current policy.</span>';await sleep(1200)}
-    else{v.innerHTML=`<span class="muted">Switching the policy to ${s.policy=="block"?"Enforce":"Monitor"}…</span>`;
+    else{v.innerHTML=`<span class="muted">Switching the policy to ${PLABEL[normPol(s.policy)]}…</span>`;
       if(!await setPolicy(s.policy)){$("#srun").disabled=false;return}
       for(let i=30;i>0;i--){v.innerHTML=`<span class="muted">Policy is applying… running in ${i}s</span>`;$("#polstate").textContent=`applies in ${i}s`;await sleep(1000)}
       markPolicy()}
@@ -700,9 +749,9 @@ async function wizard(){
       <div id="wprov">${Object.entries(F.providers).map(([p,f])=>provHTML(p,f,A.providers[p])).join("")}</div>
       <div class="row" style="gap:10px;margin-top:20px"><button id="wback">‹ Back</button><button class="primary" id="wnext">Review ›</button></div>`;
     const polopts=()=>{const create=$("#wpol").value=="create";
-      $("#wpolopts").innerHTML=create?`<div class="row" style="gap:16px"><div class="seg" id="wmode"><button data-v="detect" class="${A.mode!="block"?"on":""}">Start in Monitor</button><button data-v="block" class="${A.mode=="block"?"on":""}">Start in Enforce</button></div>
+      $("#wpolopts").innerHTML=create?`<div class="row" style="gap:16px"><label class="lbl">Start with</label><select id="wmode">${Object.entries(PLABEL).filter(([k])=>k!="custom").map(([k,v])=>`<option value="${k}" ${normPol(A.mode)==k?"selected":""}>${v}</option>`).join("")}</select>
         <label class="lbl">Competitor</label><input type="text" id="wcomp" value="${esc(A.competitor)}" style="width:200px"></div>`:'<div class="muted" style="font-size:13px">The kit won\'t change this policy, and the Policy switch stays off. Preflight lists anything it lacks.</div>';
-      if(create)seg("wmode",v=>{A.mode=v})};
+      if(create)$("#wmode").onchange=e=>{A.mode=e.target.value}};
     $("#wpol").value=A.policy=="create"?"create":String(A.policy);$("#wpol").onchange=polopts;polopts();
     const provSync=()=>$$("[data-provuse]").forEach(sel=>{const p=sel.dataset.provuse;$(`#wkey-${p}`).style.display=sel.value=="new"?"":"none";
       $(`#wmodel-${p}`).style.display=sel.value=="skip"?"none":""});
@@ -723,7 +772,7 @@ async function wizard(){
   else if(W.step==3){
     const F=W.facts,A=W.ans,L=[];
     if(F.existing.length&&A.existing=="fresh")L.push(`Delete ${F.existing.length} earlier kit objects first`);
-    L.push(A.policy=="create"?`${F.kit_policy?"Use":"Create"} policy '${F.prefix}: Test all' in ${A.mode=="block"?"Enforce":"Monitor"} mode (competitor '${A.competitor}')`:`Use existing policy '${(F.policies.find(p=>p.id==A.policy)||{}).name}' unchanged`);
+    L.push(A.policy=="create"?`${F.kit_policy?"Use":"Create"} policy '${F.prefix}: Test all' starting in '${PLABEL[normPol(A.mode)]}' (competitor '${A.competitor}')`:`Use existing policy '${(F.policies.find(p=>p.id==A.policy)||{}).name}' unchanged`);
     const proxyOf=(p,f)=>{const P=A.providers[p],c=f.creds.find(c=>c.id==P.cred_id);
       return !f.available?"":c?` and proxy mode (${P.model}) using the existing key '${c.name}'`:P.key?` and proxy mode (${P.model}) with the new key you entered`:""};
     Object.entries(F.providers).forEach(([p,f])=>L.push(`App '${F.prefix}: ${plabel(p)} App' with a detection key${proxyOf(p,f)||", detection mode only"}`));
