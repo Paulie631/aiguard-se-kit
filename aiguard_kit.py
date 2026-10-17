@@ -740,7 +740,9 @@ def fetch_release(force=False):
         except Exception:
             pass
     try:
-        r = requests.get(UPDATE_URL, timeout=15, headers={"Accept": "application/json"})
+        # cache-busting query and headers, so a proxy or CDN can't answer with an old latest.json
+        r = requests.get(UPDATE_URL, params={"t": int(time.time())}, timeout=15,
+                         headers={"Accept": "application/json", "Cache-Control": "no-cache", "Pragma": "no-cache"})
     except requests.RequestException as e:
         raise KitError(f"Couldn't reach GitHub to check for updates: {e}") from e
     if _blocked(r):

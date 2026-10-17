@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- The update check asks proxies and CDNs not to answer from cache, so **Check again** always sees a new release.
+
 ## 1.7.1
 - Fixed: setup failed at "Policy rules" with `applicationCredentialsId … not found` when this computer's saved key
   had been deleted in AI Guard (for example by setup on another computer). Setup now checks every saved key still
