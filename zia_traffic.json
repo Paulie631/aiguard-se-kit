@@ -1,0 +1,131 @@
+{
+  "about": "What the ZIA traffic generator visits. Mainstream public sites only; categories and app names checked against a live ZIA tenant (Oct 2026). 'expect' is what the SE-Demo policy should do for the kit's test user. Threat traffic uses only industry test files (EICAR, Google Safe Browsing test pages); DLP traffic uses generated fake data.",
+  "web": [
+    {"url": "https://www.example.com/", "category": "SE-Demo tenant check", "expect": "block"},
+    {"url": "https://www.bet365.com/", "category": "GAMBLING", "expect": "block"},
+    {"url": "https://www.pokerstars.com/", "category": "GAMBLING", "expect": "block"},
+    {"url": "https://www.draftkings.com/", "category": "GAMBLING", "expect": "block"},
+    {"url": "https://www.torproject.org/", "category": "ANONYMIZER", "expect": "block"},
+    {"url": "https://hide.me/", "category": "ANONYMIZER", "expect": "block"},
+    {"url": "https://www.proxysite.com/", "category": "ANONYMIZER", "expect": "block"},
+    {"url": "https://www.nordvpn.com/", "category": "ANONYMIZER", "expect": "block"},
+    {"url": "https://www.guns.com/", "category": "WEAPONS_AND_BOMBS", "expect": "block"},
+    {"url": "https://www.budsgunshop.com/", "category": "WEAPONS_AND_BOMBS", "expect": "block"},
+    {"url": "https://www.facebook.com/", "category": "SOCIAL_NETWORKING", "expect": "caution"},
+    {"url": "https://www.instagram.com/", "category": "SOCIAL_NETWORKING", "expect": "caution"},
+    {"url": "https://www.linkedin.com/", "category": "SOCIAL_NETWORKING", "expect": "caution"},
+    {"url": "https://www.tiktok.com/", "category": "SOCIAL_NETWORKING", "expect": "caution"},
+    {"url": "https://www.pinterest.com/", "category": "SOCIAL_NETWORKING", "expect": "caution"},
+    {"url": "https://x.com/", "category": "SOCIAL_NETWORKING", "expect": "caution"},
+    {"url": "https://www.youtube.com/", "category": "STREAMING_MEDIA", "expect": "caution"},
+    {"url": "https://www.twitch.tv/", "category": "STREAMING_MEDIA", "expect": "caution"},
+    {"url": "https://store.steampowered.com/", "category": "OTHER_GAMES", "expect": "isolate"},
+    {"url": "https://www.roblox.com/", "category": "OTHER_GAMES", "expect": "isolate"},
+    {"url": "https://www.thepiratebay.org/", "category": "COPYRIGHT_INFRINGEMENT", "expect": "tenant"},
+    {"url": "https://www.utorrent.com/", "category": "P2P_COMMUNICATION", "expect": "tenant"},
+    {"url": "https://www.4chan.org/", "category": "ADULT_THEMES", "expect": "tenant"},
+    {"url": "https://www.match.com/", "category": "SOCIAL_ADULT", "expect": "tenant"},
+    {"url": "https://www.reddit.com/", "category": "DISCUSSION_FORUMS", "expect": "allow"},
+    {"url": "https://www.quora.com/", "category": "DISCUSSION_FORUMS", "expect": "allow"},
+    {"url": "https://www.netflix.com/", "category": "TELEVISION_AND_MOVIES", "expect": "caution"},
+    {"url": "https://open.spotify.com/", "category": "MUSIC", "expect": "allow"},
+    {"url": "https://www.espn.com/", "category": "SPORTS", "expect": "allow"},
+    {"url": "https://www.cnn.com/", "category": "NEWS_AND_MEDIA", "expect": "allow"},
+    {"url": "https://www.bbc.com/", "category": "NEWS_AND_MEDIA", "expect": "allow"},
+    {"url": "https://www.nytimes.com/", "category": "NEWS_AND_MEDIA", "expect": "allow"},
+    {"url": "https://www.amazon.com/", "category": "SPECIALIZED_SHOPPING", "expect": "allow"},
+    {"url": "https://www.ebay.com/", "category": "ONLINE_AUCTIONS", "expect": "allow"},
+    {"url": "https://www.etsy.com/", "category": "SPECIALIZED_SHOPPING", "expect": "allow"},
+    {"url": "https://www.wikipedia.org/", "category": "REFERENCE_SITES", "expect": "allow"},
+    {"url": "https://www.khanacademy.org/", "category": "OTHER_EDUCATION", "expect": "allow"},
+    {"url": "https://www.coursera.org/", "category": "CONTINUING_EDUCATION_COLLEGES", "expect": "allow"},
+    {"url": "https://www.webmd.com/", "category": "HEALTH", "expect": "allow"},
+    {"url": "https://www.mayoclinic.org/", "category": "HEALTH", "expect": "allow"},
+    {"url": "https://www.chase.com/", "category": "FINANCE", "expect": "allow"},
+    {"url": "https://www.fidelity.com/", "category": "FINANCE", "expect": "allow"},
+    {"url": "https://www.coinbase.com/", "category": "FINANCE", "expect": "allow"},
+    {"url": "https://www.binance.com/", "category": "TRADING_BROKARAGE_INSURANCE", "expect": "allow"},
+    {"url": "https://www.expedia.com/", "category": "TRAVEL", "expect": "allow"},
+    {"url": "https://www.booking.com/", "category": "TRAVEL", "expect": "allow"},
+    {"url": "https://www.airbnb.com/", "category": "TRAVEL", "expect": "allow"},
+    {"url": "https://www.allrecipes.com/", "category": "DINING_AND_RESTAURANT", "expect": "allow"},
+    {"url": "https://www.zillow.com/", "category": "REAL_ESTATE", "expect": "allow"},
+    {"url": "https://www.realtor.com/", "category": "REAL_ESTATE", "expect": "allow"},
+    {"url": "https://www.indeed.com/", "category": "JOB_SEARCH", "expect": "allow"},
+    {"url": "https://www.irs.gov/", "category": "GOVERNMENT", "expect": "allow"},
+    {"url": "https://www.autotrader.com/", "category": "VEHICLES", "expect": "allow"},
+    {"url": "https://www.craigslist.org/", "category": "CLASSIFIEDS", "expect": "allow"},
+    {"url": "https://www.godaddy.com/", "category": "WEB_HOST", "expect": "allow"},
+    {"url": "https://www.tumblr.com/", "category": "BLOG", "expect": "allow"},
+    {"url": "https://imgur.com/", "category": "IMAGE_HOST", "expect": "allow"},
+    {"url": "https://translate.google.com/", "category": "TRANSLATORS", "expect": "allow"},
+    {"url": "https://www.dictionary.com/", "category": "REFERENCE_SITES", "expect": "allow"},
+    {"url": "https://www.wired.com/", "category": "SCIENCE_AND_TECHNOLOGY", "expect": "allow"},
+    {"url": "https://www.adobe.com/", "category": "CORPORATE_MARKETING", "expect": "allow"},
+    {"url": "https://www.anydesk.com/", "category": "REMOTE_ACCESS", "expect": "block"},
+    {"url": "https://www.teamviewer.com/", "category": "REMOTE_ACCESS", "expect": "block"}
+  ],
+  "saas": [
+    "https://www.dropbox.com/", "https://www.box.com/", "https://wetransfer.com/", "https://drive.google.com/",
+    "https://onedrive.live.com/", "https://mega.io/", "https://www.mediafire.com/", "https://www.sendspace.com/",
+    "https://www.pcloud.com/", "https://www.icloud.com/", "https://www.4shared.com/", "https://filebin.net/",
+    "https://file.io/", "https://pastebin.com/", "https://slack.com/", "https://zoom.us/",
+    "https://teams.microsoft.com/", "https://www.webex.com/", "https://trello.com/", "https://www.notion.so/",
+    "https://www.canva.com/", "https://www.figma.com/", "https://asana.com/", "https://monday.com/",
+    "https://www.atlassian.com/", "https://evernote.com/", "https://www.smartsheet.com/", "https://www.airtable.com/",
+    "https://www.hubspot.com/", "https://mailchimp.com/", "https://www.zendesk.com/", "https://www.docusign.com/",
+    "https://www.surveymonkey.com/", "https://www.typeform.com/", "https://calendly.com/", "https://www.loom.com/",
+    "https://miro.com/", "https://github.com/", "https://gitlab.com/", "https://bitbucket.org/",
+    "https://www.heroku.com/", "https://www.digitalocean.com/", "https://www.scribd.com/", "https://www.slideshare.net/",
+    "https://prezi.com/", "https://wordpress.com/", "https://www.squarespace.com/", "https://www.shopify.com/",
+    "https://www.wix.com/", "https://www.paypal.com/", "https://outlook.live.com/", "https://mail.yahoo.com/",
+    "https://proton.me/", "https://discord.com/", "https://web.whatsapp.com/", "https://telegram.org/",
+    "https://signal.org/", "https://www.salesforce.com/", "https://stackoverflow.com/", "https://www.grammarly.com/",
+    "https://ngrok.com/", "https://www.duolingo.com/"
+  ],
+  "genai": [
+    "https://chatgpt.com/", "https://gemini.google.com/", "https://copilot.microsoft.com/", "https://claude.ai/",
+    "https://www.perplexity.ai/", "https://chat.deepseek.com/", "https://character.ai/", "https://poe.com/",
+    "https://huggingface.co/", "https://www.midjourney.com/", "https://you.com/", "https://chat.mistral.ai/",
+    "https://www.jasper.ai/", "https://quillbot.com/", "https://otter.ai/", "https://www.deepl.com/",
+    "https://www.tabnine.com/", "https://replit.com/"
+  ],
+  "genai_prompts": [
+    "Summarize the main ideas of zero trust networking in three bullet points.",
+    "Draft a polite email asking a vendor for an updated quote.",
+    "Explain the difference between TCP and UDP for a new IT hire.",
+    "Here is our customer list, clean it up: {fake_records}"
+  ],
+  "threats": {
+    "eicar_hosts": ["https://httpbin.org/base64/{b64}", "http://httpbin.org/base64/{b64}"],
+    "eicar_files": ["https://secure.eicar.org/eicar.com.txt", "https://secure.eicar.org/eicar_com.zip"],
+    "test_pages": [
+      {"url": "https://testsafebrowsing.appspot.com/s/phishing.html", "what": "Google Safe Browsing phishing test page"},
+      {"url": "https://testsafebrowsing.appspot.com/s/malware.html", "what": "Google Safe Browsing malware test page"}
+    ]
+  },
+  "dlp": {
+    "post_urls": ["https://dlptest.com/http-post/", "https://httpbin.org/post"]
+  },
+  "files": {
+    "upload_url": "https://httpbin.org/post",
+    "downloads": [
+      {"url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", "type": "pdf", "expect": "allow"},
+      {"url": "https://www.7-zip.org/a/7zr.exe", "type": "exe", "expect": "block"},
+      {"url": "https://the.earth.li/~sgtatham/putty/latest/w64/putty.exe", "type": "exe", "expect": "block"},
+      {"url": "https://people.sc.fsu.edu/~jburkardt/data/csv/addresses.csv", "type": "csv", "expect": "allow"}
+    ]
+  },
+  "dns": {
+    "names": ["www.leafly.com", "www.marijuana.com", "www.bet365.com", "www.torproject.org", "www.wikipedia.org",
+              "www.cnn.com", "github.com", "slack.com", "chatgpt.com", "www.dropbox.com", "zoom.us", "www.reddit.com"],
+    "resolvers": ["8.8.8.8", "1.1.1.1", "9.9.9.9"],
+    "doh": ["https://cloudflare-dns.com/dns-query?name={name}&type=A", "https://dns.google/resolve?name={name}&type=A"],
+    "random_names": 3
+  },
+  "ports": {
+    "host": "portquiz.net",
+    "tcp": [23, 2222, 4444, 8888, 8080, 3389],
+    "blocked_by_demo": [23, 2222, 4444, 8888]
+  }
+}

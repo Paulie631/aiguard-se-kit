@@ -22,6 +22,15 @@
   ./aiguard-kit install    copy the kit to ~/.aiguard-se-kit/app, add a desktop shortcut and the `aiguard-kit` command
                            (what the double-click installers run); uninstall removes them
 
+Internet Access (ZIA), see ZIA.md:
+  ./aiguard-kit zia setup      preflight, then create the SE-Demo ZIA policy (scoped to your test user) and activate it
+  ./aiguard-kit zia preflight  read-only ZIA checks (--write-probe, --json)
+  ./aiguard-kit zia status     list the kit's ZIA objects;  zia teardown removes them and activates
+  ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
+  ./aiguard-kit zia check      on the traffic generator machine: is traffic reaching the demo tenant? (no keys needed)
+  ./aiguard-kit zia traffic    on the generator: one round of demo traffic (--types web,saas,genai,threats,dlp,files,dns,ports
+                               --count N); zia schedule install|remove|status [--every 30] repeats it
+
 Options: --yes (accept defaults), --force (teardown without asking), --verbose (API details, keys masked),
          --prefix NAME, --profile NAME (keep several tenants apart).
 Secrets live in your OS keychain, never in files or on screen. Demo/eval tenants only.
@@ -74,7 +83,8 @@ ARGS = sys.argv[1:]
 YES = "--yes" in ARGS or "-y" in ARGS
 FORCE = "--force" in ARGS
 VERBOSE = "--verbose" in ARGS or "-v" in ARGS
-VALUE_OPTS = ("--prefix", "--preset", "--mode", "--rounds", "--tests", "--port", "--profile", "--count", "--every")
+VALUE_OPTS = ("--prefix", "--preset", "--mode", "--rounds", "--tests", "--port", "--profile", "--count", "--every",
+              "--user", "--types")
 
 
 def opt(name, default=None):
@@ -1100,29 +1110,52 @@ uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %* & exit /b
 
 SCHEDULE_BASE = None  # set by `install` so an existing schedule is re-pointed at the installed copy
 
+# Scheduled jobs. "trickle" is the AI Guard job (names unchanged since 1.x); products add their own.
+#   cfg: where the settings live in config.json; file: wrapper/log name; label/task/marker: launchd/schtasks/cron ids
+SCHEDULE_JOBS = {
+    "trickle": {"cfg": ("schedule",), "file": "trickle", "label": "com.aiguard-se-kit.{p}", "task": "AIGuardSEKit-{p}",
+                "marker": "# aiguard-se-kit:{p}", "every": 60, "count": 12, "what": "tests"},
+    "zia": {"cfg": ("zia", "schedule"), "file": "zia-traffic", "label": "com.aiguard-se-kit.zia.{p}",
+            "task": "AIGuardSEKit-ZIA-{p}", "marker": "# aiguard-se-kit-zia:{p}", "every": 30, "count": 4,
+            "what": "requests per traffic type"},
+}
 
-def schedule_cmdline(count):
+
+def schedule_cmdline(count, job="trickle"):
     exe = (SCHEDULE_BASE or HERE) / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
+    if job == "zia":
+        return [str(exe), "zia", "traffic", "--count", str(count), "--profile", PROFILE, "--yes"]
     return [str(exe), "run", "--trickle", "--count", str(count), "--profile", PROFILE, "--yes"]
 
 
-def cmd_schedule():
+def _job_cfg(cfg_, job, value=None, remove=False):
+    path = SCHEDULE_JOBS[job]["cfg"]
+    node = cfg_
+    for k in path[:-1]:
+        node = node.setdefault(k, {})
+    if remove:
+        node.pop(path[-1], None)
+    elif value is not None:
+        node[path[-1]] = value
+    return node.get(path[-1])
+
+
+def cmd_schedule(job="trickle"):
     import platform
     import subprocess
+    spec = SCHEDULE_JOBS[job]
     action = next((a for a in ARGS if a in ("install", "remove", "status")), "status")
-    saved = load_cfg().get("schedule") or {}
-    every = max(15, int(opt("every", str(saved.get("every", 60)))))
-    count = int(opt("count", str(saved.get("count", 12))))
+    saved = _job_cfg(load_cfg(), job) or {}
+    every = max(15, int(opt("every", str(saved.get("every", spec["every"])))))
+    count = int(opt("count", str(saved.get("count", spec["count"]))))
     if action in ("install", "remove"):
         cfg_ = load_cfg()
-        if action == "install":
-            cfg_["schedule"] = {"every": every, "count": count}
-        else:
-            cfg_.pop("schedule", None)
+        _job_cfg(cfg_, job, {"every": every, "count": count}, remove=action == "remove")
         save_cfg(cfg_)
-    label = f"com.aiguard-se-kit.{PROFILE}"
+    label = spec["label"].format(p=PROFILE)
+    log_file = CFG_DIR / f"{spec['file']}.log"
     system = platform.system()
-    head(f"Scheduled traffic ({system})")
+    head(f"Scheduled {'ZIA traffic' if job == 'zia' else 'traffic'} ({system})")
     if system == "Darwin":
         import plistlib
         plist = HOME / "Library/LaunchAgents" / f"{label}.plist"
@@ -1131,17 +1164,18 @@ def cmd_schedule():
             CFG_DIR.mkdir(parents=True, exist_ok=True)
             plist.parent.mkdir(parents=True, exist_ok=True)
             plist.write_bytes(plistlib.dumps({
-                "Label": label, "ProgramArguments": schedule_cmdline(count), "StartInterval": every * 60,
-                "RunAtLoad": False, "StandardOutPath": str(CFG_DIR / "trickle.log"),
-                "StandardErrorPath": str(CFG_DIR / "trickle.log"),
+                "Label": label, "ProgramArguments": schedule_cmdline(count, job), "StartInterval": every * 60,
+                "RunAtLoad": False, "StandardOutPath": str(log_file),
+                "StandardErrorPath": str(log_file),
                 "EnvironmentVariables": {"PATH": f"{HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
                                          "NO_COLOR": "1"}}))
             subprocess.run(["launchctl", "bootout", dom, str(plist)], capture_output=True)
             r = subprocess.run(["launchctl", "bootstrap", dom, str(plist)], capture_output=True, text=True)
             if r.returncode:
                 raise KitError(f"launchctl couldn't load the job: {r.stderr.strip()}")
-            ok(f"Installed: {count} tests every {every} minutes. Log: {CFG_DIR / 'trickle.log'}")
-            info("The first run may ask for keychain access. Choose 'Always Allow' so later runs work unattended.")
+            ok(f"Installed: {count} {spec['what']} every {every} minutes. Log: {log_file}")
+            if job == "trickle":
+                info("The first run may ask for keychain access. Choose 'Always Allow' so later runs work unattended.")
         elif action == "remove":
             subprocess.run(["launchctl", "bootout", dom, str(plist)], capture_output=True)
             plist.unlink(missing_ok=True)
@@ -1150,37 +1184,37 @@ def cmd_schedule():
             r = subprocess.run(["launchctl", "print", f"{dom}/{label}"], capture_output=True, text=True)
             (ok if r.returncode == 0 else info)("Installed and loaded" if r.returncode == 0 else "Not installed")
     elif system == "Windows":
-        name = f"AIGuardSEKit-{PROFILE}"
+        name = spec["task"].format(p=PROFILE)
+        wrapper = CFG_DIR / f"{spec['file']}.cmd"
         if action == "install":
             ensure_windows_launcher()
             CFG_DIR.mkdir(parents=True, exist_ok=True)
             # schtasks limits /TR to 261 characters and doesn't capture output, so run a small wrapper that logs
-            wrapper = CFG_DIR / "trickle.cmd"
-            cmdline = " ".join(f'"{x}"' for x in schedule_cmdline(count))
+            cmdline = " ".join(f'"{x}"' for x in schedule_cmdline(count, job))
             wrapper.write_bytes((f'@echo off\r\nset NO_COLOR=1\r\ncd /d "{SCHEDULE_BASE or HERE}"\r\n'
-                                 f'call {cmdline} >> "{CFG_DIR / "trickle.log"}" 2>&1\r\n').encode("utf-8"))
+                                 f'call {cmdline} >> "{log_file}" 2>&1\r\n').encode("utf-8"))
             tr = f'"{wrapper}"'
             r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(every), "/TN", name, "/TR", tr],
                                capture_output=True, text=True)
             if r.returncode:
                 raise KitError(f"schtasks failed: {r.stderr.strip() or r.stdout.strip()}")
-            ok(f"Installed task '{name}': {count} tests every {every} minutes. Log: {CFG_DIR / 'trickle.log'}")
+            ok(f"Installed task '{name}': {count} {spec['what']} every {every} minutes. Log: {log_file}")
             info("It runs only while you're signed in to Windows.")
         elif action == "remove":
             subprocess.run(["schtasks", "/Delete", "/F", "/TN", name], capture_output=True)
-            (CFG_DIR / "trickle.cmd").unlink(missing_ok=True)
+            wrapper.unlink(missing_ok=True)
             ok("Removed")
         else:
             r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True)
             (ok if r.returncode == 0 else info)("Installed" if r.returncode == 0 else "Not installed")
     else:
-        marker = f"# aiguard-se-kit:{PROFILE}"
+        marker = spec["marker"].format(p=PROFILE)
         cur = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
         lines = [x for x in cur.splitlines() if marker not in x]
         if action == "install":
-            spec = f"*/{every} * * * *" if every < 60 else f"0 */{max(1, every // 60)} * * *"
-            cmd = " ".join(schedule_cmdline(count))
-            lines.append(f"{spec} {cmd} >> {CFG_DIR / 'trickle.log'} 2>&1 {marker}")
+            when = f"*/{every} * * * *" if every < 60 else f"0 */{max(1, every // 60)} * * *"
+            cmd = " ".join(schedule_cmdline(count, job))
+            lines.append(f"{when} {cmd} >> {log_file} 2>&1 {marker}")
         if action in ("install", "remove"):
             subprocess.run(["crontab", "-"], input="\n".join(lines) + "\n", text=True, check=True)
             ok("Installed" if action == "install" else "Removed")
@@ -1192,7 +1226,8 @@ def cmd_schedule():
 APP_NAME = "AI Guard Demo Console"
 INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "packs", "policy_template.json",
                  "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
-                 "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command"]
+                 "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command",
+                 "zia_module.py", "zia_traffic.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"]
 
 
 def _install_files():
@@ -1290,16 +1325,22 @@ def _win_user_path(add=None, remove=None):
 
 
 def schedule_installed():
+    return job_installed("trickle")
+
+
+def job_installed(job):
     import platform
     import subprocess
+    spec = SCHEDULE_JOBS[job]
     system = platform.system()
     try:
         if system == "Darwin":
-            return (HOME / "Library/LaunchAgents" / f"com.aiguard-se-kit.{PROFILE}.plist").exists()
+            return (HOME / "Library/LaunchAgents" / f"{spec['label'].format(p=PROFILE)}.plist").exists()
         if system == "Windows":
-            return subprocess.run(["schtasks", "/Query", "/TN", f"AIGuardSEKit-{PROFILE}"], capture_output=True).returncode == 0
+            return subprocess.run(["schtasks", "/Query", "/TN", spec["task"].format(p=PROFILE)],
+                                  capture_output=True).returncode == 0
         r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        return f"# aiguard-se-kit:{PROFILE}" in r.stdout
+        return spec["marker"].format(p=PROFILE) in r.stdout
     except OSError:  # no crontab / schtasks on this machine
         return False
 
@@ -1344,15 +1385,17 @@ def cmd_install():
         os.chmod(sp["wrapper"], 0o755)
         on_path = str(sp["wrapper"].parent) in os.getenv("PATH", "").split(os.pathsep)
         ok("Command: aiguard-kit (from any folder" + (")" if on_path else "; open a new terminal first)"))
-    if schedule_installed():
-        SCHEDULE_BASE = APP_DIR
-        global ARGS
-        ARGS = ["schedule", "install"]
-        try:
-            cmd_schedule()
-            ok("Scheduled traffic now runs from the installed copy")
-        except Exception as e:
-            warn(f"Couldn't re-point scheduled traffic ({e}). Run: aiguard-kit schedule install")
+    global ARGS
+    for job in sorted(SCHEDULE_JOBS, key=lambda j: j == "trickle"):   # the AI Guard job last
+        if schedule_installed() if job == "trickle" else job_installed(job):
+            SCHEDULE_BASE = APP_DIR
+            ARGS = ["schedule", "install"]
+            again = "aiguard-kit zia schedule install" if job == "zia" else "aiguard-kit schedule install"
+            try:
+                cmd_schedule(job)
+                ok(f"Scheduled {'ZIA traffic' if job == 'zia' else 'traffic'} now runs from the installed copy")
+            except Exception as e:
+                warn(f"Couldn't re-point scheduled traffic ({e}). Run: {again}")
     info(f"Settings and keys stay in {BASE_DIR} and the system keychain (unchanged).")
     ok(f"Installed. Open '{APP_NAME}' on your desktop, or run: aiguard-kit gui")
 
@@ -1366,10 +1409,11 @@ def cmd_uninstall():
     if not yesno("Uninstall now?", True):
         print("  Cancelled.")
         return
-    if schedule_installed():
-        global ARGS
-        ARGS = ["schedule", "remove"]
-        cmd_schedule()
+    global ARGS
+    for job in SCHEDULE_JOBS:
+        if schedule_installed() if job == "trickle" else job_installed(job):
+            ARGS = ["schedule", "remove"]
+            cmd_schedule(job)
     sp = shortcut_paths()
     for key in ("desktop", "start", "start_uninstall", "wrapper"):
         p = sp.get(key)
@@ -2332,6 +2376,15 @@ def cmd_gui():
             tenant_cache.clear()
             tenant_cache[key] = connect(c)
         return tenant_cache[key]
+
+    zia_cache = {}
+
+    def zia_tenant(c):   # separate from the AI Guard connection: a ZIA-only machine never needs AI Guard access
+        key = (c.get("client_id"), c.get("vanity_domain"))
+        if key not in zia_cache:
+            zia_cache.clear()
+            zia_cache[key] = product("zia").connect(c)
+        return zia_cache[key]
     port = int(opt("port", "8765"))
 
     if WINDOWS:  # on Windows SO_REUSEADDR lets a second console silently share the port
@@ -2416,6 +2469,13 @@ def cmd_gui():
                 self.wfile.write(data)
                 activity("setup", "Diagnostics downloaded", "info")
                 return
+            if path.startswith("/api/zia/"):
+                c = load_cfg()
+                try:
+                    out = product("zia").api_get(path, c, lambda: zia_tenant(c))
+                except Exception as e:
+                    return self._send(200, {"error": str(e), "fix": product("zia").zhint(e)})
+                return self._send(200, out) if out is not None else self._send(404, {"error": "not found"})
             if path == "/api/job":
                 q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1:] or [""])[0].split("&") if "=" in x)
                 j = JOBS.get(q.get("id"))
@@ -2423,7 +2483,8 @@ def cmd_gui():
                     return self._send(404, {"error": "no such job"})
                 since = int(q.get("since", 0))
                 return self._send(200, {"done": j["done"], "total": j["total"], "results": j["results"][since:],
-                                        "verify": j.get("verify"), "error": j.get("error"), "help": j.get("help")})
+                                        "verify": j.get("verify"), "error": j.get("error"), "help": j.get("help"),
+                                        "plan": j.get("plan"), "notes": j.get("notes")})
             if path == "/api/setup/state":
                 c = load_cfg()
                 return self._send(200, {"vanity": c.get("vanity_domain", ""), "client_id": mask(c.get("client_id", "")),
@@ -2558,6 +2619,24 @@ def cmd_gui():
 
                 threading.Thread(target=setup_work, daemon=True).start()
                 return self._send(200, {"id": jid})
+            if path.startswith("/api/zia/"):
+                if path.endswith("teardown") and body.get("confirm") != "DELETE":
+                    return self._send(400, {"error": "Type DELETE to confirm."})
+                jid = uuid.uuid4().hex[:8]
+                job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
+                zlog = lambda level, msg: job["results"].append({"level": level, "msg": msg})  # noqa: E731
+
+                def zia_work():
+                    try:
+                        if not product("zia").api_job(path, body, load_cfg(), lambda: zia_tenant(load_cfg()), zlog, job):
+                            job["error"] = {"error": "not found", "fix": ""}
+                    except Exception as e:
+                        job["error"] = {"error": str(e), "fix": product("zia").zhint(e)}
+                        zlog("fail", f"{e}")
+                    job["done"] = True
+
+                threading.Thread(target=zia_work, daemon=True).start()
+                return self._send(200, {"id": jid})
             if not c.get("state", {}).get("apps"):
                 return self._send(400, {"error": "Not set up yet. Open the Setup tab."})
             if path == "/api/run":
@@ -2632,6 +2711,52 @@ def cmd_gui():
         print("\n  Stopped.")
 
 
+# ---------------------------------------------------------------- products
+# AI Guard is built into this file. Other products are separate modules beside it that share the kit's
+# credentials, keychain, config, console, installer and updater. Each module defines bind(kit) and cli(args).
+PRODUCTS = {
+    "aiguard": {"label": "AI Guard", "module": None},
+    "zia": {"label": "Internet Access (ZIA)", "module": "zia_module.py"},
+}
+_PRODUCT_MODULES: dict = {}
+
+
+class _KitRef:
+    """What a product module sees as `kit`: this file's globals, read live (so settings and test fakes apply)."""
+
+    def __getattr__(self, name):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __setattr__(self, name, value):
+        globals()[name] = value
+
+
+def product(name):
+    spec = PRODUCTS[name]
+    if not spec["module"]:
+        return None
+    if name not in _PRODUCT_MODULES:
+        import importlib.util
+        path = HERE / spec["module"]
+        if not path.exists():
+            raise KitError(f"{spec['label']} support isn't in this copy of the kit ({path.name} is missing). "
+                           f"Update the kit, or download the latest release.")
+        s = importlib.util.spec_from_file_location(f"aiguard_kit_{name}", path)
+        mod = importlib.util.module_from_spec(s)
+        s.loader.exec_module(mod)
+        mod.bind(_KitRef())
+        _PRODUCT_MODULES[name] = mod
+    return _PRODUCT_MODULES[name]
+
+
+def cmd_zia():
+    i = ARGS.index("zia")
+    product("zia").cli([a for a in ARGS[i + 1:]])
+
+
 # ---------------------------------------------------------------- main
 def main():
     tls_setup()
@@ -2640,7 +2765,7 @@ def main():
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
-            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs}
+            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia}
     if cmd not in cmds:
         print(__doc__)
         return

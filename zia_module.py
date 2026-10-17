@@ -1,0 +1,785 @@
+"""Internet Access (ZIA) for the SE demo kit.
+
+Admin side (your laptop, OneAPI client from the kit's setup):
+  setup / preflight / status / teardown / dashboards  -> the SE-Demo ZIA policy and Insights checks
+Generator side (the Windows VM or cloud machine running Client Connector as the test user; no API keys):
+  check / traffic / schedule                         -> zia_traffic.py
+
+Everything the kit creates is named "<prefix>: ...", carries the SE-Demo rule label and is scoped to the
+test user(s) chosen in setup, so the rest of the tenant (other users, locations, your home network) is untouched.
+"""
+from __future__ import annotations
+
+import json
+import re
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+K = None  # the kit (aiguard_kit), set by bind()
+NAME_MAX = 31  # ZIA rule-name limit
+RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns")
+CONSOLE = "https://console.zscaler.com"
+
+
+def bind(kit):
+    global K
+    K = kit
+
+
+def template():
+    return json.loads((HERE / "zia_policy_template.json").read_text(encoding="utf-8"))
+
+
+def zname(suffix):
+    """'SE-Demo: Block gambling', cut to ZIA's 31-character limit."""
+    return f"{K.PREFIX}: {suffix}"[:NAME_MAX].rstrip()
+
+
+def g(o, key, default=None):
+    """Read a field whether the record is camelCase (raw API) or snake_case (SDK models)."""
+    if not isinstance(o, dict):
+        return default
+    if key in o:
+        return o[key]
+    camel = re.sub(r"_([a-z])", lambda m: m.group(1).upper(), key)
+    return o.get(camel, default)
+
+
+def mine(o):
+    n = str(g(o, "name") or g(o, "configured_name") or "")
+    return n.startswith(K.PREFIX + ":")
+
+
+def zcfg(cfg):
+    return cfg.setdefault("zia", {})
+
+
+# ---------------------------------------------------------------- OneAPI
+class ZiaTenant:
+    def __init__(self, cfg):
+        from zscaler import ZscalerClient
+        secret = K.kc_get("oneapi-client-secret")
+        if not (cfg.get("client_id") and cfg.get("vanity_domain") and secret):
+            raise K.KitError("No OneAPI credentials saved yet. Run `./aiguard-kit setup` (or the console's Setup tab) "
+                             "to enter them, then run `./aiguard-kit zia setup`.")
+        conf = {"clientId": cfg["client_id"], "clientSecret": secret, "vanityDomain": cfg["vanity_domain"]}
+        if cfg.get("cloud"):
+            conf["cloud"] = cfg["cloud"]
+        self.c = ZscalerClient(conf)
+
+    def call(self, resource, method, *a, **kw):
+        """resource is a ZIA SDK area ('url_filtering') or an Insights one ('zins.web_traffic')."""
+        insights = resource.startswith("zins.")
+        api = getattr(self.c.zins if insights else self.c.zia, resource.split(".", 1)[-1])
+        K.vlog(f"zia {resource}.{method} {a} {json.dumps(kw, default=str)[:300] if kw else ''}")
+        out = getattr(api, method)(*a, **kw)
+        if not (isinstance(out, tuple) and len(out) == 3):
+            return out
+        result, resp, err = out
+        if err:
+            K.vlog(f"error: {err}")
+            raise K.KitError(f"{resource}.{method} failed: {err}")
+        if insights:
+            return result
+        body = resp.get_body() if resp is not None and hasattr(resp, "get_body") else None
+        return body if body is not None else _plain(result)
+
+
+def _plain(x):
+    if isinstance(x, list):
+        return [_plain(i) for i in x]
+    return x.as_dict() if hasattr(x, "as_dict") else x
+
+
+def items(body):
+    if isinstance(body, list):
+        return body
+    return next((v for v in (body or {}).values() if isinstance(v, list)), [])
+
+
+LISTS = {"url_filtering": ("url_filtering", "list_rules"), "file_type_control": ("file_type_control_rule", "list_rules"),
+         "dlp": ("dlp_web_rules", "list_rules"), "firewall": ("cloud_firewall_rules", "list_rules"),
+         "dns": ("cloud_firewall_dns", "list_rules")}
+API = {"url_filtering": "url_filtering", "file_type_control": "file_type_control_rule", "dlp": "dlp_web_rules",
+       "firewall": "cloud_firewall_rules", "dns": "cloud_firewall_dns"}
+
+
+def list_rules(t, kind, rule_type=None):
+    if kind == "cloud_app_control":
+        return items(t.call("cloudappcontrol", "list_rules", rule_type))
+    return items(t.call(*LISTS[kind]))
+
+
+def connect(cfg):
+    try:
+        t = ZiaTenant(cfg)
+        list_rules(t, "url_filtering")
+        return t
+    except K.KitError:
+        raise
+    except Exception as e:
+        raise K.KitError(f"Couldn't connect to ZIA: {e}") from e
+
+
+ZIA_HINTS = [
+    (r"\b401\b|NOT_AUTHORIZED|Unauthorized",
+     "The OneAPI client works but has no ZIA access. In ZIdentity > Integration > API Clients, edit the client and "
+     "add Zscaler Internet Access with an API role (create one in ZIA > Administration > Role Management, type API)."),
+    (r"\b403\b|Forbidden|not permitted|insufficient",
+     "The client's ZIA API role is read-only or missing a policy area. Give the role full access to URL Filtering, "
+     "Cloud App Control, File Type Control, DLP, Firewall and Activation."),
+    (r"EDIT_LOCK|edit lock|locked",
+     "Another admin session is editing ZIA. Wait a minute, or activate pending changes in the console, then retry."),
+    (r"DUPLICATE|already exists",
+     "An object with that name already exists but isn't visible to the kit's API role. Rename or delete it in the console."),
+    (r"INVALID_INPUT_ARGUMENT|invalid",
+     "Your tenant rejected a value (often a category, app or action it doesn't have). Run with --verbose to see which, "
+     "then edit zia_policy_template.json or tell the kit owner."),
+]
+
+
+def zhint(err):
+    text = str(err)
+    for pat, fix in ZIA_HINTS:
+        if re.search(pat, text, re.I):
+            return fix
+    return K.hint(err)
+
+
+# ---------------------------------------------------------------- what the tenant has
+def find_users(t, wanted):
+    """wanted: emails or names. Returns (found [{id,name,email}], missing [str]). Demo tenants are small, so this
+    reads the user list once and matches locally (the API's own filter only matches the start of the name)."""
+    wanted = [x.strip() for x in wanted if x and x.strip()]
+    if not wanted:
+        return [], []
+    users = items(t.call("user_management", "list_users", query_params={"page_size": 10000}))
+    found, missing = [], []
+    for w in wanted:
+        hit = next((u for u in users if w.lower() in (str(g(u, "email", "")).lower(), str(g(u, "name", "")).lower())), None)
+        if hit:
+            found.append({"id": g(hit, "id"), "name": g(hit, "name"), "email": g(hit, "email")})
+        else:
+            missing.append(w)
+    return found, missing
+
+
+def resolve(t, tpl):
+    """Look up what the template names (engines, file types, isolation profile, actions). Missing items are reported,
+    not fatal: the matching rule is skipped or trimmed."""
+    facts = {"engines": {}, "file_types": None, "cbi": None, "notes": []}
+    for e in items(t.call("dlp_engine", "list_dlp_engines_lite")):
+        for key in ("name", "predefined_engine_name"):
+            if g(e, key):
+                facts["engines"][str(g(e, key))] = g(e, "id")
+    try:
+        cats = t.call("file_type_control_rule", "list_file_type_categories", query_params={"enums": "FILETYPECATEGORYFORFILETYPECONTROL"})
+        names = {g(c, "name") if isinstance(c, dict) else c for c in items(cats)}
+        facts["file_types"] = {n for n in names if n} or None
+    except Exception as e:  # older tenants: no listing, so the template's names are sent as they are
+        K.vlog(f"file type categories: {e}")
+    try:
+        profiles = items(t.call("cloud_browser_isolation", "list_isolation_profiles"))
+        facts["cbi"] = next((p for p in profiles if g(p, "default_profile")), None) or (profiles[0] if profiles else None)
+    except Exception as e:
+        K.vlog(f"isolation profiles: {e}")
+    return facts
+
+
+def pick_actions(t, rule_type, apps, choices):
+    """choices: [[preferred, fallback, ...], ...] -> the first of each the tenant offers for these apps."""
+    try:
+        avail = {str(a) for a in items(t.call("cloudappcontrol", "list_available_actions", rule_type, apps)) if a}
+    except Exception as e:
+        K.vlog(f"actions {rule_type}: {e}")
+        avail = set()
+    if not avail:
+        return [c[0] for c in choices]
+    out = [next((a for a in c if a in avail), None) for c in choices]
+    return None if None in out else out
+
+
+# ---------------------------------------------------------------- the plan
+def plan(t, cfg, facts=None):
+    """The objects setup will create or update, as (kind, rule_type, name, body) plus notes about skips."""
+    tpl = template()
+    facts = facts or resolve(t, tpl)
+    z = zcfg(cfg)
+    users = [u["id"] for u in z.get("users", [])]
+    notes = list(facts["notes"])
+    out = []
+    scope = {"users": users, "state": "ENABLED", "rank": 7}
+
+    for r in tpl["url_filtering"]:
+        out.append(("url_filtering", None, zname(r["name"]),
+                    dict(scope, action=r["action"], url_categories=r["url_categories"], protocols=["ANY_RULE"],
+                         request_methods=["CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "OTHER", "POST", "PUT", "TRACE"],
+                         description="SE demo kit: demo rule for the test user only")))
+    for r in tpl.get("isolation", []):
+        if not facts.get("cbi"):
+            notes.append(f"'{zname(r['name'])}' skipped: no Cloud Browser Isolation profile in this tenant")
+            continue
+        cbi = facts["cbi"]
+        out.append(("url_filtering", None, zname(r["name"]),
+                    dict(scope, action="ISOLATE", url_categories=r["url_categories"], protocols=["ANY_RULE"],
+                         user_agent_types=["CHROME", "FIREFOX", "MSEDGE", "MSCHREDGE", "SAFARI", "OTHER"],
+                         cbi_profile={"id": g(cbi, "id"), "name": g(cbi, "name"), "url": g(cbi, "url")},
+                         description="SE demo kit: isolates this category for the test user")))
+    for r in tpl["cloud_app_control"]:
+        actions = pick_actions(t, r["rule_type"], r["applications"], r["actions"])
+        if not actions:
+            notes.append(f"'{zname(r['name'])}' skipped: your tenant offers none of {r['actions']} for {r['rule_type']}")
+            continue
+        out.append(("cloud_app_control", r["rule_type"], zname(r["name"]),
+                    dict(scope, applications=r["applications"], actions=actions,
+                         description="SE demo kit: Shadow IT and GenAI demo")))
+    for r in tpl["file_type_control"]:
+        types_ = r["file_types"]
+        if facts.get("file_types"):
+            skipped = [x for x in types_ if x not in facts["file_types"]]
+            types_ = [x for x in types_ if x in facts["file_types"]]
+            if skipped:
+                notes.append(f"'{zname(r['name'])}': file types not in this tenant, left out: {', '.join(skipped)}")
+        if not types_:
+            continue
+        out.append(("file_type_control", None, zname(r["name"]),
+                    dict(scope, filtering_action=r["filtering_action"], operation=r["operation"], file_types=types_,
+                         protocols=["FOHTTP_RULE", "FTP_RULE", "HTTPS_RULE", "HTTP_RULE"],
+                         description="SE demo kit: file type demo")))
+    for r in tpl["dlp"]:
+        ids = [facts["engines"][e] for e in r["engines"] if e in facts["engines"]]
+        missing = [e for e in r["engines"] if e not in facts["engines"]]
+        if missing:
+            notes.append(f"'{zname(r['name'])}': DLP engines not found, left out: {', '.join(missing)}")
+        if not ids:
+            continue
+        out.append(("dlp", None, zname(r["name"]),
+                    dict(scope, action=r["action"], dlp_engines=ids, protocols=["FTP_RULE", "HTTPS_RULE", "HTTP_RULE"],
+                         severity="RULE_SEVERITY_HIGH" if r["action"] == "BLOCK" else "RULE_SEVERITY_MEDIUM",
+                         description="SE demo kit: fake card numbers and SSNs from the traffic generator")))
+    for r in tpl["firewall"]:
+        out.append(("firewall", None, zname(r["name"]),
+                    dict(scope, action=r["action"], nw_services=r["nw_services"], enable_full_logging=True,
+                         description="SE demo kit: unusual ports (needs Z-Tunnel 2.0)")))
+    for r in tpl["dns"]:
+        out.append(("dns", None, zname(r["name"]),
+                    dict(scope, action=r["action"], res_categories=r["res_categories"],
+                         description="SE demo kit: DNS control demo (needs Z-Tunnel 2.0)")))
+    return out, notes
+
+
+def _resolve_refs(body, refs):
+    """'@tenant_check' -> the custom category id; '@demo_ports' -> the network service id."""
+    b = dict(body)
+    if "url_categories" in b:
+        b["url_categories"] = [refs.get(c, c) for c in b["url_categories"]]
+    if "nw_services" in b:
+        b["nw_services"] = [refs.get(c, c) for c in b["nw_services"]]
+    return b
+
+
+def ensure_label(t, log):
+    name = zname(template()["label"])
+    hit = next((x for x in items(t.call("rule_labels", "list_labels")) if g(x, "name") == name), None)
+    if hit:
+        return g(hit, "id")
+    lab = t.call("rule_labels", "add_label", name=name, description="Objects created by the SE demo kit")
+    log("ok", f"Created rule label '{name}'")
+    return g(lab, "id")
+
+
+def ensure_tenant_category(t, log):
+    tc = template()["tenant_check"]
+    name = zname(tc["name"])
+    cats = items(t.call("url_categories", "list_categories", query_params={"custom_only": True}))
+    hit = next((c for c in cats if g(c, "configured_name") == name), None)
+    body = dict(configured_name=name, super_category="USER_DEFINED", urls=tc["urls"], custom_category=True,
+                description=tc["description"])
+    if hit:
+        t.call("url_categories", "update_url_category", g(hit, "id"), **body)
+        return g(hit, "id")
+    c = t.call("url_categories", "add_url_category", **body)
+    log("ok", f"Created URL category '{name}' ({', '.join(tc['urls'])})")
+    return g(c, "id")
+
+
+def ensure_network_service(t, log):
+    ns = template()["network_service"]
+    name = zname(ns["name"])
+    hit = next((s for s in items(t.call("cloud_firewall", "list_network_services", query_params={"search": name}))
+                if g(s, "name") == name), None)
+    ports = [("dest", "tcp", str(p)) for p in ns["dest_tcp"]]
+    if hit:
+        t.call("cloud_firewall", "update_network_service", g(hit, "id"), ports=ports, name=name,
+               description=ns["description"])
+        return g(hit, "id")
+    s = t.call("cloud_firewall", "add_network_service", ports=ports, name=name, description=ns["description"])
+    log("ok", f"Created network service '{name}' (TCP {', '.join(map(str, ns['dest_tcp']))})")
+    return g(s, "id")
+
+
+def _add_at_top(t, kind, rule_type, body, existing):
+    """Rules go above the tenant's own, so the user-scoped demo rules win for the test user. Some tenants pin
+    predefined rules at the top; then the next slot down is tried."""
+    taken = sorted(int(g(r, "order") or 0) for r in existing if int(g(r, "order") or 0) > 0)
+    last_err = None
+    for order in range(1, (taken[-1] if taken else 0) + 2):
+        try:
+            b = dict(body, order=order)
+            if kind == "cloud_app_control":
+                return t.call("cloudappcontrol", "add_rule", rule_type, **b)
+            return t.call(API[kind], "add_rule", **b)
+        except K.KitError as e:
+            if not re.search(r"order|rank|predefined", str(e), re.I):
+                raise
+            last_err = e
+    raise last_err
+
+
+def setup_apply(t, cfg, log, facts=None):
+    """Creates or updates every SE-Demo ZIA object, then activates. Safe to run again."""
+    z = zcfg(cfg)
+    if not z.get("users"):
+        raise K.KitError("No test user chosen. Run `./aiguard-kit zia setup --user test.user@yourdomain` "
+                         "(the user signed in to Client Connector on the traffic generator).")
+    log("head", "Shared objects")
+    refs = {"@tenant_check": ensure_tenant_category(t, log), "@demo_ports": ensure_network_service(t, log)}
+    label = ensure_label(t, log)
+    rules, notes = plan(t, cfg, facts)
+    for n in notes:
+        log("warn", n)
+    log("head", "Demo rules (scoped to " + ", ".join(u.get("email") or u["name"] for u in z["users"]) + ")")
+    made, failed = 0, []
+    cache = {}
+    for kind, rule_type, name, body in rules:
+        key = (kind, rule_type)
+        if key not in cache:
+            cache[key] = list_rules(t, kind, rule_type)
+        existing = cache[key]
+        b = _resolve_refs(dict(body, name=name, labels=[label]), refs)
+        hit = next((r for r in existing if g(r, "name") == name), None)
+        try:
+            if hit:
+                b["order"] = g(hit, "order")
+                if kind == "cloud_app_control":
+                    t.call("cloudappcontrol", "update_rule", rule_type, g(hit, "id"), **b)
+                else:
+                    t.call(API[kind], "update_rule", g(hit, "id"), **b)
+                log("ok", f"Updated '{name}'")
+            else:
+                r = _add_at_top(t, kind, rule_type, b, existing)
+                existing.append(r if isinstance(r, dict) else {"name": name})
+                log("ok", f"Created '{name}'")
+            made += 1
+        except Exception as e:
+            failed.append(name)
+            log("warn", f"'{name}' not created: {str(e)[:200]}. Fix: {zhint(e)}")
+    log("head", "Activate")
+    activate(t, log)
+    z["state"] = {"set_up": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rules": made, "failed": failed,
+                  "tenant_check_category": refs["@tenant_check"]}
+    K.save_cfg(cfg)
+    return {"rules": made, "failed": failed, "notes": notes}
+
+
+def activate(t, log):
+    try:
+        t.call("activate", "activate")
+        log("ok", "Changes activated")
+    except Exception as e:
+        log("warn", f"Activation failed: {str(e)[:160]}. Activate pending changes in the ZIA console. {zhint(e)}")
+
+
+# ---------------------------------------------------------------- teardown
+def kit_objects(t):
+    tpl = template()
+    found = []
+    for kind in RULE_KINDS:
+        types_ = sorted({r["rule_type"] for r in tpl["cloud_app_control"]}) if kind == "cloud_app_control" else [None]
+        for rt in types_:
+            try:
+                found += [(kind, rt, r) for r in list_rules(t, kind, rt) if mine(r)]
+            except Exception as e:
+                K.vlog(f"list {kind} {rt}: {e}")
+    for c in items(t.call("url_categories", "list_categories", query_params={"custom_only": True})):
+        if mine(c):
+            found.append(("url_category", None, c))
+    for s in items(t.call("cloud_firewall", "list_network_services", query_params={"search": K.PREFIX})):
+        if mine(s):
+            found.append(("network_service", None, s))
+    for lab in items(t.call("rule_labels", "list_labels")):
+        if mine(lab):
+            found.append(("label", None, lab))
+    return found
+
+
+def teardown(t, cfg, log, confirm=True):
+    objs = kit_objects(t)
+    if not objs:
+        log("ok", f"Nothing named '{K.PREFIX}: …' in ZIA.")
+    else:
+        if confirm:
+            for kind, _, o in objs:
+                K.info(f"{kind:18} {g(o, 'name') or g(o, 'configured_name')}")
+            if not K.FORCE and not K.yesno(f"Delete these {len(objs)} ZIA objects and activate?", False):
+                print("  Cancelled.")
+                return False
+        deleters = {"url_category": ("url_categories", "delete_category"),
+                    "network_service": ("cloud_firewall", "delete_network_service"),
+                    "label": ("rule_labels", "delete_label")}
+        for kind, rt, o in objs:   # rules first, then the objects they reference
+            label = g(o, "name") or g(o, "configured_name")
+            try:
+                if kind == "cloud_app_control":
+                    t.call("cloudappcontrol", "delete_rule", rt, g(o, "id"))
+                elif kind in API:
+                    t.call(API[kind], "delete_rule", g(o, "id"))
+                else:
+                    t.call(*deleters[kind], g(o, "id"))
+                log("ok", f"Deleted {label}")
+            except Exception as e:
+                log("warn", f"Couldn't delete {label}: {str(e)[:160]}")
+        activate(t, log)
+    z = zcfg(cfg)
+    z.pop("state", None)
+    K.save_cfg(cfg)
+    return True
+
+
+# ---------------------------------------------------------------- preflight (admin side)
+def preflight(cfg, write_probe=False):
+    checks = []
+
+    def add(cid, label, status, detail="", fix=""):
+        checks.append({"id": cid, "label": label, "status": status, "detail": detail, "fix": fix})
+
+    if not (cfg.get("client_id") and cfg.get("vanity_domain") and K.kc_get("oneapi-client-secret")):
+        add("zia-creds", "OneAPI credentials saved", "fail",
+            fix="Run `./aiguard-kit setup` (or the console's Setup tab) once to save the vanity domain, client ID and secret.")
+        return checks, None
+    add("zia-creds", "OneAPI credentials saved", "ok", f"client {K.mask(cfg['client_id'])} on '{cfg['vanity_domain']}'")
+    try:
+        t = connect(cfg)
+        add("zia-login", "ZIA API access", "ok")
+    except Exception as e:
+        add("zia-login", "ZIA API access", "fail", str(e)[:200], zhint(e))
+        return checks, None
+
+    tpl = template()
+    try:
+        for kind in ("url_filtering", "file_type_control", "dlp", "firewall", "dns"):
+            list_rules(t, kind)
+        list_rules(t, "cloud_app_control", "AI_ML")
+        add("zia-read", "Read ZIA policy", "ok", "URL filtering, Cloud App Control, File Type Control, DLP, firewall, DNS")
+    except Exception as e:
+        add("zia-read", "Read ZIA policy", "fail", str(e)[:200], zhint(e))
+        return checks, None
+
+    z = zcfg(cfg)
+    if z.get("users"):
+        found, missing = find_users(t, [u.get("email") or u["name"] for u in z["users"]])
+        add("zia-user", "Test user exists", "fail" if missing else "ok",
+            ", ".join(u.get("email") or u["name"] for u in found) + (f"; missing: {', '.join(missing)}" if missing else ""),
+            "Create the user in ZIdentity (or your IdP) and sign in to Client Connector once, then rerun." if missing else "")
+    else:
+        add("zia-user", "Test user chosen", "info", "not yet - setup asks",
+            "Use a dedicated test user, the one signed in to Client Connector on the traffic generator.")
+
+    facts = resolve(t, tpl)
+    want = sorted({e for r in tpl["dlp"] for e in r["engines"]})
+    have = [e for e in want if e in facts["engines"]]
+    add("zia-dlp", "DLP engines for the demo", "ok" if len(have) == len(want) else ("warn" if have else "fail"),
+        f"{len(have)} of {len(want)} found" + (f"; missing {', '.join(e for e in want if e not in have)}" if len(have) < len(want) else ""),
+        "" if len(have) == len(want) else "DLP rules will use the engines that exist. Check the DLP subscription.")
+    try:
+        ssl = list_rules_ssl(t)
+        dec = [r for r in ssl if g(r, "state") == "ENABLED" and str((g(r, "action") or {}).get("type", "")).upper() == "DECRYPT"]
+        add("zia-ssl", "SSL inspection decrypts traffic", "ok" if dec else "warn",
+            ", ".join(g(r, "name") for r in dec[:3]) or "no enabled DECRYPT rule",
+            "" if dec else "EICAR over HTTPS, DLP and Cloud App Control need SSL inspection. Add a DECRYPT rule for the test user.")
+    except Exception as e:
+        add("zia-ssl", "SSL inspection decrypts traffic", "warn", str(e)[:160], "Couldn't read SSL inspection rules.")
+    add("zia-cbi", "Browser Isolation profile", "ok" if facts.get("cbi") else "info",
+        g(facts.get("cbi") or {}, "name") or "none - the isolation demo rule is skipped")
+    mine_ = kit_objects(t)
+    add("zia-existing", "Earlier kit objects in ZIA", "info", f"{len(mine_)} found" if mine_ else "none - fresh setup")
+    if write_probe:
+        try:
+            lab = t.call("rule_labels", "add_label", name=zname("preflight probe"), description="temporary")
+            t.call("rule_labels", "delete_label", g(lab, "id"))
+            add("zia-write", "Create and delete permission", "ok", "Created and removed a temporary rule label")
+        except Exception as e:
+            add("zia-write", "Create and delete permission", "fail", str(e)[:200], zhint(e))
+    add("zia-tunnel", "Client Connector uses Z-Tunnel 2.0 on the generator", "info", "Can't be read through the API",
+        "Firewall, DNS and unusual-port traffic only reach ZIA with Z-Tunnel 2.0. In the Client Connector portal, give "
+        "the test user a forwarding profile with Tunnel version Z-Tunnel 2.0 (see ZIA.md). `zia check` on the "
+        "generator tests it.")
+    t._facts = facts
+    return checks, t
+
+
+def list_rules_ssl(t):
+    return items(t.call("ssl_inspection_rules", "list_rules"))
+
+
+# ---------------------------------------------------------------- dashboards (Insights)
+PANELS = [
+    ("web", "Web traffic", "zins.web_traffic", "get_no_grouping", {}),
+    ("web-blocked", "Blocked web traffic", "zins.web_traffic", "get_no_grouping", {"action_filter": "BLOCK"}),
+    ("protocols", "Web protocols", "zins.web_traffic", "get_protocols", {}),
+    ("threats", "Threat classes", "zins.web_traffic", "get_threat_class", {}),
+    ("threat-cats", "Threat categories", "zins.web_traffic", "get_threat_super_categories", {}),
+    ("incidents", "Cyber incidents", "zins.cyber_security", "get_incidents", {}),
+    ("firewall", "Firewall by action", "zins.firewall", "get_traffic_by_action", {}),
+    ("fw-services", "Firewall network services", "zins.firewall", "get_network_services", {}),
+    ("shadow-it", "Shadow IT apps", "zins.shadow_it", "get_apps", {}),
+    ("casb", "SaaS (CASB) apps", "zins.saas_security", "get_casb_app_report", {}),
+]
+
+
+def dashboards(t, days=7, end_days_ago=2):
+    """Insights only answers for whole 7- or 14-day windows that end at least a day or two ago."""
+    end = int((time.time() - end_days_ago * 86400) * 1000)
+    start = end - days * 86400 * 1000
+    out = []
+    for pid, label, res, method, kw in PANELS:
+        try:
+            rows = t.call(res, method, start, end, **kw) or []
+            rows = rows if isinstance(rows, list) else items(rows)
+            total = sum(int(g(r, "total") or 0) for r in rows if isinstance(r, dict))
+            names = [g(r, "name") or g(r, "application") for r in rows if isinstance(r, dict)][:6]
+            apps = pid in ("shadow-it", "casb")   # app lists carry bytes and users, not a total
+            status = "ok" if rows and (total or apps) else "empty"
+            if status == "ok" and pid == "firewall" and not any(str(g(r, "name", "")).upper().startswith("BLOCK")
+                                                                for r in rows if isinstance(r, dict)):
+                status = "partial"   # traffic but nothing blocked: the demo firewall rule hasn't fired yet
+            out.append({"id": pid, "label": label, "status": status, "rows": len(rows), "total": total,
+                        "top": [n for n in names if n]})
+        except Exception as e:
+            out.append({"id": pid, "label": label, "status": "error", "error": str(e)[:160]})
+    return {"start": start, "end": end, "panels": out}
+
+
+# ---------------------------------------------------------------- terminal
+def choose_users(t, cfg):
+    z = zcfg(cfg)
+    wanted = K.opt("user")
+    if wanted:
+        found, missing = find_users(t, wanted.split(","))
+        if missing:
+            raise K.KitError(f"No ZIA user {', '.join(missing)}. Create the test user in ZIdentity (or your IdP), sign "
+                             f"in once with Client Connector on the generator, then rerun.")
+        z["users"] = found
+        return
+    if z.get("users") and K.yesno("Scope the demo rules to " + ", ".join(u.get("email") or u["name"] for u in z["users"]) + "?", True):
+        return
+    if K.YES:
+        raise K.KitError("Pass the test user: ./aiguard-kit zia setup --user test.user@yourdomain --yes")
+    K.info("The demo rules apply only to this user: the one signed in to Client Connector on the traffic generator.")
+    K.info("Use a dedicated test user, never yours, so the block rules can't affect real browsing.")
+    while True:
+        w = K.ask("Test user email (comma-separate several)")
+        found, missing = find_users(t, w.split(","))
+        if found and not missing:
+            z["users"] = found
+            return
+        K.warn(f"Not found in ZIA: {', '.join(missing) or w}")
+
+
+def cmd_setup():
+    cfg = K.load_cfg()
+    K.head(f"ZIA demo policy - setup (kit {K.VERSION})")
+    print("  Creates SE-Demo URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules for one")
+    print("  test user, then activates. Demo/eval tenants only. Teardown: ./aiguard-kit zia teardown")
+    K.head("Step 1 of 4 · Preflight (no changes yet)")
+    checks, t = preflight(cfg, write_probe=K.yesno("Also test create permission with a temporary rule label?", True))
+    K.print_checks(checks)
+    if not t or any(c["status"] == "fail" and c["id"] in ("zia-login", "zia-read", "zia-write") for c in checks):
+        print("  Stopped. Nothing was changed.")
+        return
+    if not K.yesno(f"'{cfg['vanity_domain']}' is a demo/eval tenant and the kit may create ZIA policy in it?", True):
+        print("  Stopped. Nothing was changed.")
+        return
+    K.head("Step 2 of 4 · Test user")
+    choose_users(t, cfg)
+    K.save_cfg(cfg)
+    K.head("Step 3 of 4 · Review")
+    rules, notes = plan(t, cfg, getattr(t, "_facts", None))
+    for kind, rt, name, body in rules:
+        what = body.get("action") or body.get("filtering_action") or ",".join(body.get("actions", []))
+        print(f"  • {kind.replace('_', ' '):18} {name}  ({what})")
+    for n in notes:
+        K.warn(n)
+    print(f"  • plus: URL category '{zname(template()['tenant_check']['name'])}', network service "
+          f"'{zname(template()['network_service']['name'])}', rule label '{zname(template()['label'])}'")
+    if not K.yesno("Create or update these and activate?", True):
+        print("  Cancelled. Nothing was changed.")
+        return
+    K.head("Step 4 of 4 · Create and activate")
+    res = setup_apply(t, cfg, K.cli_log, getattr(t, "_facts", None))
+    K.head("Done" if not res["failed"] else f"Done, {len(res['failed'])} rule(s) need attention (see above)")
+    print("  Next, on the traffic generator (Client Connector signed in as the test user):")
+    print("    ./aiguard-kit zia check      confirms traffic reaches this tenant")
+    print("    ./aiguard-kit zia traffic    one round of demo traffic;  zia schedule install  keeps it going")
+
+
+def cmd_preflight():
+    cfg = K.load_cfg()
+    as_json = "--json" in K.ARGS
+    if not as_json:
+        K.head("ZIA preflight (no changes)")
+    checks, _ = preflight(cfg, write_probe="--write-probe" in K.ARGS)
+    rep = K.preflight_report(cfg, checks)
+    if as_json:
+        print(json.dumps(rep, indent=2))
+    else:
+        K.print_checks(checks)
+        print(f"\n  Result: {rep['result'].upper()}.  Runbook: {HERE / 'ZIA.md'}")
+    raise SystemExit({"pass": 0, "warn": 2, "fail": 1}[rep["result"]])
+
+
+def cmd_status():
+    cfg = K.load_cfg()
+    K.head("ZIA status")
+    z = zcfg(cfg)
+    t = connect(cfg)
+    K.ok(f"Tenant '{cfg['vanity_domain']}': ZIA API works")
+    if z.get("users"):
+        K.ok("Test user: " + ", ".join(u.get("email") or u["name"] for u in z["users"]))
+    objs = kit_objects(t)
+    (K.ok if objs else K.warn)(f"{len(objs)} SE-Demo objects" + ("" if objs else " - run ./aiguard-kit zia setup"))
+    for kind, _, o in objs:
+        state = g(o, "state")
+        K.info(f"{kind:18} {g(o, 'name') or g(o, 'configured_name')}" + (f"  ({state})" if state else ""))
+    try:
+        st = t.call("activate", "status")
+        K.info(f"Activation: {g(st, 'status') if isinstance(st, dict) else st}")
+    except Exception as e:
+        K.vlog(str(e))
+    last = K.CFG_DIR / "zia-traffic-last.json"
+    if last.exists():
+        K.info(f"Last traffic round on this machine: {json.loads(last.read_text(encoding='utf-8')).get('summary')}")
+
+
+def cmd_teardown():
+    cfg = K.load_cfg()
+    K.head("ZIA teardown")
+    teardown(connect(cfg), cfg, K.cli_log)
+
+
+def cmd_dashboards():
+    cfg = K.load_cfg()
+    K.head("ZIA dashboards (Insights, 7 days ending 2 days ago)")
+    rep = dashboards(connect(cfg), days=int(K.opt("days", "7")))
+    icon = {"ok": "✓", "partial": "!", "empty": "✗", "error": "?"}
+    for p in rep["panels"]:
+        extra = f"{p.get('total', 0):,} · {', '.join(map(str, p['top']))}" if p["status"] in ("ok", "partial") else \
+            p.get("error", "no data in the window")
+        print(f"  {icon[p['status']]} {p['label']:28} {extra}")
+    print("  Empty panels fill once the generator has run for a few days. Firewall and DNS need Z-Tunnel 2.0.")
+
+
+def traffic_module():
+    import importlib.util
+    s = importlib.util.spec_from_file_location("aiguard_kit_zia_traffic", HERE / "zia_traffic.py")
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m
+
+
+def cmd_check():
+    cfg = K.load_cfg()
+    tm = traffic_module()
+    K.head("ZIA traffic generator check (this machine)")
+    checks = tm.check(cloud=zcfg(cfg).get("cloud_name"))
+    K.print_checks(checks)
+    worst = "fail" if any(c["status"] == "fail" for c in checks) else "warn" if any(c["status"] == "warn" for c in checks) else "pass"
+    print(f"\n  Result: {worst.upper()}.  Runbook: {HERE / 'ZIA.md'}")
+    raise SystemExit({"pass": 0, "warn": 2, "fail": 1}[worst])
+
+
+def cmd_traffic():
+    tm = traffic_module()
+    types_ = (K.opt("types") or "").split(",") if K.opt("types") else None
+    res = tm.run(types=types_, count=int(K.opt("count", "4")), quiet=K.YES, log_dir=K.CFG_DIR)
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} zia-traffic profile={K.PROFILE} {res['summary']}")
+    if res["total"] and res["errors"] == res["total"]:
+        raise SystemExit(1)
+
+
+def cli(args):
+    sub = next((a for a in args if not a.startswith("-") and a not in _values(args)), "help")
+    cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "status": cmd_status, "teardown": cmd_teardown,
+            "dashboards": cmd_dashboards, "check": cmd_check, "traffic": cmd_traffic,
+            "schedule": lambda: K.cmd_schedule("zia")}
+    if sub not in cmds:
+        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|check|traffic|schedule  (see ZIA.md)")
+        return
+    try:
+        cmds[sub]()
+    except K.KitError as e:
+        print(f"\n  ✗ {e}\n    Fix: {zhint(e)}")
+        raise SystemExit(1)
+
+
+def _values(args):
+    return {args[i + 1] for i, a in enumerate(args[:-1]) if a in K.VALUE_OPTS}
+
+
+# ---------------------------------------------------------------- console (gui.html ZIA tab)
+def api_get(path, cfg, tenant):
+    z = zcfg(cfg)
+    if path == "/api/zia/state":
+        return {"users": z.get("users", []), "state": z.get("state"), "prefix": K.PREFIX,
+                "creds": bool(cfg.get("client_id")) and K.kc_has("oneapi-client-secret"),
+                "schedule": z.get("schedule"), "last_traffic": _last_traffic()}
+    if path == "/api/zia/objects":
+        return {"objects": [{"kind": k, "name": g(o, "name") or g(o, "configured_name"), "state": g(o, "state")}
+                            for k, _, o in kit_objects(tenant())]}
+    if path == "/api/zia/dashboards":
+        return dashboards(tenant())
+    return None
+
+
+def _last_traffic():
+    p = K.CFG_DIR / "zia-traffic-last.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    except Exception:
+        return None
+
+
+def api_job(path, body, cfg, tenant, log, job):
+    """Long-running console actions. Returns True if the path was handled."""
+    if path == "/api/zia/preflight":
+        checks, t = preflight(cfg, write_probe=bool(body.get("write_probe")))
+        job["verify"] = checks
+        if t:
+            rules, notes = plan(t, cfg, getattr(t, "_facts", None))
+            job["plan"] = [{"kind": k, "name": n, "action": b.get("action") or b.get("filtering_action")
+                            or ",".join(b.get("actions", []))} for k, _, n, b in rules]
+            job["notes"] = notes
+        return True
+    if path == "/api/zia/apply":
+        t = tenant()
+        if body.get("users"):
+            found, missing = find_users(t, body["users"])
+            if missing:
+                raise K.KitError(f"No ZIA user {', '.join(missing)}.")
+            zcfg(cfg)["users"] = found
+            K.save_cfg(cfg)
+        job["verify"] = setup_apply(t, cfg, log)
+        return True
+    if path == "/api/zia/teardown":
+        teardown(tenant(), cfg, log, confirm=False)
+        return True
+    if path in ("/api/zia/check", "/api/zia/traffic"):
+        tm = traffic_module()
+        if path.endswith("check"):
+            job["verify"] = tm.check(cloud=zcfg(cfg).get("cloud_name"), log=log)
+        else:
+            job["verify"] = tm.run(types=body.get("types") or None, count=int(body.get("count") or 4), log=log,
+                                   log_dir=K.CFG_DIR, stop=lambda: job.get("stop"))
+        return True
+    return False

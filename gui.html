@@ -190,6 +190,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <button data-t="demo">Guided demo</button>
   <button data-t="packs">Test packs</button>
   <button data-t="logs">Logs<span class="tabcount" id="logerr" style="display:none"></span></button>
+  <button data-t="zia">Internet Access (ZIA)</button>
 </nav>
 <div class="healthbar" id="healthbar">
   <div><b>This computer's demo setup needs a repair.</b><ul id="healthlist"></ul></div>
@@ -210,6 +211,47 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
     <div class="row" style="gap:10px"><span class="muted" style="font-size:13px">Deletes every kit object in the tenant and the keys on this machine.</span>
       <input type="text" id="tdconfirm" placeholder="Type DELETE" style="width:130px"><button id="tdgo">Remove everything</button></div>
     <div class="log" id="tdlog" style="display:none;margin-top:12px"></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ ZIA ============ -->
+<div class="view" id="v-zia">
+<div class="wrap stack" style="max-width:1100px">
+  <div class="panel">
+    <h2>1 · Demo policy <span class="muted" style="font-weight:400;font-size:13px">· run on your admin machine</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Creates <code>SE-Demo:</code> URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules for one test user, then activates. Uses the OneAPI client from the Setup tab; it needs a ZIA API role. Other users and locations are not affected.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap">
+      <span class="lbl">Test user</span><input type="text" id="ziauser" placeholder="se-demo-traffic@yourdomain" style="width:300px">
+      <button id="ziapf">Run checks</button><button class="primary" id="ziaapply">Create or update policy</button><button id="ziaobjs">Show kit objects</button>
+    </div>
+    <div class="hint" id="ziausers" style="margin-top:8px"></div>
+    <div id="ziapfout"></div>
+    <div class="log" id="ziapolog" style="display:none;margin-top:12px"></div>
+  </div>
+  <div class="panel">
+    <h2>2 · Traffic generator <span class="muted" style="font-weight:400;font-size:13px">· run on the generator VM, never a corporate laptop</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">This machine must run Client Connector enrolled in the demo tenant and signed in as the test user. No API keys are needed here. Threat and DLP traffic uses only the EICAR test file, Google's Safe Browsing test pages and generated fake data.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap" id="ziatypes"></div>
+    <div class="row" style="gap:10px;margin-top:10px;flex-wrap:wrap">
+      <button id="ziacheck">Check this machine</button>
+      <span class="lbl">Per type</span><input type="number" id="ziacount" value="4" min="1" max="20" style="width:64px">
+      <button class="primary" id="ziasend">Send one round</button><button id="ziastop" disabled>Stop</button>
+      <span class="muted" style="font-size:12px" id="ziasched"></span>
+    </div>
+    <div id="ziachkout"></div>
+    <div class="log" id="ziatrlog" style="display:none;margin-top:12px;max-height:40vh"></div>
+  </div>
+  <div class="panel">
+    <h2>3 · Dashboards</h2>
+    <div class="row" style="gap:10px"><button id="ziadash">Check Insights</button><span class="muted" style="font-size:12px">7 days ending 2 days ago: Insights lags, so new traffic shows here after about two days. ZIA logs show it within minutes.</span></div>
+    <div id="ziadashout" style="margin-top:10px"></div>
+  </div>
+  <div class="panel danger">
+    <h2>Remove the ZIA demo</h2>
+    <div class="row" style="gap:10px"><span class="muted" style="font-size:13px">Deletes every <code>SE-Demo:</code> ZIA object and activates. AI Guard objects are not touched.</span>
+      <input type="text" id="ziatdc" placeholder="Type DELETE" style="width:130px"><button id="ziatd">Remove ZIA demo</button></div>
+    <div class="log" id="ziatdlog" style="display:none;margin-top:12px"></div>
   </div>
 </div>
 </div>
@@ -384,7 +426,7 @@ const segVal=id=>($(`#${id} button.on`)||{}).dataset?.v;
 function note(h,good){const n=$("#notice");n.innerHTML=h;n.classList.toggle("good",!!good);n.style.display=h?"block":"none"}
 
 /* ---------- tabs ---------- */
-$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo")drawStage();if(b.dataset.t=="setup")wizard()});
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo")drawStage();if(b.dataset.t=="setup")wizard();if(b.dataset.t=="zia")zia()});
 
 /* ---------- state ---------- */
 async function loadState(){
@@ -984,6 +1026,40 @@ $("#tdgo").onclick=()=>{
   runJob("/api/setup/teardown",{confirm:"DELETE"},$("#tdlog"),async()=>{$("#tdconfirm").value="";$("#tdlog").insertAdjacentHTML("beforeend",'<div class="h">Done. Run setup again any time.</div>');W.step=0;W.checks=null;W.ans=null;await refreshAll();wizard()});
 };
 async function refreshAll(){try{await loadState();refreshRunner();drawPresets();drawLib();drawStories();drawPacks();loadPolicy()}catch(e){}}
+
+/* ---------- ZIA ---------- */
+const ZT=["web","saas","genai","threats","dlp","files","dns","ports"];
+let ZJOB=null;
+async function zia(){
+  if(!$("#ziatypes").children.length)$("#ziatypes").innerHTML=ZT.map(t=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-zt="${t}" checked>${t}</label>`).join("");
+  try{const z=await api("/api/zia/state");
+    if(z.users&&z.users.length){$("#ziauser").value=z.users.map(u=>u.email||u.name).join(", ");$("#ziausers").textContent="Demo rules apply to: "+$("#ziauser").value+(z.state?` · last setup ${z.state.set_up}, ${z.state.rules} rules`:"")}
+    else $("#ziausers").textContent=z.creds?"Choose a dedicated test user: the one signed in to Client Connector on the generator.":"Save the OneAPI credentials in the Setup tab first (only needed on the admin machine).";
+    $("#ziasched").textContent=z.schedule?`Scheduled: every ${z.schedule.every} min`:"Not scheduled. To repeat: aiguard-kit zia schedule install";
+    if(z.last_traffic)$("#ziasched").textContent+=` · last round ${z.last_traffic.time}: ${z.last_traffic.summary}`;
+  }catch(e){$("#ziausers").textContent=e.message}
+}
+const zusers=()=>$("#ziauser").value.split(",").map(x=>x.trim()).filter(Boolean);
+$("#ziapf").onclick=()=>{$("#ziapfout").innerHTML="";runJob("/api/zia/preflight",{write_probe:true},$("#ziapolog"),j=>{
+  $("#ziapolog").style.display="none";
+  $("#ziapfout").innerHTML=checksHTML(j.verify||[])+(j.plan?`<h2 style="margin-top:12px">What setup will create or update</h2><div class="tablewrap"><table><tr><th>Area</th><th>Rule</th><th>Action</th></tr>${j.plan.map(r=>`<tr><td>${esc(r.kind.replace(/_/g," "))}</td><td>${esc(r.name)}</td><td>${esc(r.action)}</td></tr>`).join("")}</table></div>`:"")+((j.notes||[]).length?`<div class="notice" style="display:block;margin-top:10px">${j.notes.map(esc).join("<br>")}</div>`:"")})};
+$("#ziaapply").onclick=()=>{const users=zusers();if(!users.length)return alert("Enter the test user's email first.");
+  if(!confirm(`Create or update the SE-Demo ZIA policy for ${users.join(", ")} and activate it? Demo/eval tenants only.`))return;
+  runJob("/api/zia/apply",{users},$("#ziapolog"),j=>{zia();if(j.error)return;const v=j.verify||{};$("#ziapolog").insertAdjacentHTML("beforeend",`<div class="h">${v.failed&&v.failed.length?`Done: ${v.rules} rules, ${v.failed.length} need attention`:`Done: ${v.rules} rules active`}. Next: on the generator VM, Check this machine.</div>`)})};
+$("#ziaobjs").onclick=async()=>{$("#ziapfout").innerHTML='<div class="muted">Loading…</div>';try{const r=await api("/api/zia/objects");
+  $("#ziapfout").innerHTML=r.error?`<div class="fail">${esc(r.error)}</div>`:`<div class="tablewrap"><table><tr><th>Type</th><th>Name</th><th>State</th></tr>${r.objects.map(o=>`<tr><td>${esc(o.kind.replace(/_/g," "))}</td><td>${esc(o.name)}</td><td>${esc(o.state||"")}</td></tr>`).join("")||'<tr><td colspan=3 class="muted">None yet</td></tr>'}</table></div>`}catch(e){$("#ziapfout").innerHTML=`<div class="fail">${esc(e.message)}</div>`}};
+$("#ziacheck").onclick=()=>{$("#ziachkout").innerHTML="";runJob("/api/zia/check",{},$("#ziatrlog"),j=>{$("#ziatrlog").style.display="none";$("#ziachkout").innerHTML=checksHTML(j.verify||[])})};
+$("#ziasend").onclick=()=>{const types=$$("[data-zt]").filter(x=>x.checked).map(x=>x.dataset.zt);$("#ziastop").disabled=false;
+  api("/api/zia/traffic",{types,count:+$("#ziacount").value||4}).then(({id})=>{ZJOB=id;const el=$("#ziatrlog");el.style.display="block";el.innerHTML="";let got=0;
+    const tick=async()=>{const j=await api(`/api/job?id=${id}&since=${got}`);got+=j.results.length;
+      el.insertAdjacentHTML("beforeend",j.results.map(e=>`<div class="${e.level}">${ICON[e.level]||"·"} ${esc(e.msg)}</div>`).join(""));el.scrollTop=el.scrollHeight;
+      if(j.done){$("#ziastop").disabled=true;ZJOB=null;el.insertAdjacentHTML("beforeend",`<div class="h">${esc((j.verify||{}).summary||(j.error||{}).error||"Done")}</div>`);zia()}else setTimeout(tick,700)};tick()}).catch(e=>alert(e.message))};
+$("#ziastop").onclick=()=>ZJOB&&api("/api/stop",{id:ZJOB});
+$("#ziadash").onclick=async()=>{$("#ziadashout").innerHTML='<div class="muted">Asking Insights…</div>';try{const r=await api("/api/zia/dashboards");
+  if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));
+  const lab={ok:"has data",partial:"traffic, no blocks yet",empty:"empty",error:"error"};
+  $("#ziadashout").innerHTML=`<div class="tablewrap"><table><tr><th>Panel</th><th>State</th><th>Total</th><th>Top</th></tr>${r.panels.map(p=>`<tr><td>${esc(p.label)}</td><td><span class="ic ${p.status=="ok"?"ok":p.status=="empty"?"fail":"warn"}">${ICON[p.status=="ok"?"ok":p.status=="empty"?"fail":"warn"]}</span> ${lab[p.status]}</td><td>${p.total!=null?p.total.toLocaleString():""}</td><td>${esc((p.top||[]).join(", ")||p.error||"")}</td></tr>`).join("")}</table></div>`}catch(e){$("#ziadashout").innerHTML=`<div class="fail">${esc(e.message)}</div>`}};
+$("#ziatd").onclick=()=>{if($("#ziatdc").value!="DELETE")return alert("Type DELETE to confirm.");runJob("/api/zia/teardown",{confirm:"DELETE"},$("#ziatdlog"),()=>{$("#ziatdc").value="";zia()})};
 
 init();
 </script>

@@ -105,12 +105,19 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ./aiguard-kit teardown                   deletes every SE-Demo object and the local keys (--force: no prompt)
 ./aiguard-kit install | uninstall        desktop shortcut + `aiguard-kit` on PATH (what the double-click installers run)
 
+./aiguard-kit zia setup|preflight|status|teardown|dashboards   ZIA demo policy (admin machine; see ZIA.md)
+./aiguard-kit zia check|traffic|schedule                       ZIA traffic generator (the generator VM, no keys)
+
 Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 ```
 
 **Scheduled traffic** uses launchd (Mac), Task Scheduler (Windows) or cron (Linux) and logs to `~/.aiguard-se-kit/trickle.log`. On a Mac, the first scheduled run may ask for keychain access; choose **Always Allow**.
 
 **Several tenants:** run `./aiguard-kit setup --profile acme`, then add `--profile acme` to any command. Each profile has its own credentials, keys, objects and schedule.
+
+## Internet Access (ZIA)
+
+The kit can also fill ZIA and Insights dashboards in the same demo tenant: `zia setup` creates `SE-Demo:` URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules **for one test user only**, and a separate Windows VM or cloud machine running Client Connector as that user sends real traffic (`zia traffic`, `zia schedule install`). The generator needs no API keys and uses only safe test data (EICAR, Google Safe Browsing test pages, generated fake card numbers and SSNs). Never run it on a corporate laptop. Steps, what's created and what each check proves: [ZIA.md](ZIA.md). The console's **Internet Access (ZIA)** tab does the same.
 
 ## Adding tests
 
@@ -150,4 +157,4 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 
 ## Files
 
-`Install AI Guard Kit.cmd` / `.command`: double-click installers (see INSTALL.md) · `aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.
+`Install AI Guard Kit.cmd` / `.command`: double-click installers (see INSTALL.md) · `aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `zia_module.py`, `zia_policy_template.json`: ZIA demo policy · `zia_traffic.py`, `zia_traffic.json`: ZIA traffic generator · `ZIA.md`: ZIA runbook · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.

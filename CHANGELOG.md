@@ -16,6 +16,22 @@
   response, with Copy.
 - A Detection API 401 or 403 now explains that this computer's key was deleted or isn't in the rule, and to rerun setup, instead of pointing at ZIdentity permissions.
 - The update check asks proxies and CDNs not to answer from cache, so **Check again** always sees a new release.
+- **Internet Access (ZIA).** New `aiguard-kit zia …` commands and a console tab (see ZIA.md):
+  - `zia setup` creates an `SE-Demo:` ZIA policy through OneAPI and activates it. It covers URL filtering (with a
+    tenant-check category), Browser Isolation where licensed, Cloud App Control, File Type Control, DLP, firewall
+    with a demo-ports service, and DNS. Every rule is scoped to one test user and labeled `SE-Demo`. Anything the
+    tenant lacks is skipped and named. `zia teardown` removes it all and activates.
+  - `zia preflight` checks ZIA API access, the test user, DLP engines, SSL inspection, Browser Isolation and create
+    permission.
+  - `zia dashboards` lists which Insights panels are still empty.
+  - The traffic generator (`zia check`, `zia traffic`, `zia schedule`) runs on a separate VM with Client Connector
+    signed in as the test user. It needs no keys. It sends web categories, 60 SaaS apps, GenAI apps, EICAR over
+    HTTP/HTTPS, Safe Browsing test pages, fake-data DLP posts, file uploads and downloads, DNS and unusual ports.
+    `zia check` proves it reaches the demo tenant as the test user and that Z-Tunnel 2.0 is on.
+- Products are now modules beside `aiguard_kit.py` (`PRODUCTS`), sharing credentials, config, console, installer and
+  updater. AI Guard behavior is unchanged.
+- The scheduler supports more than one job. The AI Guard job keeps its names (`AIGuardSEKit-<profile>`,
+  `trickle.log`), and install/uninstall re-point or remove every job.
 
 ## 1.7.1
 - Fixed: setup failed at "Policy rules" with `applicationCredentialsId … not found` when this computer's saved key
