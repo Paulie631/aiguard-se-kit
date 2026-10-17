@@ -113,7 +113,7 @@ class FakeZia:
                 return []
             per = self.actions.get(a[0], [])
             if isinstance(per, dict):   # per app, like the real tenant (some apps list nothing)
-                return list(per.get(a[1][0], []))
+                return list(per.get(a[1][0] if a[1] else "*", []))
             return list(per)
         if resource == "rule_labels":
             objs = self.db["rule_labels"]
@@ -511,6 +511,7 @@ def test_cloud_app_actions_come_only_from_what_the_tenant_lists(zenv):
                   "CHATGPT_AI": ["ALLOW_AI_ML_WEB_USE", "BLOCK_AI_ML_WEB_USE"], "GOOGLE_GEMINI": ["ALLOW_AI_ML_WEB_USE"],
                   "MICROSOFT_COPILOT": ["ALLOW_AI_ML_WEB_USE"], "CLAUDE_AI": ["ALLOW_AI_ML_WEB_USE"], "PERPLEXITY": []},
         "ENTERPRISE_COLLABORATION": {"ANYDESK": ["ALLOW_ENTERPRISE_COLLABORATION_CHAT"], "TEAMVIEWER": []}})
+    fake.actions["FILE_SHARE"]["*"] = []
     cfg = kit.load_cfg()
     cfg["zia"] = {"users": [{"id": 502, "name": "SE Traffic"}]}
     rules, notes = z.plan(fake, cfg)
@@ -522,6 +523,24 @@ def test_cloud_app_actions_come_only_from_what_the_tenant_lists(zenv):
     text = " ".join(notes)
     assert "lists no actions for DEEPSEEK, CHARACTER_AI, POE_AI" in text
     assert "tenant offers: ALLOW_ENTERPRISE_COLLABORATION_CHAT" in text and "left out WETRANSFER" in text
+
+
+def test_type_level_actions_are_used_when_apps_list_none(zenv):
+    kit, z, fake = zenv("zia", actions={"FILE_SHARE": {"*": ["ALLOW_FILE_SHARE_VIEW", "BLOCK_FILE_SHARE_UPLOAD"]}})
+    apps, actions, why = z.pick_actions(fake, "FILE_SHARE", ["WETRANSFER", "MEGA"], [["BLOCK_FILE_SHARE_UPLOAD"]])
+    assert apps == ["WETRANSFER", "MEGA"] and actions == ["BLOCK_FILE_SHARE_UPLOAD"] and "rule type" in why
+
+
+def test_a_name_rejected_on_update_is_renamed_safely(zenv):
+    kit, z, fake = zenv("zia", "setup", "--user", "traffic.tester@pyite.buzz", "--yes", strict=("rule_labels",))
+    kit.cmd_zia()
+    assert any(s["name"] == "SE-Demo: demo ports" for s in fake.db["network_services"])
+    fake.strict.add("cloud_firewall")   # now ZIA rejects the ':' it accepted on create
+    kit.cmd_zia()
+    names = [s["name"] for s in fake.db["network_services"] if s["name"].startswith("SE-Demo")]
+    assert names == ["SE-Demo - demo ports"]
+    kit.cmd_zia()   # and finds it again under the new name
+    assert [s["name"] for s in fake.db["network_services"] if s["name"].startswith("SE-Demo")] == names
 
 
 def test_caution_and_isolate_rules_use_what_zia_allows(zenv):

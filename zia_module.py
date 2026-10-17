@@ -461,7 +461,8 @@ def resolve(t, tpl):
 
 def available_actions(t, rule_type, app):
     try:
-        return [str(a) for a in items(t.call("cloudappcontrol", "list_available_actions", rule_type, [app]))
+        return [str(a) for a in items(t.call("cloudappcontrol", "list_available_actions", rule_type,
+                                             [app] if app else []))
                 if isinstance(a, str) and a]
     except Exception as e:
         K.vlog(f"actions {rule_type} {app}: {e}")
@@ -495,7 +496,12 @@ def pick_actions(t, rule_type, apps, choices):
         actions, kept = max(groups.items(), key=lambda kv: len(kv[1]))
         dropped = [a for a in apps if a not in kept]
         return kept, list(actions), (f"left out {', '.join(dropped)} (no matching actions)" if dropped else "")
-    sample = sorted({a for v in seen.values() for a in v})[:10]
+    general = available_actions(t, rule_type, None)   # some app types only list actions without an app
+    if general:
+        picked = [_match(c, general) for c in choices]
+        if None not in picked:
+            return list(apps), picked, "actions from the rule type (the apps list none of their own)"
+    sample = sorted({a for v in seen.values() for a in v} | set(general))[:10]
     return [], None, ("your tenant lists no actions for " + ", ".join(apps) if not sample else
                       f"no action like {choices[0][0]} for {', '.join(apps)} (tenant offers: {', '.join(sample)})")
 
@@ -601,7 +607,8 @@ def ensure_tenant_category(t, log):
     hit = next((c for c in cats if g(c, "configured_name") in names_for(name)), None)
     body = dict(super_category="USER_DEFINED", urls=tc["urls"], custom_category=True, description=tc["description"])
     if hit:
-        t.call("url_categories", "update_url_category", g(hit, "id"), configured_name=g(hit, "configured_name"), **body)
+        with_valid_name(lambda **n: t.call("url_categories", "update_url_category", g(hit, "id"), **n, **body),
+                        g(hit, "configured_name"), "configured_name")
         return g(hit, "id")
     c = t.call("url_categories", "add_url_category", configured_name=safe_name(name), **body)   # no ':' allowed
     log("ok", f"Created URL category '{g(c, 'configured_name') or name}' ({', '.join(tc['urls'])})")
@@ -614,9 +621,9 @@ def ensure_network_service(t, log):
     hit = next((s for s in items(t.call("cloud_firewall", "list_network_services", query_params={"search": K.PREFIX}))
                 if g(s, "name") in names_for(name)), None)
     ports = [("dest", "tcp", str(p)) for p in ns["dest_tcp"]]
-    if hit:
-        t.call("cloud_firewall", "update_network_service", g(hit, "id"), ports=ports, name=g(hit, "name"),
-               description=ns["description"])
+    if hit:   # ZIA has accepted ':' on create but rejected it on update, so a rejected name is renamed safely
+        with_valid_name(lambda **n: t.call("cloud_firewall", "update_network_service", g(hit, "id"), ports=ports,
+                                           description=ns["description"], **n), g(hit, "name"))
         return g(hit, "id")
     s = with_valid_name(lambda **n: t.call("cloud_firewall", "add_network_service", ports=ports,
                                            description=ns["description"], **n), name)
@@ -669,10 +676,11 @@ def setup_apply(t, cfg, log, facts=None):
             if hit:
                 b["order"] = g(hit, "order")
                 b["name"] = g(hit, "name")   # keep the name ZIA accepted
+                nm = b.pop("name")
                 if kind == "cloud_app_control":
-                    t.call("cloudappcontrol", "update_rule", rule_type, g(hit, "id"), **b)
+                    with_valid_name(lambda **n: t.call("cloudappcontrol", "update_rule", rule_type, g(hit, "id"), **n, **b), nm)
                 else:
-                    t.call(API[kind], "update_rule", g(hit, "id"), **b)
+                    with_valid_name(lambda **n: t.call(API[kind], "update_rule", g(hit, "id"), **n, **b), nm)
                 log("ok", f"Updated '{name}'")
             else:
                 r = _add_at_top(t, kind, rule_type, b, existing)
