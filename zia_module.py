@@ -177,6 +177,25 @@ MANUAL_PW = ("Set or reset its password in the console: " + CONSOLE_USERS + ", c
              "fill Change Password > Password and Confirm Password, then Save.")
 
 
+def auth_mode(t):
+    """How Client Connector users sign in to ZIA: 'hosted' (Hosted DB with form sign-in: the kit can create the user
+    and its password), 'saml' or 'directory' (an IdP or AD/LDAP owns users and passwords), or None if unreadable.
+    Console: Administration > Internet & SaaS Authentication > Internet Authentication Settings."""
+    try:
+        a = t.call("authentication_settings", "get_authentication_settings") or {}
+    except Exception as e:
+        K.vlog(f"auth settings: {e}")
+        return None, ""
+    repo = str(g(a, "org_auth_type") or "").upper()
+    saml = bool(g(a, "saml_enabled"))
+    detail = f"{'Hosted DB' if repo == 'SAFECHANNEL_DIR' else repo or 'unknown'}, {'SAML' if saml else 'form-based'} sign-in"
+    if saml:
+        return "saml", detail
+    if repo == "SAFECHANNEL_DIR":
+        return "hosted", detail
+    return ("directory" if repo else None), detail
+
+
 def gen_password(n=20):
     """Random, and meets ZIA's hosted-database password rules (upper, lower, digit, special, 8+ characters)."""
     import secrets
@@ -246,7 +265,15 @@ def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, p
     a generated password kept in this computer's keychain. via="zidentity": a ZIdentity user (set its password by
     hand). Safe to run again: an existing user is reused."""
     z = zcfg(cfg)
-    via = via or (z.get("created_user") or {}).get("via") or "zia"
+    via = via or (z.get("created_user") or {}).get("via")
+    if not via:
+        mode, detail = auth_mode(t)
+        if mode == "directory":
+            raise K.KitError(f"This tenant signs users in from a directory ({detail}), so the test user has to be "
+                             f"created there. Create it, then rerun with --user <its email>.")
+        via = "zidentity" if mode == "saml" else "zia"
+        if mode == "saml":
+            log("info", f"Users sign in with SAML ({detail}), so the test user is created in ZIdentity")
     if via == "zidentity":
         return create_zid_user(t, cfg, log, email, domain, wait, poll)
     return create_zia_user(t, cfg, log, email, domain)
@@ -291,8 +318,8 @@ def create_zia_user(t, cfg, log, email=None, domain=None):
             raise K.KitError(f"The OneAPI client's ZIA role can't manage users ({str(e)[:120]}). x, or create {email} "
                              f"yourself in {CONSOLE_USERS} and rerun with --user {email}.") from e
         if re.search(r"password", str(e), re.I):
-            raise K.KitError(f"ZIA rejected the generated password ({str(e)[:160]}). Check the password policy "
-                             f"(Administration > Authentication > Password Policy), or create {email} yourself and rerun "
+            raise K.KitError(f"ZIA rejected the generated password ({str(e)[:160]}). Check Password Strength in "
+                             f"Administration > Internet & SaaS Authentication > Internet Authentication Settings, or create {email} yourself and rerun "
                              f"with --user {email}.") from e
         raise
     K.kc_set(PW_KEY, pw)
@@ -693,6 +720,12 @@ def preflight(cfg, write_probe=False):
     else:
         add("zia-user", "Test user chosen", "info", "not yet - setup creates one",
             "Setup creates a dedicated ZIA test user with a generated password, or pass --user to use one you have.")
+        mode, detail = auth_mode(t)
+        add("zia-auth", "How Client Connector users sign in", "ok" if mode in ("hosted", "saml") else
+            ("warn" if mode else "info"), detail or "couldn't read Internet Authentication Settings",
+            {"hosted": "", "saml": "Setup will create the test user in ZIdentity; set its password there once.",
+             "directory": "Create the test user in your directory (AD/LDAP) and pass --user."}.get(mode,
+             "Setup assumes Hosted DB. Check Administration > Internet & SaaS Authentication > Internet Authentication Settings."))
         try:
             dom = tenant_domain(t)
             items(t.call("user_management", "list_groups", query_params={"search": K.PREFIX}))

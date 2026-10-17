@@ -34,7 +34,7 @@ You only need this for a user you created yourself, or to reset a password. The 
 
 1. In the left menu, choose **Administration**. Under **Internet & SaaS Authentication**, choose **Internet & SaaS Users**.
 2. On the **Users** tab, find the user (filter with **User ID or Name** if the list is long). Click the **pencil** icon under **Actions**.
-3. In the **Edit User** panel, scroll to **Change Password**. Enter the new password in **Password** and again in **Confirm Password**. The password has to meet the tenant's password policy (under **Administration > Authentication**, **Password Policy**).
+3. In the **Edit User** panel, scroll to **Change Password**. Enter the new password in **Password** and again in **Confirm Password**. The password has to meet **Password Strength** in **Administration > Internet & SaaS Authentication > Internet Authentication Settings**.
 4. Click **Save**.
 5. Sign in to Client Connector on the generator with the **User ID** (the email) and that password.
 
@@ -43,12 +43,17 @@ To create a user by hand instead:
 2. Give it a User ID on your tenant's domain, a group and a department, and a password.
 3. Run `./aiguard-kit zia setup --user <that User ID>`.
 
-### If your tenant signs users in through ZIdentity
+### How the kit decides where to create the user
 
-The tenant setting **Administration > Internet & SaaS Authentication > Internet Authentication Settings** decides whether Client Connector users sign in with the Internet & SaaS user list above or through ZIdentity. If it's ZIdentity:
-1. Run `./aiguard-kit zia setup --via zidentity`. This creates the user and the group `SE-Demo: traffic generator` in ZIdentity instead.
-2. Set the password in **Administration > Authentication > Directory > Users**. The API can't set it, and this guide doesn't have click-by-click steps for that page yet.
-3. ZIA only lists a ZIdentity user once it has signed in, so if setup reports that ZIA hasn't received the user, sign in once on the generator and rerun setup.
+Setup reads **Administration > Internet & SaaS Authentication > Internet Authentication Settings** (`zia preflight` shows the result as "How Client Connector users sign in"):
+
+| User Repository Type / Authentication Type | Setup |
+|---|---|
+| **Hosted DB** with **Form-Based** (typical demo tenant) | Creates a ZIA Internet & SaaS user with a generated password. Nothing to do by hand |
+| **SAML** | Creates the user and the group `SE-Demo: traffic generator` in ZIdentity. Set its password in **Administration > Authentication > Directory > Users** (the API can't set it; this guide doesn't have click-by-click steps for that page yet). ZIA lists a ZIdentity user only after its first sign-in, so if setup says ZIA hasn't received the user, sign in once on the generator and rerun setup |
+| **Active Directory** or **OpenLDAP** | Stops and asks you to create the user in your directory, then rerun with `--user` |
+
+`--via zia` or `--via zidentity` overrides the choice.
 
 ### What setup creates
 

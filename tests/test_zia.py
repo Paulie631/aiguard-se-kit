@@ -60,6 +60,7 @@ class FakeZia:
         self.members = []
         self.sync = True          # ZIdentity users show up in ZIA right away
         self.passwords = {}
+        self.auth = {"orgAuthType": "SAFECHANNEL_DIR", "samlEnabled": False, "passwordStrength": "NONE"}  # as in the demo tenant
         self.zid_allowed = True
 
     def _rules(self, resource, rule_type=None):
@@ -87,6 +88,10 @@ class FakeZia:
             return {"status": "ACTIVE"}
         if resource == "user_management":
             return self._users(method, a, kw)
+        if resource == "authentication_settings":
+            if self.auth is None:
+                raise sys.modules[type(self).kit_module].KitError("authentication_settings.get failed: 403")
+            return copy.deepcopy(self.auth)
         if resource == "dlp_engine":
             return copy.deepcopy(self.engines)
         if resource == "cloud_browser_isolation":
@@ -395,6 +400,24 @@ def test_slow_zidentity_sync_stops_cleanly_and_resumes(zenv):
     kit.cmd_zia()
     assert sum(u["loginName"].startswith("se-demo-traffic@") for u in fake.zid_users) == 1
     assert mine(fake)
+
+
+def test_where_the_user_is_created_follows_the_tenants_sign_in(zenv):
+    kit, z, fake = zenv("zia")
+    assert z.auth_mode(fake) == ("hosted", "Hosted DB, form-based sign-in")
+    by = {c["id"]: c for c in z.preflight(kit.load_cfg())[0]}
+    assert by["zia-auth"]["status"] == "ok" and "Hosted DB" in by["zia-auth"]["detail"]
+    fake.auth = {"orgAuthType": "SAFECHANNEL_DIR", "samlEnabled": True}      # SAML: the user goes in ZIdentity
+    z.create_test_user(fake, kit.load_cfg(), lambda *a: None)
+    assert any(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) and not fake.passwords
+    fake.auth = {"orgAuthType": "MICROSOFT_ACTIVE_DIRECTORY", "samlEnabled": False}
+    cfg = kit.load_cfg()
+    cfg["zia"] = {}
+    with pytest.raises(kit.KitError, match="directory"):
+        z.create_test_user(fake, cfg, lambda *a: None)
+    fake.auth = None                                                     # unreadable: Hosted DB is assumed
+    z.create_test_user(fake, cfg, lambda *a: None, email="other@pyite.buzz")
+    assert "other@pyite.buzz" in fake.passwords
 
 
 def test_tenant_domain_ignores_zscaler_admin_domains(zenv):
