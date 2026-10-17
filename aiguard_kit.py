@@ -158,6 +158,10 @@ HINTS = [
     (r"CERTIFICATE_VERIFY_FAILED|UnknownIssuer|self.signed certificate|SSLError",
      "TLS inspection is breaking certificate checks. Launch through ./aiguard-kit (it sets UV_SYSTEM_CERTS), and make sure "
      "your Zscaler root CA is in the system keychain (on Windows, the Trusted Root Certification Authorities store). As a last resort set SSL_CERT_FILE to a bundle that includes it."),
+    (r"Detection API HTTP (401|403)",
+     "AI Guard didn't accept this computer's detection key: it was deleted (for example by setup on another computer) "
+     "or isn't in the kit's rule. Open Setup and click Retry, or run ./aiguard-kit setup. New keys can take a minute to "
+     "start working."),
     (r"\b401\b|NOT_AUTHORIZED|Unauthorized",
      "Authenticated but not allowed. In ZIdentity, the API client needs the AI Guard scope (and for ZIA, an API role - "
      "not an admin role - created in ZIA > Role Management)."),
@@ -347,7 +351,7 @@ def das_scan(key, text, direction="IN", user=None, timeout=60):
                       headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     ms = int((time.time() - t0) * 1000)
     if r.status_code >= 400:
-        raise KitError(f"HTTP {r.status_code}: {r.text[:300]}".replace(key, "<key>"))
+        raise KitError(f"Detection API HTTP {r.status_code}: {r.text[:300]}".replace(key, "<key>"))
     return r.json(), ms
 
 

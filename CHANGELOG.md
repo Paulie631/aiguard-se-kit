@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- A Detection API 401 or 403 now explains that this computer's key was deleted or isn't in the rule, and to rerun setup, instead of pointing at ZIdentity permissions.
 - The update check asks proxies and CDNs not to answer from cache, so **Check again** always sees a new release.
 
 ## 1.7.1
