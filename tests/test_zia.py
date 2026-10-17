@@ -109,7 +109,12 @@ class FakeZia:
                 raise sys.modules[type(self).kit_module].KitError("file_type_control_rule.list failed: 404")
             return [{"name": n} for n in self.file_types]
         if resource == "cloudappcontrol" and method == "list_available_actions":
-            return list(self.actions.get(a[0], [])) if self.actions else []
+            if self.actions is None:
+                return []
+            per = self.actions.get(a[0], [])
+            if isinstance(per, dict):   # per app, like the real tenant (some apps list nothing)
+                return list(per.get(a[1][0], []))
+            return list(per)
         if resource == "rule_labels":
             objs = self.db["rule_labels"]
             if method == "list_labels":
@@ -496,6 +501,37 @@ def test_tenant_differences_skip_or_trim_rules(zenv):
     fake.engines = [e for e in fake.engines if e.get("name") != "5 or more Credit Card Numbers"]
     rules, notes = z.plan(fake, cfg)
     assert "SE-Demo: Block card numbers" not in {n for _, _, n, _ in rules}
+
+
+def test_cloud_app_actions_come_only_from_what_the_tenant_lists(zenv):
+    kit, z, fake = zenv("zia", actions={
+        "FILE_SHARE": {"WETRANSFER": [], "MEGA": ["ALLOW_FILE_SHARE_VIEW", "DENY_FILE_SHARE_UPLOAD"],
+                       "SENDSPACE": ["DENY_FILE_SHARE_UPLOAD"], "FILE_IO": [], "FILEBIN": []},
+        "AI_ML": {"DEEPSEEK": [], "CHARACTER_AI": [], "POE_AI": [],
+                  "CHATGPT_AI": ["ALLOW_AI_ML_WEB_USE", "BLOCK_AI_ML_WEB_USE"], "GOOGLE_GEMINI": ["ALLOW_AI_ML_WEB_USE"],
+                  "MICROSOFT_COPILOT": ["ALLOW_AI_ML_WEB_USE"], "CLAUDE_AI": ["ALLOW_AI_ML_WEB_USE"], "PERPLEXITY": []},
+        "ENTERPRISE_COLLABORATION": {"ANYDESK": ["ALLOW_ENTERPRISE_COLLABORATION_CHAT"], "TEAMVIEWER": []}})
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"users": [{"id": 502, "name": "SE Traffic"}]}
+    rules, notes = z.plan(fake, cfg)
+    by = {n: b for k, rt, n, b in rules if k == "cloud_app_control"}
+    up = by["SE-Demo: Block file uploads"]   # same verb and last word: DENY_..._UPLOAD
+    assert up["actions"] == ["DENY_FILE_SHARE_UPLOAD"] and up["applications"] == ["MEGA", "SENDSPACE"]
+    assert by["SE-Demo: Allow GenAI"]["applications"] == ["CHATGPT_AI", "GOOGLE_GEMINI", "MICROSOFT_COPILOT", "CLAUDE_AI"]
+    assert "SE-Demo: Block risky GenAI" not in by and "SE-Demo: Block remote access" not in by
+    text = " ".join(notes)
+    assert "lists no actions for DEEPSEEK, CHARACTER_AI, POE_AI" in text
+    assert "tenant offers: ALLOW_ENTERPRISE_COLLABORATION_CHAT" in text and "left out WETRANSFER" in text
+
+
+def test_caution_and_isolate_rules_use_what_zia_allows(zenv):
+    kit, z, fake = zenv("zia")
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"users": [{"id": 502, "name": "SE Traffic"}]}
+    by = {n: b for k, rt, n, b in z.plan(fake, cfg)[0] if k == "url_filtering"}
+    assert by["SE-Demo: Caution social"]["request_methods"] == ["CONNECT", "GET", "HEAD"]
+    assert by["SE-Demo: Isolate games"]["protocols"] == ["HTTPS_RULE", "HTTP_RULE"]
+    assert "POST" in by["SE-Demo: Block gambling"]["request_methods"]
 
 
 def test_a_rejected_rule_is_reported_and_the_rest_continue(zenv, monkeypatch):

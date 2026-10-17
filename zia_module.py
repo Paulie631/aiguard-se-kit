@@ -168,6 +168,9 @@ ZIA_HINTS = [
     (r"name should be valid",
      "ZIA rejected characters in a name. Update the kit (this was fixed), or run with --prefix using only letters, "
      "digits and hyphens."),
+    (r"Request body is invalid",
+     "ZIA didn't accept the rule's apps or actions. Run setup with --verbose and send the lines for this rule to the "
+     "kit owner (they show the apps and actions sent and what the tenant lists)."),
     (r"INVALID_NAME|can only have",
      "ZIA rejected characters in a name. Update the kit (git pull), then rerun setup: it picks up where it stopped."),
     (r"INVALID_INPUT_ARGUMENT|invalid",
@@ -456,17 +459,45 @@ def resolve(t, tpl):
     return facts
 
 
-def pick_actions(t, rule_type, apps, choices):
-    """choices: [[preferred, fallback, ...], ...] -> the first of each the tenant offers for these apps."""
+def available_actions(t, rule_type, app):
     try:
-        avail = {str(a) for a in items(t.call("cloudappcontrol", "list_available_actions", rule_type, apps)) if a}
+        return [str(a) for a in items(t.call("cloudappcontrol", "list_available_actions", rule_type, [app]))
+                if isinstance(a, str) and a]
     except Exception as e:
-        K.vlog(f"actions {rule_type}: {e}")
-        avail = set()
-    if not avail:
-        return [c[0] for c in choices]
-    out = [next((a for a in c if a in avail), None) for c in choices]
-    return None if None in out else out
+        K.vlog(f"actions {rule_type} {app}: {e}")
+        return []
+
+
+def _match(choice, avail):
+    """The template's preferred action, else the tenant's action with the same verb and the same last word
+    (BLOCK_FILE_SHARE_UPLOAD -> a BLOCK_/DENY_ action ending in UPLOAD)."""
+    for a in choice:
+        if a in avail:
+            return a
+    verb = ("BLOCK", "DENY") if choice[0].startswith(("BLOCK", "DENY")) else (choice[0].split("_", 1)[0],)
+    tail = choice[0].rsplit("_", 2)[-2:] if choice[0].endswith("WEB_USE") else choice[0].rsplit("_", 1)[-1:]
+    want = "_".join(tail)
+    return next((a for a in avail if a.startswith(verb) and a.endswith(want)), None)
+
+
+def pick_actions(t, rule_type, apps, choices):
+    """Asks the tenant which actions each app supports. Returns (apps, actions, why): the largest set of apps that
+    share actions matching the template's choices, or ([], None, why) when none do. Never guesses action names:
+    a guessed name makes ZIA reject the whole rule ("Request body is invalid")."""
+    groups, seen = {}, {}
+    for app in apps:
+        avail = available_actions(t, rule_type, app)
+        seen[app] = avail
+        picked = [_match(c, avail) for c in choices]
+        if avail and None not in picked:
+            groups.setdefault(tuple(picked), []).append(app)
+    if groups:
+        actions, kept = max(groups.items(), key=lambda kv: len(kv[1]))
+        dropped = [a for a in apps if a not in kept]
+        return kept, list(actions), (f"left out {', '.join(dropped)} (no matching actions)" if dropped else "")
+    sample = sorted({a for v in seen.values() for a in v})[:10]
+    return [], None, ("your tenant lists no actions for " + ", ".join(apps) if not sample else
+                      f"no action like {choices[0][0]} for {', '.join(apps)} (tenant offers: {', '.join(sample)})")
 
 
 # ---------------------------------------------------------------- the plan
@@ -480,10 +511,12 @@ def plan(t, cfg, facts=None):
     out = []
     scope = {"users": users, "state": "ENABLED", "rank": 7}
 
+    all_methods = ["CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "OTHER", "POST", "PUT", "TRACE"]
     for r in tpl["url_filtering"]:
         out.append(("url_filtering", None, zname(r["name"]),
                     dict(scope, action=r["action"], url_categories=r["url_categories"], protocols=["ANY_RULE"],
-                         request_methods=["CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "OTHER", "POST", "PUT", "TRACE"],
+                         # ZIA: Caution works only for CONNECT/GET/HEAD
+                         request_methods=["CONNECT", "GET", "HEAD"] if r["action"] == "CAUTION" else all_methods,
                          description="SE demo kit: demo rule for the test user only")))
     for r in tpl.get("isolation", []):
         if not facts.get("cbi"):
@@ -491,17 +524,20 @@ def plan(t, cfg, facts=None):
             continue
         cbi = facts["cbi"]
         out.append(("url_filtering", None, zname(r["name"]),
-                    dict(scope, action="ISOLATE", url_categories=r["url_categories"], protocols=["ANY_RULE"],
+                    dict(scope, action="ISOLATE", url_categories=r["url_categories"], protocols=["HTTPS_RULE", "HTTP_RULE"],
+                         request_methods=["CONNECT", "GET", "HEAD"],
                          user_agent_types=["CHROME", "FIREFOX", "MSEDGE", "MSCHREDGE", "SAFARI", "OTHER"],
                          cbi_profile={"id": g(cbi, "id"), "name": g(cbi, "name"), "url": g(cbi, "url")},
                          description="SE demo kit: isolates this category for the test user")))
     for r in tpl["cloud_app_control"]:
-        actions = pick_actions(t, r["rule_type"], r["applications"], r["actions"])
+        apps, actions, why = pick_actions(t, r["rule_type"], r["applications"], r["actions"])
         if not actions:
-            notes.append(f"'{zname(r['name'])}' skipped: your tenant offers none of {r['actions']} for {r['rule_type']}")
+            notes.append(f"'{zname(r['name'])}' skipped: {why}")
             continue
+        if why:
+            notes.append(f"'{zname(r['name'])}': {why}")
         out.append(("cloud_app_control", r["rule_type"], zname(r["name"]),
-                    dict(scope, applications=r["applications"], actions=actions,
+                    dict(scope, applications=apps, actions=actions,
                          description="SE demo kit: Shadow IT and GenAI demo")))
     for r in tpl["file_type_control"]:
         types_ = r["file_types"]
