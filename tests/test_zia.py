@@ -42,7 +42,7 @@ class FakeZia:
             "rule_labels": [], "url_categories": [{"id": "CUSTOM_00", "configuredName": "Home allow list"}],
             "network_services": [{"id": 8, "name": "HTTPS"}],
             "users": [{"id": 501, "name": "ztest", "email": "ztest@pyite.buzz"},
-                      {"id": 502, "name": "SE Traffic", "email": "se-demo-traffic@pyite.buzz"}],
+                      {"id": 502, "name": "SE Traffic", "email": "traffic.tester@pyite.buzz"}],
             "ssl": [{"id": 9, "name": "Decrypt All Traffic", "state": "ENABLED", "action": {"type": "DECRYPT"}}],
         }
         self.engines = [{"id": 61, "predefinedEngineName": "PCI"}, {"id": 17, "name": "PII (US) - Low Volume"},
@@ -54,6 +54,12 @@ class FakeZia:
         self.calls = []
         self.activations = 0
         self.zins = {}
+        self.zid_users = [{"id": "zu-1", "loginName": "ztest@pyite.buzz", "primaryEmail": "ztest@pyite.buzz"},
+                          {"id": "zu-2", "loginName": "admin@paulaiuto.zslogin.net", "primaryEmail": "paiuto@zscaler.com"}]
+        self.zid_groups = []
+        self.members = []
+        self.sync = True          # ZIdentity users show up in ZIA right away
+        self.zid_allowed = True
 
     def _rules(self, resource, rule_type=None):
         if resource == "cloudappcontrol":
@@ -71,6 +77,8 @@ class FakeZia:
 
     def call(self, resource, method, *a, **kw):
         self.calls.append((resource, method, a, kw))
+        if resource.startswith("zid."):
+            return self._zid(resource, method, a, kw)
         if resource.startswith("zins."):
             return copy.deepcopy(self.zins.get(method + str(sorted(kw.items())), self.zins.get(method, [])))
         if resource == "activate":
@@ -142,6 +150,45 @@ class FakeZia:
             return None
         raise AssertionError(f"unexpected call {resource}.{method}")
 
+    def _zid(self, resource, method, a, kw):
+        KitError = sys.modules[type(self).kit_module].KitError
+        if not self.zid_allowed:
+            raise KitError(f"{resource}.{method} failed: 403 Forbidden")
+        if resource == "zid.users":
+            if method == "list_users":
+                want = (kw.get("query_params") or {}).get("login_name")
+                return {"records": copy.deepcopy([u for u in self.zid_users if not want or u["loginName"] == want])}
+            if method == "add_user":
+                u = dict(camel(copy.deepcopy(kw)), id=f"zu-{next(self.ids)}")
+                self.zid_users.append(u)
+                if self.sync:
+                    self.push(u)
+                return copy.deepcopy(u)
+            if method == "delete_user":
+                self.zid_users = [u for u in self.zid_users if u["id"] != a[0]]
+                self.db["users"] = [u for u in self.db["users"] if u.get("zid") != a[0]]
+                return None
+        if resource == "zid.groups":
+            if method == "list_groups":
+                return {"records": copy.deepcopy(self.zid_groups)}
+            if method == "add_group":
+                grp = dict(camel(copy.deepcopy(kw)), id=f"zg-{next(self.ids)}")
+                self.zid_groups.append(grp)
+                return copy.deepcopy(grp)
+            if method == "add_user_to_group":
+                if (a[0], a[1]) in self.members:
+                    raise KitError("zid.groups.add_user_to_group failed: 409 already a member")
+                self.members.append((a[0], a[1]))
+                return None
+            if method == "delete_group":
+                self.zid_groups = [x for x in self.zid_groups if x["id"] != a[0]]
+                return None
+        raise AssertionError(f"unexpected call {resource}.{method}")
+
+    def push(self, u):
+        """ZIdentity -> ZIA user sync."""
+        self.db["users"].append({"id": next(self.ids), "name": u["displayName"], "email": u["loginName"], "zid": u["id"]})
+
     def all_rules(self):
         out = [r for k in ("url_filtering", "file_type_control_rule", "dlp_web_rules", "cloud_firewall_rules",
                            "cloud_firewall_dns") for r in self.db[k]]
@@ -196,7 +243,7 @@ def test_template_names_fit_zia_limits_and_are_unique():
 
 
 def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
-    kit, z, fake = zenv("zia", "setup", "--user", "se-demo-traffic@pyite.buzz", "--yes")
+    kit, z, fake = zenv("zia", "setup", "--user", "traffic.tester@pyite.buzz", "--yes")
     kit.cmd_zia()
     made = mine(fake)
     assert "SE-Demo: Block gambling" in made and "SE-Demo: Block card numbers" in made
@@ -217,7 +264,7 @@ def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
     # demo rules go above the tenant's own, so they win for the test user
     assert min(r["order"] for r in fake.db["url_filtering"] if r["name"].startswith("SE-Demo:")) == 1
     assert fake.activations == 1
-    assert kit.load_cfg()["zia"]["users"] == [{"id": 502, "name": "SE Traffic", "email": "se-demo-traffic@pyite.buzz"}]
+    assert kit.load_cfg()["zia"]["users"] == [{"id": 502, "name": "SE Traffic", "email": "traffic.tester@pyite.buzz"}]
     before = (len(fake.all_rules()), len(fake.db["url_categories"]), len(fake.db["network_services"]), len(fake.db["rule_labels"]))
     kit.cmd_zia()   # again: updates in place
     assert (len(fake.all_rules()), len(fake.db["url_categories"]), len(fake.db["network_services"]),
@@ -227,12 +274,70 @@ def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
     assert {"URL Filtering Rule-1", "DLP PCI Rule-1", "AI_ML_App_Rule_1"} <= {r["name"] for r in fake.all_rules()}
 
 
-def test_setup_without_user_in_yes_mode_stops_before_changes(zenv, capsys):
-    kit, _, fake = zenv("zia", "setup", "--yes")
+def test_setup_creates_the_test_user_when_none_is_given(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    new = next(u for u in fake.zid_users if u["loginName"] == "se-demo-traffic@pyite.buzz")   # the tenant's domain
+    assert new["displayName"] == "SE-Demo Traffic" and new["status"] is True
+    grp = next(x for x in fake.zid_groups if x["name"] == "SE-Demo: traffic generator")
+    assert (grp["id"], new["id"]) in fake.members
+    zia_user = next(u for u in fake.db["users"] if u["email"] == "se-demo-traffic@pyite.buzz")
+    assert all(r["users"] == [zia_user["id"]] for r in fake.all_rules() if r["name"].startswith("SE-Demo:"))
+    assert "can't set passwords" in out and "se-demo-traffic@pyite.buzz" in out
+    made = kit.load_cfg()["zia"]["created_user"]
+    assert made["email"] == "se-demo-traffic@pyite.buzz" and made["zid_id"] == new["id"]
+    kit.cmd_zia()   # again: reuses the user, no duplicates
+    assert sum(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) == 1
+    assert len(fake.zid_groups) == 1 and len(fake.members) == 1
+
+
+def test_teardown_removes_the_user_it_created_but_never_yours(zenv):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    kit.ARGS[:] = ["zia", "teardown", "--force"]
+    kit.FORCE = True
+    kit.cmd_zia()
+    assert [u["loginName"] for u in fake.zid_users] == ["ztest@pyite.buzz", "admin@paulaiuto.zslogin.net"]
+    assert not fake.zid_groups and "created_user" not in kit.load_cfg()["zia"]
+    # a user you chose yourself stays
+    kit.ARGS[:] = ["zia", "setup", "--user", "ztest@pyite.buzz", "--yes"]
+    kit.cmd_zia()
+    kit.ARGS[:] = ["zia", "teardown", "--force"]
+    kit.cmd_zia()
+    assert any(u["loginName"] == "ztest@pyite.buzz" for u in fake.zid_users)
+    assert not [c for c in fake.calls if c[:2] == ("zid.users", "delete_user") and c[2] == ("zu-1",)]
+
+
+def test_slow_user_sync_stops_cleanly_and_resumes(zenv, monkeypatch):
+    kit, z, fake = zenv("zia")
+    fake.sync = False
+    cfg = kit.load_cfg()
+    with pytest.raises(kit.KitError, match="hasn't received it yet"):
+        z.create_test_user(fake, cfg, lambda *a: None, wait=0)
+    assert not mine(fake) and kit.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@pyite.buzz"
+    fake.push(fake.zid_users[-1])   # ZIA catches up
+    kit.ARGS[:] = ["zia", "setup", "--yes"]
+    kit.YES = True
+    kit.cmd_zia()
+    assert sum(u["loginName"].startswith("se-demo-traffic@") for u in fake.zid_users) == 1
+    assert mine(fake)
+
+
+def test_no_zidentity_access_explains_both_ways_out(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    fake.zid_allowed = False
     with pytest.raises(SystemExit):
         kit.cmd_zia()
-    assert "--user" in capsys.readouterr().out
-    assert not mine(fake) and fake.activations == 0
+    out = capsys.readouterr().out
+    assert "can't manage ZIdentity users" in out and "--user" in out and not mine(fake)
+
+
+def test_tenant_domain_ignores_zscaler_admin_domains(zenv):
+    kit, z, fake = zenv("zia")
+    assert z.tenant_domain(fake) == "pyite.buzz"
+    fake.zid_users, fake.db["users"] = [{"id": "x", "loginName": "admin@acme.zslogin.net"}], []
+    assert z.tenant_domain(fake) is None
 
 
 def test_unknown_test_user_is_rejected(zenv, capsys):
@@ -294,7 +399,7 @@ def test_predefined_rules_pinned_at_top_push_demo_rules_down(zenv):
 
 
 def test_teardown_removes_only_kit_objects_and_activates(zenv):
-    kit, z, fake = zenv("zia", "setup", "--user", "se-demo-traffic@pyite.buzz", "--yes")
+    kit, z, fake = zenv("zia", "setup", "--user", "traffic.tester@pyite.buzz", "--yes")
     kit.cmd_zia()
     assert mine(fake)
     kit.ARGS[:] = ["zia", "teardown", "--force"]

@@ -16,12 +16,15 @@ The ZIA tab of the console does the same as these commands.
 1. Give the OneAPI client ZIA access (one time):
    - ZIA > Administration > Role Management: add an **API** role with full access to URL Filtering, Cloud App Control, File Type Control, DLP, Firewall and Activation.
    - ZIdentity > Integration > API Clients: edit the kit's client and add Zscaler Internet Access with that role.
-2. Create a dedicated test user, for example `se-demo-traffic@yourdomain`, in ZIdentity or your IdP. Never use your own account.
-3. Check, then create:
+2. Create the policy. Setup creates the test user for you:
    ```
    ./aiguard-kit zia preflight
-   ./aiguard-kit zia setup --user se-demo-traffic@yourdomain
+   ./aiguard-kit zia setup
    ```
+   - **The test user.** With no `--user`, setup creates `se-demo-traffic@<your tenant's domain>` in ZIdentity, plus the group `SE-Demo: traffic generator`. It then waits until ZIA has the user, usually under a minute. Use `--domain` to choose the domain, or `--user someone@yourdomain` to use a dedicated user you already have (never your own account).
+   - **The password.** ZIdentity's API can't set passwords, so set one yourself, once: in the ZIdentity admin console, open the user and set a password. That's what you sign in to Client Connector with on the generator. Keep it out of chat and email.
+   - **API access.** The OneAPI client needs ZIdentity user management for this. Without it, setup says so and you can create the user yourself and pass `--user`.
+   - **Teardown.** `zia teardown` removes the user and group only if the kit created them.
 
 ### What setup creates
 
@@ -37,6 +40,7 @@ Every object is scoped to the test user only, labeled `SE-Demo`, placed above yo
 | Firewall | Block TCP 23, 2222, 4444 and 8888 (network service `SE-Demo: demo ports`) |
 | DNS | Block the marijuana category. The web sweep never visits it, so DNS blocks don't hide URL blocks |
 | Shared objects | URL category `SE-Demo: tenant check` (example.com), rule label `SE-Demo: SE-Demo` |
+| ZIdentity (unless you pass `--user`) | User `se-demo-traffic@<domain>`, group `SE-Demo: traffic generator` |
 
 The rules are defined in `zia_policy_template.json`. Setup checks the template against your tenant and skips or trims anything it doesn't have (an isolation profile, a DLP engine, an app action), saying which in the review.
 
@@ -54,7 +58,7 @@ The rules are defined in `zia_policy_template.json`. Setup checks the template a
 2. **Client Connector.** Install it and enroll in the demo tenant as the test user.
 3. **Z-Tunnel 2.0.** Firewall, DNS and unusual-port traffic only reach ZIA through Z-Tunnel 2.0. Z-Tunnel 1.0 carries web traffic only. In the Client Connector portal:
    1. Under Forwarding Profile, copy your profile as `SE-Demo: Z-Tunnel 2.0`, with Tunnel version set to **Z-Tunnel 2.0** for on-trusted and off-trusted networks.
-   2. Add a Windows app profile `SE-Demo: …` that uses that forwarding profile, assigned to the test user's group only.
+   2. Add a Windows app profile `SE-Demo: …` that uses that forwarding profile, assigned only to the group `SE-Demo: traffic generator` (setup creates it).
    
    This leaves your other devices as they are.
 4. **SSL inspection.** It must decrypt the test user's traffic, which `zia preflight` checks. EICAR over HTTPS, DLP and Cloud App Control need it.

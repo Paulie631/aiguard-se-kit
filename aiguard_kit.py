@@ -23,7 +23,8 @@
                            (what the double-click installers run); uninstall removes them
 
 Internet Access (ZIA), see ZIA.md:
-  ./aiguard-kit zia setup      preflight, then create the SE-Demo ZIA policy (scoped to your test user) and activate it
+  ./aiguard-kit zia setup      preflight, create a test user (or --user an existing one), then the SE-Demo ZIA policy
+                               scoped to that user, and activate it
   ./aiguard-kit zia preflight  read-only ZIA checks (--write-probe, --json)
   ./aiguard-kit zia status     list the kit's ZIA objects;  zia teardown removes them and activates
   ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
@@ -84,7 +85,7 @@ YES = "--yes" in ARGS or "-y" in ARGS
 FORCE = "--force" in ARGS
 VERBOSE = "--verbose" in ARGS or "-v" in ARGS
 VALUE_OPTS = ("--prefix", "--preset", "--mode", "--rounds", "--tests", "--port", "--profile", "--count", "--every",
-              "--user", "--types")
+              "--user", "--types", "--domain")
 
 
 def opt(name, default=None):
