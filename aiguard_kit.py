@@ -37,7 +37,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -1497,53 +1497,54 @@ def kit_app_credentials(t, cfg=None):
                 ids.update(a.get("applicationCredentialsIds") or [])
     for a in ((cfg or {}).get("state") or {}).get("apps", {}).values():
         ids.update(x for x in (a.get("das_cred_id"), a.get("proxy_cred_id")) if x)
-    ids.update(((cfg or {}).get("state") or {}).get("retire", []))
+    st_ = (cfg or {}).get("state") or {}
+    ids.update(st_.get("retire_own", []) + st_.get("retire", []))
     for cid in ids - set(found):
         try:
             c = t.call("llm_application_credentials", "get_credential", cid)
             if c and is_mine(c):
                 found[cid] = c
         except Exception as e:
-            vlog(f"credential {cid}: {e}")
+            if not re.search(r"404|not.?found", str(e), re.I):
+                raise  # a network or permission problem must not look like a deleted key
+            vlog(f"credential {cid}: gone")
     return found
 
 
+def _machine():
+    import platform
+    return re.sub(r"[^A-Za-z0-9-]", "-", platform.node().split(".")[0])[:24] or "this-computer"
+
+
 def create_app_key(t, cfg, log, label, kind, **fields):
-    """Creates a kit app credential. If one with the same name already exists (its key isn't on this machine,
-    e.g. after a reinstall), creates a uniquely named replacement and marks the old one for removal."""
+    """Creates a kit app credential. The name includes this computer's name, so several computers can each keep
+    their own key in one tenant; if the name is taken (e.g. after a reinstall), a timestamp is added."""
     base = f"{PREFIX}: {label} {kind} key"
-    st = cfg["state"]
-    existing = [c for c in kit_app_credentials(t, cfg).values() if c.get("name", "").startswith(base)
-                and c.get("applicationId") == fields.get("applicationId")]
-    name = base
-    if any(c.get("name") == base for c in existing):
-        name = f"{base} {time.strftime('%Y%m%d-%H%M%S')}"
+    name = f"{base} ({_machine()})"
+    taken = {c.get("name") for c in kit_app_credentials(t, cfg).values()}
+    if name in taken:
+        name = f"{name} {time.strftime('%Y%m%d-%H%M%S')}"
     try:
-        cred = t.call("llm_application_credentials", "add_credential", name=name, **fields)
+        return t.call("llm_application_credentials", "add_credential", name=name, **fields)
     except KitError as e:
         if "409" not in str(e) and "already_exists" not in str(e):
             raise
-        name = f"{base} {time.strftime('%Y%m%d-%H%M%S')}"
-        cred = t.call("llm_application_credentials", "add_credential", name=name, **fields)
-    old = [c["id"] for c in existing if c["id"] != cred["id"]]
-    if old:
-        st.setdefault("retire", [])
-        st["retire"] = sorted(set(st["retire"]) | set(old))
-        log("info", f"{label}: an earlier {kind} key exists in AI Guard but its secret isn't on this machine; "
-                    f"created a replacement and will remove the old one")
-    return cred
+        return t.call("llm_application_credentials", "add_credential", name=f"{base} ({_machine()}) "
+                      f"{time.strftime('%Y%m%d-%H%M%S')}", **fields)
 
 
 def retire_old_keys(t, cfg, log):
+    """Deletes keys this computer created earlier and can no longer use (its own state recorded them)."""
     st = cfg["state"]
-    for cid in list(st.get("retire", [])):
+    for cid in list(st.get("retire_own", [])):
         try:
             t.call("llm_application_credentials", "delete_credential", cid)
-            log("ok", f"Removed an old key (id {cid}) that this machine couldn't use")
+            log("ok", f"Removed this computer's old key (id {cid}), which it could no longer use")
         except Exception as e:
-            log("warn", f"Couldn't remove old key {cid} yet: {str(e)[:120]}")
-            continue
-        st["retire"].remove(cid)
+            if not re.search(r"404|not.?found", str(e), re.I):
+                log("warn", f"Couldn't remove old key {cid} yet: {str(e)[:120]}")
+                continue
+        st["retire_own"].remove(cid)
     save_cfg(cfg)
 
 
@@ -1589,6 +1590,8 @@ def setup_apply(t, cfg, ans, log):
     save_cfg(cfg)
 
     log("head", "Demo apps and keys")
+    st.pop("retire", None)  # 1.5.x marked other computers' keys for deletion; never do that
+    alive = kit_app_credentials(t, cfg)  # every kit key in AI Guard, including ones the list API hides
     apps, providers = t.list("llm_applications"), t.list("llm_providers")
     pcreds = t.list("llm_provider_credentials")
     for ptype, (ctype, field, model) in PROVIDERS.items():
@@ -1609,6 +1612,16 @@ def setup_apply(t, cfg, ans, log):
                  provider_id=prov["id"] if prov else None)
         st["apps"][app_name] = a
         save_cfg(cfg)
+        for credkey, kind in (("das_cred_id", "detection"), ("proxy_cred_id", "proxy")):
+            cid = a.get(credkey)
+            if cid and (cid not in alive or alive[cid].get("applicationId") not in (None, a["id"])):
+                log("info", f"{label}: this computer's saved {kind} key (id {cid}) no longer exists in AI Guard "
+                            f"(it may have been removed by setup or teardown on another computer); creating a new one")
+                a.pop(credkey, None)
+            elif cid and not kc_get(f"{app_name}:{'detections' if kind == 'detection' else 'proxy'}"):
+                st.setdefault("retire_own", [])
+                st["retire_own"] = sorted(set(st["retire_own"]) | {cid})  # ours, but its secret is gone
+                a.pop(credkey, None)
         if not (a.get("das_cred_id") and kc_get(f"{app_name}:detections")):
             cred = create_app_key(t, cfg, log, label, "detection", applicationId=a["id"], mode="DETECTIONS")
             kc_set(f"{app_name}:detections", cred["key"])
@@ -1654,11 +1667,22 @@ def setup_apply(t, cfg, ans, log):
     log("head", "Policy rules")
     rules = t.list("policy_match_rules")
     order = max([r.get("ruleOrder", 0) for r in rules if not is_mine(r)] + [0])
+    alive = kit_app_credentials(t, cfg)
+    drop = set(st.get("retire_own", []))
     for kind, rtype, credkey in (("detection", "DAS_APPLICATION", "das_cred_id"), ("proxy", "APPLICATION", "proxy_cred_id")):
-        entries = [{"applicationId": a["id"], "applicationCredentialsIds": [a[credkey]]}
-                   for a in st["apps"].values() if a.get(credkey)]
         rname = f"{PREFIX}: {kind} apps"
         existing = next((r for r in rules if r.get("name") == rname), None)
+        others = {}  # keys other computers added to this rule, still present in AI Guard
+        if existing:
+            mc = existing.get("matchCriteria") or t.call("policy_match_rules", "get_rule", existing["id"]).get("matchCriteria") or {}
+            for e in mc.get("llmApplications") or []:
+                others[e.get("applicationId")] = [i for i in e.get("applicationCredentialsIds") or []
+                                                  if i in alive and i not in drop]
+        entries = []
+        for a in st["apps"].values():
+            if a.get(credkey):
+                ids = [a[credkey]] + [i for i in others.get(a["id"], []) if i != a[credkey]]
+                entries.append({"applicationId": a["id"], "applicationCredentialsIds": ids})
         if not entries:
             continue
         order += 1
@@ -1674,7 +1698,7 @@ def setup_apply(t, cfg, ans, log):
             st[f"{kind}_rule_id"] = r["id"]
             log("ok", f"Created rule '{rname}' (order {body['ruleOrder']})")
     save_cfg(cfg)
-    if st.get("retire"):
+    if st.get("retire_own"):
         retire_old_keys(t, cfg, log)   # only now: the rules no longer point at them
 
 

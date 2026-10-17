@@ -49,6 +49,14 @@ class FakeTenant:
 
     def call(self, r, m, *a, **kw):
         self.calls.append((r, m, a, kw))
+        KitError = sys.modules[type(self).kit_module].KitError
+        if r == "policy_match_rules" and m in ("add_rule", "update_rule"):  # the real API rejects unknown keys
+            have = {o["id"] for o in self.db["llm_application_credentials"]}
+            for e in (kw.get("matchCriteria") or {}).get("llmApplications") or []:
+                for i in e.get("applicationCredentialsIds") or []:
+                    if i not in have:
+                        raise KitError(f'policy_match_rules.{m} failed: {{"status": 400, "detail": '
+                                       f'"applicationCredentialsId {i} not found"}}')
         if m.startswith("add"):
             if r == "llm_application_credentials" and any(o.get("name") == kw.get("name") for o in self.db[r]):
                 raise sys.modules[type(self).kit_module].KitError(
@@ -59,7 +67,10 @@ class FakeTenant:
             self.db[r].append(o)
             return copy.deepcopy(o)
         if m.startswith("get"):
-            return copy.deepcopy(next(o for o in self.db[r] if o["id"] == a[0]))
+            o = next((o for o in self.db[r] if o["id"] == a[0]), None)
+            if o is None:   # like the real API
+                raise KitError(f'{r}.{m} failed: {{"status": 404, "title": "Not Found"}}')
+            return copy.deepcopy(o)
         if m.startswith("update"):
             objs = self.db[r]
             i = next(i for i, o in enumerate(objs) if o["id"] == a[0])
@@ -413,8 +424,9 @@ def test_reused_key_that_vanished_gives_clear_error(env):
 
 
 def test_reinstall_with_hidden_detection_keys(env):
-    """Keys exist in AI Guard but not on this machine (new laptop, wiped keychain): setup must replace them
-    without a 409, and teardown must still find the DETECTIONS keys the list API hides."""
+    """Keys exist in AI Guard but this computer has no record of them (another computer's keys, or a wiped
+    state): setup adds its own key without a 409, keeps the others working, and teardown still finds the
+    DETECTIONS keys the list API hides."""
     kit, t = env("setup", "--yes")
     kit.cmd_setup()
     first = {c["id"] for c in t.db["llm_application_credentials"]}
@@ -424,13 +436,10 @@ def test_reinstall_with_hidden_detection_keys(env):
     for a in cfg["state"]["apps"].values():
         a.pop("das_cred_id", None)
     kit.save_cfg(cfg)
-    logs = []
-    kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())),
-                    lambda lv, m: logs.append(m))
+    kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())), lambda *a: None)
     now = {c["id"]: c for c in t.db["llm_application_credentials"]}
-    assert not (first & set(now)), "old keys should be retired"
-    assert all(c["name"].startswith("SE-Demo: ") for c in now.values()) and len(now) == 2
-    assert any("replacement" in m for m in logs) and any("Removed an old key" in m for m in logs)
+    assert first < set(now) and len(now) == 4, "unknown keys are kept, a new key is added per app"
+    assert all(c["name"].startswith("SE-Demo: ") for c in now.values())
     rule = next(r for r in t.db["policy_match_rules"] if r["name"] == "SE-Demo: detection apps")
     assert {i for a in rule["matchCriteria"]["llmApplications"] for i in a["applicationCredentialsIds"]} == set(now)
     kit.FORCE = True
@@ -699,3 +708,49 @@ def test_release_package_has_update_manifest(tmp_path):
     assert info["version"] == v and info["zip_url"].endswith(f"/v{v}/aiguard-se-kit-{v}.zip")
     assert info["sha256"] == hashlib.sha256((ROOT / f"dist/aiguard-se-kit-{v}.zip").read_bytes()).hexdigest()
     assert info["notes"]
+
+
+
+def test_two_computers_share_a_tenant(env):
+    """Setup on computer B must not break computer A, and A's rerun must recover if its key was deleted."""
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    a_cfg, a_kc = kit.load_cfg(), dict(kit._kc)
+    a_keys = {a["das_cred_id"] for a in a_cfg["state"]["apps"].values()}
+    # computer B: same tenant, its own settings and keychain
+    kit._kc.clear()
+    kit._kc["oneapi-client-secret"] = "s"
+    b_cfg = {k: v for k, v in a_cfg.items() if k != "state"}
+    kit.save_cfg(b_cfg)
+    kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())), lambda *a: None)
+    rule = next(r for r in t.db["policy_match_rules"] if r["name"] == "SE-Demo: detection apps")
+    in_rule = {i for e in rule["matchCriteria"]["llmApplications"] for i in e["applicationCredentialsIds"]}
+    assert a_keys <= in_rule, "B's setup must keep A's keys in the rule"
+    assert a_keys <= {c["id"] for c in t.db["llm_application_credentials"]}, "B must not delete A's keys"
+    # now A's key gets deleted (e.g. by an older kit version or a manual cleanup) and A reruns setup
+    gone = sorted(a_keys)[0]
+    t.db["llm_application_credentials"] = [c for c in t.db["llm_application_credentials"] if c["id"] != gone]
+    for r in t.db["policy_match_rules"]:
+        for e in (r.get("matchCriteria") or {}).get("llmApplications") or []:
+            e["applicationCredentialsIds"] = [i for i in e["applicationCredentialsIds"] if i != gone]
+    kit._kc.clear()
+    kit._kc.update(a_kc)
+    kit.save_cfg(a_cfg)
+    logs = []
+    kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())),
+                    lambda lv, m: logs.append(m))
+    assert any("no longer exists in AI Guard" in m for m in logs)
+    ids = {a["das_cred_id"] for a in kit.load_cfg()["state"]["apps"].values()}
+    assert gone not in ids and ids <= {c["id"] for c in t.db["llm_application_credentials"]}
+
+
+def test_lost_secret_retires_only_this_computers_own_key(env):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    cfg = kit.load_cfg()
+    app = next(iter(cfg["state"]["apps"]))
+    own = cfg["state"]["apps"][app]["das_cred_id"]
+    del kit._kc[f"{app}:detections"]
+    kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())), lambda *a: None)
+    assert own not in {c["id"] for c in t.db["llm_application_credentials"]}
+    assert kit.load_cfg()["state"]["apps"][app]["das_cred_id"] != own

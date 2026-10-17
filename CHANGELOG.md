@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.1
+- Fixed: setup failed at "Policy rules" with `applicationCredentialsId … not found` when this computer's saved key
+  had been deleted in AI Guard (for example by setup on another computer). Setup now checks every saved key still
+  exists, and creates a new one if it doesn't.
+- Several computers can now share one demo tenant: each keeps its own keys (named with the computer's name), the
+  kit's rules keep every computer's keys, and setup never deletes keys another computer created. Only this
+  computer's own key is replaced if its secret is lost.
+- A network or permission error while checking keys no longer looks like a deleted key.
+
 ## 1.7.0
 - **Updates from the console.** An **Updates** button in the header checks the kit's GitHub releases (at most every
   12 hours, or on demand) and turns into **Update to x.y.z** when a new version is out. **Install update** shows the
