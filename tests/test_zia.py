@@ -378,6 +378,27 @@ def test_no_user_management_access_explains_both_ways_out(zenv, capsys):
     assert "can't manage users" in out and "--user" in out and not mine(fake)
 
 
+def test_preflight_catches_a_role_without_user_management(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    real = fake.call
+    rba = ('user_management.add_group failed: {\n  "status": 403,\n  "code": "RBA_LIMITED",\n'
+           '  "message": "Functional scope restriction",\n  "url": "https://api.zsapi.net/zia/api/v1/groups"\n}')
+
+    def limited(resource, method, *a, **kw):
+        if resource == "user_management" and method.startswith("add"):
+            raise kit.KitError(rba)
+        return real(resource, method, *a, **kw)
+    fake.call = limited
+    by = {c["id"]: c for c in z.preflight(kit.load_cfg(), write_probe=True)[0]}
+    assert by["zia-mkuser"]["status"] == "warn" and by["zia-mkuser"]["detail"] == "RBA_LIMITED: Functional scope restriction"
+    assert "Role Management" in by["zia-mkuser"]["fix"] and "--user se-demo-traffic@pyite.buzz" in by["zia-mkuser"]["fix"]
+    with pytest.raises(SystemExit):
+        kit.cmd_zia()
+    out = capsys.readouterr().out
+    assert "RBA_LIMITED: Functional scope restriction" in out and "User Management to Full" in out
+    assert " x," not in out and "Give the role full access to URL Filtering" not in out
+
+
 def test_zidentity_option_creates_the_user_there(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--via", "zidentity", "--yes")
     kit.cmd_zia()

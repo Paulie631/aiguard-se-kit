@@ -14,7 +14,7 @@ APIs can create ZIA policy but can't create log entries. Only real traffic throu
 The ZIA tab of the console does the same as these commands.
 
 1. Give the OneAPI client ZIA access (one time):
-   - **Administration > Role Management**: add an **API** role with full access to URL Filtering, Cloud App Control, File Type Control, DLP, Firewall and Activation.
+   - **Administration > Role Management**: add an **API** role with full access to URL Filtering, Cloud App Control, File Type Control, DLP, Firewall, Activation and **User Management** (for creating the test user; without it, create the user yourself and pass `--user`).
    - **Administration > API > OneAPI > API Clients**: edit the kit's client and add Zscaler Internet Access with that role.
 2. Create the policy. Setup creates the test user for you:
    ```

@@ -151,6 +151,11 @@ def connect(cfg):
 
 
 ZIA_HINTS = [
+    (r"can't manage users",
+     "See above: give the API role User Management access, or create the test user yourself and pass --user."),
+    (r"RBA_LIMITED|scope restriction",
+     "The client's ZIA API role doesn't cover this area. In Administration > Role Management, open the API role the "
+     "kit's OneAPI client uses and give it full access to the area named in the error, then rerun."),
     (r"\b401\b|NOT_AUTHORIZED|Unauthorized",
      "The OneAPI client works but has no ZIA access. X"),
     (r"\b403\b|Forbidden|not permitted|insufficient",
@@ -309,6 +314,20 @@ def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, p
     return create_zia_user(t, cfg, log, email, domain)
 
 
+USER_MGMT_FIX = ("Either give the role User Management access (Administration > Role Management, open the API role "
+                 "the kit's OneAPI client uses, set User Management to Full, save) and rerun setup, or create "
+                 "{email} yourself (" + "Administration > Internet & SaaS Authentication > Internet & SaaS Users"
+                 " > Add User) and rerun with --user {email}.")
+
+
+def rba_reason(e):
+    """'RBA_LIMITED: Functional scope restriction' out of the SDK's multi-line error."""
+    text = str(e)
+    code = re.search(r'"code":\s*"([^"]+)"', text)
+    msg = re.search(r'"message":\s*"([^"]+)"', text)
+    return ": ".join(x.group(1) for x in (code, msg) if x) or text[:120]
+
+
 def ensure_zia_ref(t, kind, name, log):
     """A ZIA group or department for the test user."""
     lister, adder = {"group": ("list_groups", "add_group"), "department": ("list_departments", "add_department")}[kind]
@@ -345,8 +364,8 @@ def create_zia_user(t, cfg, log, email=None, domain=None):
                       comments="Test user for the SE demo kit's ZIA traffic generator")
     except K.KitError as e:
         if re.search(r"\b40[13]\b|unauthori|forbidden|not authorized", str(e), re.I):
-            raise K.KitError(f"The OneAPI client's ZIA role can't manage users ({str(e)[:120]}). x, or create {email} "
-                             f"yourself in {CONSOLE_USERS} and rerun with --user {email}.") from e
+            raise K.KitError(f"The OneAPI client's ZIA API role can't manage users ({rba_reason(e)}). "
+                             f"{USER_MGMT_FIX.format(email=email)}") from e
         if re.search(r"password", str(e), re.I):
             raise K.KitError(f"ZIA rejected the generated password ({str(e)[:160]}). Check Password Strength in "
                              f"Administration > Internet & SaaS Authentication > Internet Authentication Settings, or create {email} yourself and rerun "
@@ -770,15 +789,22 @@ def preflight(cfg, write_probe=False):
             {"hosted": "", "saml": "Setup will create the test user in ZIdentity; set its password there once.",
              "directory": "Create the test user in your directory (AD/LDAP) and pass --user."}.get(mode,
              "Setup assumes Hosted DB. Check Administration > Internet & SaaS Authentication > Internet Authentication Settings."))
+        dom = tenant_domain(t)
+        email = f"{TEST_USER['login']}@{dom}" if dom else "the test user"
         try:
-            dom = tenant_domain(t)
             items(t.call("user_management", "list_groups", query_params={"search": K.PREFIX}))
-            add("zia-mkuser", "Can create the test user", "ok" if dom else "warn",
-                f"would create {TEST_USER['login']}@{dom}" if dom else "couldn't tell the tenant's email domain",
+            detail = f"would create {email}" if dom else "couldn't tell the tenant's email domain"
+            if write_probe and mode in ("hosted", None):
+                step("testing user-management permission (temporary group)")
+                grp = with_valid_name(lambda **n: t.call("user_management", "add_group", comments="temporary", **n),
+                                      zname("preflight probe"))
+                t.call("user_management", "delete_group", g(grp, "id"))
+                detail += "; created and removed a temporary group"
+            add("zia-mkuser", "Can create the test user", "ok" if dom else "warn", detail,
                 "" if dom else "Pass --domain yourdomain.com to setup.")
         except Exception as e:
-            add("zia-mkuser", "Can create the test user", "warn", str(e)[:160],
-                "Give the ZIA API role User Management access, or create a test user yourself and pass --user.")
+            add("zia-mkuser", "Can create the test user", "warn", rba_reason(e),
+                "The kit can't create users with this API role. " + USER_MGMT_FIX.format(email=email))
 
     step("reading DLP engines, file types and isolation profiles")
     facts = resolve(t, tpl)
