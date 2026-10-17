@@ -1,0 +1,35 @@
+name: release
+# Push a tag like v1.6.1 (matching VERSION in aiguard_kit.py) to test and publish a release with the zips.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Tag matches the kit version
+        run: |
+          v=$(python -c "import re;print(re.search(r'^VERSION = \"([^\"]+)\"', open('aiguard_kit.py', encoding='utf-8').read(), re.M).group(1))")
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME doesn't match VERSION $v"; exit 1; }
+      - run: python tools/package.py
+      - name: Publish
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          notes=$(python - <<'PY'
+          import re
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## .*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+          print((m.group(1) if m else "").strip())
+          PY
+          )
+          printf '%s\n\n**Download:** `aiguard-se-kit-*.zip` (double-click installers inside; see INSTALL.md). The `-email` files leave out the installers so mail filters accept them.\n' "$notes" > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/aiguard-se-kit-*.zip dist/aiguard-se-demo-*.plugin dist/SHA256SUMS.txt \
+            --title "AI Guard SE Demo Kit $GITHUB_REF_NAME" --notes-file notes.md
