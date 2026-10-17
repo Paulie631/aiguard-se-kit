@@ -1,1 +1,5 @@
 *.cmd text eol=crlf
+*.command text eol=lf
+aiguard-kit text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
