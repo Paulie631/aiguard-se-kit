@@ -13,4 +13,5 @@ set UV_SYSTEM_CERTS=1
 set UV_NATIVE_TLS=1
 set PYTHONUTF8=1
 rem Python 3.12: every library the kit needs has ready-made builds for it on Windows and Mac.
-uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %*
+rem "& exit /b" keeps cmd from reading this file again after the kit exits (an update may have replaced it).
+uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %* & exit /b

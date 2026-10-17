@@ -7,6 +7,7 @@ import importlib.util
 import itertools
 import json
 import pathlib
+import re
 import sys
 import types
 
@@ -606,3 +607,95 @@ def test_real_windows_shortcut_and_user_path(env, tmp_path):
         assert kit._win_user_path(add=probe).count(probe) == 1  # adding twice doesn't duplicate
     finally:
         assert probe not in kit._win_user_path(remove=probe)
+
+
+class FakeResp:
+    def __init__(self, status=200, body=b"", ctype="application/json"):
+        self.status_code, self._body, self.headers = status, body, {"Content-Type": ctype}
+
+    def json(self):
+        return json.loads(self._body)
+
+    def iter_content(self, n):
+        for i in range(0, len(self._body), n):
+            yield self._body[i:i + n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def release_zip(tmp_path, version):
+    import hashlib
+    import zipfile
+    z = tmp_path / "kit.zip"
+    with zipfile.ZipFile(z, "w") as out:
+        src = (ROOT / "aiguard_kit.py").read_text(encoding="utf-8")
+        out.writestr("aiguard-se-kit/aiguard_kit.py", re.sub(r'^VERSION = "[^"]+"', f'VERSION = "{version}"', src, flags=re.M))
+        out.writestr("aiguard-se-kit/aiguard-kit", (ROOT / "aiguard-kit").read_text())
+    data = z.read_bytes()
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def test_update_check_download_verify_and_rollback(env, monkeypatch, tmp_path):
+    import requests
+    kit, _ = env("update")
+    monkeypatch.setattr(kit, "BASE_DIR", tmp_path / "base")
+    monkeypatch.setattr(kit, "APP_DIR", tmp_path / "base" / "app")
+    data, sha = release_zip(tmp_path, "9.9.9")
+    info = {"version": "9.9.9", "notes": "- new", "zip_url": "https://example.test/kit.zip", "sha256": sha}
+    routes = {"latest": FakeResp(body=json.dumps(info).encode()), "zip": FakeResp(body=data, ctype="application/zip")}
+    monkeypatch.setattr(requests, "get", lambda url, **k: routes["zip" if url.endswith(".zip") else "latest"])
+    st = kit.update_status(force=True)
+    assert st["available"] and st["latest"] == "9.9.9" and not st["error"]
+    assert kit.vtuple("1.10.0") > kit.vtuple("1.9.9")
+    kit_dir = kit.download_release(info)
+    assert re.search(r'^VERSION = "9.9.9"', (kit_dir / "aiguard_kit.py").read_text(encoding="utf-8"), re.M)
+    # a tampered or swapped download is refused
+    routes["zip"] = FakeResp(body=b"<html>blocked by policy</html>", ctype="application/zip")
+    with pytest.raises(kit.KitError, match="checksum.*web page"):
+        kit.download_release(info)
+    # a web-policy block page instead of release info is explained
+    routes["latest"] = FakeResp(body=b"<html>blocked</html>", ctype="text/html")
+    st = kit.update_status(force=True)
+    assert "blocked" in st["error"] and "github.com" in kit.hint(kit.KitError(st["error"]))
+    # rollback swaps app and app.previous
+    app, prev = kit.APP_DIR, kit.APP_DIR.with_name("app.previous")
+    for d, v in ((app, "2.0.0"), (prev, "1.0.0")):
+        d.mkdir(parents=True)
+        (d / "aiguard_kit.py").write_text(f'VERSION = "{v}"\n')
+    assert kit.rollback() == "1.0.0"
+    assert 'VERSION = "1.0.0"' in (app / "aiguard_kit.py").read_text() and 'VERSION = "2.0.0"' in (prev / "aiguard_kit.py").read_text()
+
+
+def test_update_refuses_unsafe_zips_and_links(env, monkeypatch, tmp_path):
+    import hashlib
+    import requests
+    import zipfile
+    kit, _ = env("update")
+    monkeypatch.setattr(kit, "BASE_DIR", tmp_path / "base")
+    z = tmp_path / "evil.zip"
+    with zipfile.ZipFile(z, "w") as out:
+        out.writestr("aiguard-se-kit/../../evil.py", "x")
+    data = z.read_bytes()
+    info = {"version": "9.9.9", "zip_url": "https://example.test/kit.zip", "sha256": hashlib.sha256(data).hexdigest()}
+    monkeypatch.setattr(requests, "get", lambda url, **k: FakeResp(body=data, ctype="application/zip"))
+    with pytest.raises(kit.KitError, match="Unexpected file"):
+        kit.download_release(info)
+    with pytest.raises(kit.KitError, match="insecure"):
+        kit.download_release({**info, "zip_url": "http://example.test/kit.zip"})
+
+
+def test_release_package_has_update_manifest(tmp_path):
+    import subprocess
+    if not (ROOT / ".git").exists():
+        pytest.skip("needs the git checkout")
+    subprocess.run([sys.executable, str(ROOT / "tools/package.py")], check=True, capture_output=True)
+    v = re.search(r'^VERSION = "([^"]+)"', (ROOT / "aiguard_kit.py").read_text(encoding="utf-8"), re.M).group(1)
+    info = json.loads((ROOT / "dist/latest.json").read_text())
+    import hashlib
+    assert info["version"] == v and info["zip_url"].endswith(f"/v{v}/aiguard-se-kit-{v}.zip")
+    assert info["sha256"] == hashlib.sha256((ROOT / f"dist/aiguard-se-kit-{v}.zip").read_bytes()).hexdigest()
+    assert info["notes"]

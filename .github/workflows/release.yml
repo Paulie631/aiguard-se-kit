@@ -53,5 +53,5 @@ jobs:
                     "(see INSTALL.md). The `-email` files leave out the installers so mail filters accept them.\n")
           open("notes.md", "w", encoding="utf-8").write(notes)
           PY
-          gh release create "$V" dist/aiguard-se-kit-*.zip dist/aiguard-se-demo-*.plugin dist/SHA256SUMS.txt \
+          gh release create "$V" dist/aiguard-se-kit-*.zip dist/aiguard-se-demo-*.plugin dist/SHA256SUMS.txt dist/latest.json \
             --target "$GITHUB_SHA" --title "AI Guard SE Demo Kit $V" --notes-file notes.md

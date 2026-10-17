@@ -27,9 +27,13 @@ The installers aren't code-signed yet, so your computer asks once:
 
 If your laptop's policy blocks this entirely, use the command-line steps below, or ask IT.
 
-### Upgrading
+### Updating
 
-Unzip the new version and double-click its installer. The previous copy is kept in `~/.aiguard-se-kit/app.previous`.
+The console checks for new versions. When one is out, the **Updates** button at the top turns into **Update to x.y.z**. Click it, read what's new, and click **Install update**. The console downloads the release from GitHub, checks it against the release's SHA-256 checksum, installs it and restarts itself. Your settings, keys and tenant objects aren't touched. **Roll back** in the same dialog returns to the previous version.
+
+From a terminal: `aiguard-kit update` (add `--check` to only check, or `--rollback` to go back).
+
+If your laptop's web policy blocks GitHub downloads, the console says so. Then download the newest zip from https://github.com/Paulie631/aiguard-se-kit/releases/latest in your browser, extract it, and double-click its installer. The previous copy is always kept in `~/.aiguard-se-kit/app.previous`.
 
 ### Uninstalling
 

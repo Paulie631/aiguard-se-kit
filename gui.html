@@ -25,7 +25,11 @@ header{display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:
 header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:-.01em}
 header .meta{color:var(--muted);font-size:13px}
 header .sp{flex:1}
-.upd{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--warn-bg);color:var(--warn);display:none}
+.upd{font-size:12px;padding:3px 10px;border-radius:99px}
+.upd.new{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.updlog{margin:10px 0 0;padding:0;list-style:none;font-size:13px}
+.updlog li{padding:2px 0}.updlog li.fail{color:var(--bad,#c0392b)}.updlog li.ok::before{content:"✓ ";color:var(--good,#2e7d32)}
+.updnotes{white-space:pre-wrap;font-size:13px;background:var(--soft);border-radius:8px;padding:10px 12px;margin:10px 0;max-height:40vh;overflow:auto}
 .pol{display:flex;align-items:center;gap:8px;font-size:13px}
 .pol .state{color:var(--muted);font-size:12px;min-width:90px}
 nav.tabs{display:flex;gap:4px;padding:0 24px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:57px;z-index:4}
@@ -162,7 +166,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 <header>
   <h1>AI Guard Test Console</h1>
   <span class="meta" id="tenant">connecting…</span>
-  <span class="upd" id="upd"></span>
+  <button class="upd" id="upd" title="Check for kit updates">Updates</button>
   <span class="sp"></span>
   <div class="pol" title="Switches the kit's demo policy. Takes about 30 seconds to apply.">
     <span class="lbl">Policy</span>
@@ -316,6 +320,20 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <div class="row" style="gap:10px;margin-top:14px"><button class="primary" id="pmapply">Apply</button><span class="muted" id="pmmsg" style="font-size:13px"></span></div>
 </div></div>
 
+<div class="modal" id="updmodal"><div class="panel">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">Kit updates</h2><button id="updclose">Close</button></div>
+  <p id="updsum" style="margin:10px 0 0"></p>
+  <div id="updnotes" class="updnotes" style="display:none"></div>
+  <ul id="updlog" class="updlog"></ul>
+  <div class="row" style="gap:10px;margin-top:14px">
+    <button class="primary" id="updgo" style="display:none">Install update</button>
+    <button id="updcheck">Check again</button>
+    <button id="updroll" style="display:none" title="Go back to the version installed before the last update">Roll back</button>
+    <a id="updrel" target="_blank" rel="noopener" style="font-size:13px">All releases ↗</a>
+  </div>
+  <p class="muted" style="font-size:12px;margin:12px 0 0">Updates come from the kit's GitHub releases and are checked against the release's SHA-256 checksum before installing. Your settings, keys and tenant objects aren't touched, and the previous version is kept so you can roll back.</p>
+</div></div>
+
 <script>
 const TOKEN="__KIT_TOKEN__";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -337,11 +355,60 @@ async function loadState(){
   S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;
   $("#tenant").textContent=`${st.tenant||"not set up"}${st.profile!="default"?" · profile "+st.profile:""} · kit ${st.version}`;
   $("#console").href=st.console;
-  if(st.update_behind){const u=$("#upd");u.style.display="inline";u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
+  if(st.update_behind){const u=$("#upd");u.classList.add("new");u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
   return st;
 }
+
+/* ---------- updates ---------- */
+let UPD=null;
+function showUpd(){
+  const u=UPD||{},b=$("#upd");
+  b.classList.toggle("new",!!u.available);
+  b.textContent=u.available?`Update to ${u.latest}`:"Updates";
+  $("#updrel").href=u.releases||"#";
+  $("#updroll").style.display=u.can_rollback&&u.installed?"":"none";
+  $("#updgo").style.display=u.available&&!u.git?"":"none";
+  $("#updnotes").style.display=u.available&&u.notes?"block":"none";$("#updnotes").textContent=u.notes||"";
+  let t=`You have <b>${esc(u.current||"?")}</b>. `;
+  if(u.error)t+=`Couldn't check for updates: ${esc(u.error)}`;
+  else if(u.available)t+=`Version <b>${esc(u.latest)}</b> is available.`+(u.git?` This copy is a git checkout: update it with <code>git pull</code>.`:u.installed?"":" Installing it also installs the kit on this computer, with a desktop shortcut.");
+  else if(u.latest)t+=`That's the latest release.`;
+  else t+="Checking…";
+  $("#updsum").innerHTML=t;
+}
+async function checkUpd(force){
+  try{UPD=await api("/api/update"+(force?"?force=1":""))}catch(e){UPD={error:e.message}}
+  showUpd();
+}
+$("#upd").onclick=()=>{$("#updlog").innerHTML="";$("#updmodal").classList.add("on");showUpd();if(!UPD)checkUpd(false)};
+$("#updclose").onclick=()=>$("#updmodal").classList.remove("on");
+$("#updcheck").onclick=()=>{$("#updlog").innerHTML="";UPD=null;showUpd();checkUpd(true)};
+function updLine(level,msg){const li=document.createElement("li");li.className=level;li.textContent=msg;$("#updlog").appendChild(li)}
+async function waitForRestart(){
+  updLine("info","Restarting the console…");
+  for(let i=0;i<40;i++){
+    await new Promise(r=>setTimeout(r,1000));
+    try{const r=await fetch("/",{cache:"no-store"});if(r.ok){location.reload();return}}catch(e){}
+  }
+  updLine("info","The console reopened in a new browser tab. You can close this one.");
+}
+$("#updgo").onclick=async()=>{
+  $("#updgo").disabled=$("#updcheck").disabled=$("#updroll").disabled=true;$("#updlog").innerHTML="";
+  try{
+    const {job}=await api("/api/update/apply",{});let since=0,j;
+    do{await new Promise(r=>setTimeout(r,800));j=await api(`/api/job?id=${job}&since=${since}`);since+=j.results.length;j.results.forEach(x=>updLine(x.level,x.msg))}while(!j.done);
+    if(j.error)throw new Error(j.error.error);
+    await api("/api/update/restart",{});await waitForRestart();
+  }catch(e){updLine("fail",e.message);$("#updgo").disabled=$("#updcheck").disabled=$("#updroll").disabled=false}
+};
+$("#updroll").onclick=async()=>{
+  if(!confirm("Go back to the previously installed version?"))return;
+  try{const r=await api("/api/update/rollback",{});updLine("ok",`Rolled back to ${r.version}.`);await api("/api/update/restart",{});await waitForRestart()}
+  catch(e){updLine("fail",e.message)}
+};
 async function init(){
   let st;try{st=await loadState()}catch(e){$("#tenant").textContent="error: "+e.message;return}
+  if(!st.update_behind)setTimeout(()=>checkUpd(false),1500);
   drawPresets();refreshRunner();
   seg("mode",v=>{S.mode=v;$("#rtagsf").style.display=v=="proxy"?"":"none";$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
     if(v=="proxy"&&!S.apps.some(a=>a.proxy))note("No app has a proxy key. Add an OpenAI or Anthropic key in the Setup tab to use proxy mode.");else note("")});

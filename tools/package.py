@@ -5,11 +5,14 @@
   aiguard-se-demo-<v>.plugin          Claude plugin
   aiguard-se-demo-<v>-email.plugin    plugin without .cmd files
   SHA256SUMS.txt
+  latest.json                         what the kit's update check reads (version, notes, zip link, SHA-256)
 
 Run: python tools/package.py   (uses the committed files at HEAD)
 """
 import hashlib
 import io
+import json
+import os
 import re
 import subprocess
 import sys
@@ -42,6 +45,12 @@ def rezip(src, dest, keep=lambda name: True):
                 out.writestr(info, src.read(info.filename))
 
 
+def changelog_notes(v):
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    m = re.search(rf"^## {re.escape(v)}\b.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return (m.group(1) if m else "").strip()
+
+
 def main():
     v = version()
     DIST.mkdir(exist_ok=True)
@@ -56,7 +65,12 @@ def main():
     rezip(plugin, files[3], lambda n: not EMAIL_BLOCKED.search(n))
     sums = "".join(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}\n" for f in files)
     (DIST / "SHA256SUMS.txt").write_text(sums)
-    for f in files + [DIST / "SHA256SUMS.txt"]:
+    repo = os.getenv("GITHUB_REPOSITORY", "Paulie631/aiguard-se-kit")
+    (DIST / "latest.json").write_text(json.dumps({
+        "version": v, "tag": f"v{v}", "notes": changelog_notes(v),
+        "zip_url": f"https://github.com/{repo}/releases/download/v{v}/{files[0].name}",
+        "sha256": hashlib.sha256(files[0].read_bytes()).hexdigest()}, indent=2))
+    for f in files + [DIST / "SHA256SUMS.txt", DIST / "latest.json"]:
         print(f.relative_to(ROOT))
 
 

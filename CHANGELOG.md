@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.0
+- **Updates from the console.** An **Updates** button in the header checks the kit's GitHub releases (at most every
+  12 hours, or on demand) and turns into **Update to x.y.z** when a new version is out. **Install update** shows the
+  release notes, downloads the release, checks its SHA-256 checksum, installs it with the new version's own installer,
+  and restarts the console. **Roll back** returns to the previous version.
+- `aiguard-kit update` does the same from the terminal (`--check` only checks; `--rollback` goes back one version).
+  `status` reports when an update is available.
+- Blocked downloads (for example a web-policy block page instead of the file) are detected and explained.
+- Releases now include `latest.json`, which the update check reads.
+- Windows: shortcuts now start in your home folder, and the launcher no longer re-reads itself after the kit exits,
+  so an update can replace the kit safely while the console runs.
+
 ## 1.6.2
 - Windows: creating the desktop and Start menu shortcuts could fail with an empty error message. The installer
   now runs PowerShell non-interactively with errors caught, checks the shortcut was written, and reports why if not.

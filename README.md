@@ -142,7 +142,7 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 - **Advanced:** `AIGUARD_DAS_HOST` (default `https://api.us1.zseclipse.net`) and `AIGUARD_PROXY` (default `https://proxy.zseclipse.net`) point at other AI Guard clouds.
 - **Offline tests:** `uv run --with pytest --with requests --with keyring --with truststore pytest -q tests`. CI runs them on every push (`.github/workflows/ci.yml`).
 - **Claude plugin:** `python tools/build_plugin.py` writes `dist/aiguard-se-demo.plugin`, bundling the kit with a skill so SEs can say "set up the AI Guard demo".
-- **Updates:** SEs who cloned with git see "Update available" in the console and in `status`.
+- **Updates:** the console's **Updates** button (top bar) checks the GitHub releases and turns into **Update to x.y.z** when there's a new version; **Install update** downloads it, verifies its SHA-256, installs it and restarts the console, and **Roll back** goes back one version. From a terminal: `aiguard-kit update` (`--check`, `--rollback`). Git clones are told to `git pull` instead. Set `AIGUARD_KIT_UPDATE_URL` to point at a different `latest.json`.
 - **Publishing a release:** bump `VERSION` in `aiguard_kit.py` and `plugin/.../plugin.json`, add a `## <version>` section at the top of CHANGELOG.md, commit and push to main. The release workflow sees the new version, runs the tests on Windows, macOS and Linux, then publishes the zips, plugins and SHA256SUMS.txt to GitHub Releases. `python tools/package.py` builds the same files locally into `dist/`.
 
 ## Files

@@ -16,6 +16,7 @@
                            keep dashboards fresh with a small batch every N minutes
   ./aiguard-kit status     check credentials, tenant objects, the detection API and kit updates
   ./aiguard-kit teardown   delete everything this kit created (objects named with the prefix)
+  ./aiguard-kit update     install the latest release from GitHub (--check: only check, --rollback: previous version)
   ./aiguard-kit install    copy the kit to ~/.aiguard-se-kit/app, add a desktop shortcut and the `aiguard-kit` command
                            (what the double-click installers run); uninstall removes them
 
@@ -36,7 +37,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.6.2"
+VERSION = "1.7.0"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -65,6 +66,7 @@ if WINDOWS:
     sys.stdout = _LauncherNames(sys.stdout)
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
+APP_DIR = BASE_DIR / "app"  # where the double-click installer puts the kit
 KC = "aiguard-se-kit"
 ARGS = sys.argv[1:]
 YES = "--yes" in ARGS or "-y" in ARGS
@@ -165,6 +167,14 @@ HINTS = [
      "The LLM provider account has no credit. Top it up, or use detection mode (free) instead of proxy mode."),
     (r"\b429\b|rate.?limit",
      "Rate limited. Wait a minute, or lower --rounds."),
+    (r"update check was blocked|download was blocked|web policy may block GitHub",
+     "Ask IT to allow github.com, objects.githubusercontent.com and release-assets.githubusercontent.com, or download "
+     "the latest zip from the kit's GitHub releases page in your browser and run its installer."),
+    (r"doesn't match the release checksum|incomplete or not in the expected format",
+     "Try again in a few minutes. If it keeps happening, download the zip from the kit's GitHub releases page and run "
+     "its installer, and tell the kit owner."),
+    (r"Couldn't reach GitHub",
+     "Check your internet connection, then try again. Updates are optional: the kit keeps working without them."),
     (r"keychain|Credential Manager",
      "Open Credential Manager > Windows Credentials and check you're signed in to Windows as yourself, then retry."
      if WINDOWS else
@@ -697,6 +707,198 @@ def update_check(fetch=True):
     return _UPDATE["behind"]
 
 
+# ---------------------------------------------------------------- updates from GitHub Releases
+REPO = os.getenv("AIGUARD_KIT_REPO", "Paulie631/aiguard-se-kit")
+UPDATE_URL = os.getenv("AIGUARD_KIT_UPDATE_URL", f"https://github.com/{REPO}/releases/latest/download/latest.json")
+UPDATE_HOSTS = "github.com, objects.githubusercontent.com and release-assets.githubusercontent.com"
+_REL: dict = {}
+
+
+def vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3])
+
+
+def _blocked(r):
+    """True when a web policy answered instead of GitHub (ZIA and similar return an HTML block or warning page)."""
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    return r.status_code in (403, 407, 451) or "text/html" in ctype
+
+
+def _url_ok(url):
+    return url.startswith("https://") or re.match(r"http://(127\.0\.0\.1|localhost)[:/]", url or "")
+
+
+def fetch_release(force=False):
+    """Latest release info {version, notes, zip_url, sha256}. Cached for 12 hours (in ~/.aiguard-se-kit)."""
+    import requests
+    cache = BASE_DIR / "update-check.json"
+    if not force:
+        try:
+            c = json.loads(cache.read_text(encoding="utf-8"))
+            if time.time() - c.get("t", 0) < 12 * 3600 and c.get("url") == UPDATE_URL:
+                return c["info"]
+        except Exception:
+            pass
+    try:
+        r = requests.get(UPDATE_URL, timeout=15, headers={"Accept": "application/json"})
+    except requests.RequestException as e:
+        raise KitError(f"Couldn't reach GitHub to check for updates: {e}") from e
+    if _blocked(r):
+        raise KitError(f"The update check was blocked (HTTP {r.status_code}, got a web page instead of release info). "
+                       f"Your laptop's web policy may block GitHub downloads; ask IT to allow {UPDATE_HOSTS}.")
+    if r.status_code == 404:
+        raise KitError("No published release with update information was found yet.")
+    if r.status_code != 200:
+        raise KitError(f"The update check failed: HTTP {r.status_code}")
+    try:
+        info = r.json()
+        assert info["version"] and _url_ok(info["zip_url"]) and re.fullmatch(r"[0-9a-f]{64}", info["sha256"])
+    except Exception as e:
+        raise KitError("The release information was incomplete or not in the expected format.") from e
+    try:
+        BASE_DIR.mkdir(exist_ok=True)
+        cache.write_text(json.dumps({"t": time.time(), "url": UPDATE_URL, "info": info}), encoding="utf-8")
+    except OSError:
+        pass
+    return info
+
+
+def update_status(force=False):
+    st = {"current": VERSION, "latest": None, "available": False, "notes": "", "error": None,
+          "installed": APP_DIR.exists() and HERE.resolve() == APP_DIR.resolve(), "git": (HERE / ".git").exists(),
+          "can_rollback": (APP_DIR.with_name(APP_DIR.name + ".previous") / "aiguard_kit.py").exists(),
+          "releases": f"https://github.com/{REPO}/releases/latest"}
+    try:
+        info = fetch_release(force)
+        st.update(latest=info["version"], notes=info.get("notes", ""), available=vtuple(info["version"]) > vtuple(VERSION))
+    except KitError as e:
+        st["error"] = str(e)
+    return st
+
+
+def download_release(info, log=lambda level, msg: None):
+    """Download and verify the release zip, extract it, and return the folder holding the new kit."""
+    import hashlib
+    import shutil
+    import zipfile
+    import requests
+    if not _url_ok(info.get("zip_url", "")):
+        raise KitError("Refusing to download an update over an insecure link.")
+    work = BASE_DIR / "update-staging"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    zpath = work / "kit.zip"
+    log("info", f"Downloading {info['version']}…")
+    h = hashlib.sha256()
+    try:
+        with requests.get(info["zip_url"], stream=True, timeout=60) as r:
+            if _blocked(r) or r.status_code != 200:
+                raise KitError(f"The download was blocked or failed (HTTP {r.status_code}). Your laptop's web policy may "
+                               f"block GitHub downloads; ask IT to allow {UPDATE_HOSTS}, or download the zip from "
+                               f"https://github.com/{REPO}/releases/latest and run its installer.")
+            size = 0
+            with open(zpath, "wb") as f:
+                for chunk in r.iter_content(65536):
+                    size += len(chunk)
+                    if size > 50 * 1024 * 1024:
+                        raise KitError("The download is far larger than expected, so it was stopped.")
+                    h.update(chunk)
+                    f.write(chunk)
+    except requests.RequestException as e:
+        raise KitError(f"The download failed: {e}") from e
+    if h.hexdigest() != info["sha256"]:
+        head_ = zpath.read_bytes()[:400].lower()
+        why = (" It looks like a web page, so a web policy may have blocked it." if b"<html" in head_ or b"<!doctype" in head_
+               else " It may have been changed or cut short.")
+        raise KitError("The downloaded file doesn't match the release checksum, so it wasn't installed." + why)
+    log("ok", "Download verified (SHA-256 matches the release)")
+    out = work / "x"
+    with zipfile.ZipFile(zpath) as z:
+        for n in z.namelist():
+            p = Path(n)
+            if p.is_absolute() or ".." in p.parts or not n.startswith("aiguard-se-kit/"):
+                raise KitError(f"Unexpected file in the update: {n}")
+        z.extractall(out)
+    kit = out / "aiguard-se-kit"
+    m = re.search(r'^VERSION = "([^"]+)"', (kit / "aiguard_kit.py").read_text(encoding="utf-8"), re.M)
+    if not m or m.group(1) != info["version"]:
+        raise KitError("The downloaded kit's version doesn't match the release, so it wasn't installed.")
+    for f in ("aiguard-kit", "Install AI Guard Kit.command", "Uninstall AI Guard Kit.command"):
+        if (kit / f).exists():
+            os.chmod(kit / f, 0o755)
+    return kit
+
+
+def apply_update(info, log=lambda level, msg: None):
+    """Download, verify and install a release into APP_DIR using the new kit's own installer."""
+    import subprocess
+    if (HERE / ".git").exists():
+        raise KitError(f"This copy is a git checkout. Update it with: git -C \"{HERE}\" pull")
+    kit = download_release(info, log)
+    log("info", "Installing…")
+    env = {**os.environ, "NO_COLOR": "1", "PYTHONUTF8": "1"}
+    r = subprocess.run([sys.executable, str(kit / "aiguard_kit.py"), "install", "--yes", "--profile", PROFILE],
+                       capture_output=True, text=True, env=env, timeout=300)
+    for line in (r.stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith("✓"):
+            log("ok", line[1:].strip())
+        elif line.startswith("!"):
+            log("warn", line[1:].strip())
+    if r.returncode:
+        raise KitError(f"The new version's installer failed: {(r.stdout + r.stderr).strip()[-400:]}")
+    log("ok", f"Updated to {info['version']}. The previous version is kept for rollback.")
+
+
+def rollback():
+    """Swap the installed kit with the copy kept by the last install or update."""
+    import shutil
+    prev, tmp = APP_DIR.with_name(APP_DIR.name + ".previous"), APP_DIR.with_name(APP_DIR.name + ".rollback")
+    if not (prev / "aiguard_kit.py").exists():
+        raise KitError("There's no previous version to roll back to.")
+    m = re.search(r'^VERSION = "([^"]+)"', (prev / "aiguard_kit.py").read_text(encoding="utf-8"), re.M)
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        APP_DIR.rename(tmp)
+        prev.rename(APP_DIR)
+        tmp.rename(prev)
+    except OSError:  # Windows: folder in use, so swap the contents instead
+        if not APP_DIR.exists() and tmp.exists():
+            tmp.rename(APP_DIR)
+        shutil.copytree(APP_DIR, tmp, dirs_exist_ok=True)
+        shutil.copytree(prev, APP_DIR, dirs_exist_ok=True)
+        shutil.rmtree(prev, ignore_errors=True)
+        tmp.rename(prev)
+    return m.group(1) if m else "the previous version"
+
+
+def cmd_update():
+    head("Kit updates")
+    if "--rollback" in ARGS:
+        v = rollback()
+        ok(f"Rolled back to {v}. Run the command again with --rollback to undo.")
+        return
+    st = update_status(force=True)
+    print(f"  This copy: {st['current']}" + ("  (installed)" if st["installed"] else f"  ({HERE})"))
+    if st["error"]:
+        raise KitError(st["error"])
+    if not st["available"]:
+        ok(f"Up to date (latest release: {st['latest']})")
+        return
+    ok(f"Version {st['latest']} is available")
+    for line in (st["notes"] or "").splitlines()[:15]:
+        info(line)
+    if st["git"]:
+        info(f"This copy is a git checkout. Update it with: git -C \"{HERE}\" pull")
+        return
+    if "--check" in ARGS or not yesno(f"Install {st['latest']} now?", True):
+        return
+    apply_update(fetch_release(), lambda level, msg: (ok if level == "ok" else warn if level == "warn" else info)(msg))
+    if not st["installed"]:
+        info(f"Installed to {APP_DIR}. Use the 'AI Guard Demo Console' shortcut or `aiguard-kit gui` from now on.")
+    info("If the console is open, close it and open it again to use the new version.")
+
+
 # ---------------------------------------------------------------- scheduler
 def ensure_windows_launcher():
     """The email-safe package leaves out aiguard-kit.cmd (mail filters block .cmd), so write it on first run."""
@@ -724,7 +926,8 @@ set UV_SYSTEM_CERTS=1
 set UV_NATIVE_TLS=1
 set PYTHONUTF8=1
 rem Python 3.12: every library the kit needs has ready-made builds for it on Windows and Mac.
-uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %*
+rem "& exit /b" keeps cmd from reading this file again after the kit exits (an update may have replaced it).
+uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %* & exit /b
 """
 
 
@@ -819,7 +1022,6 @@ def cmd_schedule():
 
 
 # ---------------------------------------------------------------- install (double-click installers)
-APP_DIR = BASE_DIR / "app"
 APP_NAME = "AI Guard Demo Console"
 INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "packs", "policy_template.json",
                  "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
@@ -951,7 +1153,7 @@ def cmd_install():
                                 ("start", "gui", "Open the AI Guard demo console")):
             try:
                 sp[key].parent.mkdir(parents=True, exist_ok=True)
-                _win_shortcut(sp[key], launcher, args, APP_DIR, desc)
+                _win_shortcut(sp[key], launcher, args, HOME, desc)
                 ok(f"Shortcut: {sp[key]}")
             except KitError as e:
                 warn(str(e))
@@ -1733,6 +1935,14 @@ def cmd_status():
     behind = update_check()
     if behind:
         warn(f"A newer kit is available ({behind} change{'s' if behind > 1 else ''}). Update with: git -C {HERE} pull")
+    elif not (HERE / ".git").exists():
+        u = update_status()
+        if u["available"]:
+            warn(f"Version {u['latest']} is available. Update with: aiguard-kit update")
+        elif u["error"]:
+            info(f"Couldn't check for updates: {u['error']}")
+        else:
+            ok(f"Kit {VERSION} is the latest release")
     for name, a in st.get("apps", {}).items():
         dk, pk = kc_get(f"{name}:detections"), kc_get(f"{name}:proxy")
         line = f"{name}: detection key {'✓' if dk else '✗'}, proxy key {'✓' if pk else '-'}"
@@ -1798,6 +2008,22 @@ def trickle(cfg, lib, count):
 
 # ---------------------------------------------------------------- GUI server
 JOBS: dict = {}
+SERVER: dict = {}
+
+
+def restart_console(srv, port):
+    """Reopen the console from the installed copy (after an update), on the same port when possible."""
+    import subprocess
+    launcher = APP_DIR / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
+    args = ["gui", "--port", str(port), "--restarted"] + (["--profile", PROFILE] if PROFILE != "default" else [])
+    try:
+        srv.socket.close()  # free the port for the new console
+    except OSError:
+        pass
+    if WINDOWS:
+        subprocess.Popen(["cmd", "/c", "start", APP_NAME, str(launcher), *args], cwd=str(HOME))
+        os._exit(0)
+    os.execv("/bin/bash", ["bash", str(launcher), *args])
 
 
 def cmd_gui():
@@ -1873,6 +2099,8 @@ def cmd_gui():
                                         "lib": lib, "panels": PANELS, "prefix": PREFIX,
                                         "competitor": c.get("competitor", "Palo Alto"), "profile": PROFILE,
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE)})
+            if path == "/api/update":
+                return self._send(200, update_status(force="force=1" in self.path))
             if path == "/api/job":
                 q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1:] or [""])[0].split("&") if "=" in x)
                 j = JOBS.get(q.get("id"))
@@ -1896,6 +2124,32 @@ def cmd_gui():
             body = self._body()
             c = load_cfg()
             lib = load_tests()
+            if path == "/api/update/apply":
+                jid = uuid.uuid4().hex[:8]
+                job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
+                ulog = lambda level, msg: job["results"].append({"level": level, "msg": msg})  # noqa: E731
+
+                def update_work():
+                    try:
+                        apply_update(fetch_release(force=True), ulog)
+                        job["verify"] = {"restart": True}
+                    except Exception as e:
+                        job["error"] = {"error": str(e), "fix": ""}
+                        ulog("fail", str(e))
+                    job["done"] = True
+                threading.Thread(target=update_work, daemon=True).start()
+                return self._send(200, {"job": jid})
+            if path == "/api/update/rollback":
+                try:
+                    return self._send(200, {"ok": True, "version": rollback()})
+                except Exception as e:
+                    return self._send(400, {"error": str(e)})
+            if path == "/api/update/restart":
+                if not (APP_DIR / "aiguard_kit.py").exists():
+                    return self._send(400, {"error": "The kit isn't installed, so there's nothing to restart into."})
+                self._send(200, {"ok": True})
+                threading.Timer(0.5, restart_console, args=(SERVER["srv"], SERVER["port"])).start()
+                return
             if path == "/api/import":
                 try:
                     p, n = import_pack(body.get("name"), body.get("rows") or [])
@@ -2015,12 +2269,15 @@ def cmd_gui():
             continue
     if not srv:
         raise KitError("No free local port between 8765 and 8784.")
+    SERVER.update(srv=srv, port=port)
     url = f"http://127.0.0.1:{port}/"
     head("AI Guard test console")
     print(f"  {url}   (this machine only - press Ctrl+C to stop)")
     if not cfg.get("state", {}).get("apps"):
         info("Not set up yet: the console opens on its Setup tab.")
-    if "--no-browser" not in ARGS:
+    # after an update restart, the open browser tab reconnects by itself when the port is unchanged
+    reconnects = "--restarted" in ARGS and str(port) == opt("port", "")
+    if "--no-browser" not in ARGS and not reconnects:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
@@ -2035,7 +2292,8 @@ def main():
     vals = {ARGS[i + 1] for i, a in enumerate(ARGS[:-1]) if a in VALUE_OPTS}
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
-            "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall}
+            "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
+            "update": cmd_update}
     if cmd not in cmds:
         print(__doc__)
         return
