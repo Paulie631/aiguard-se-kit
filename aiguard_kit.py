@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.10,<3.15"
 # dependencies = ["zscaler-sdk-python>=1.11", "requests>=2.31", "keyring>=24", "truststore>=0.9"]
 # ///
 """Zscaler AI Guard SE demo kit.
@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -709,6 +709,8 @@ def ensure_windows_launcher():
 
 WINDOWS_LAUNCHER = """@echo off
 rem Launcher for the AI Guard SE demo kit (Windows). Usage: .\\aiguard-kit.cmd setup|gui|run|status|teardown
+rem Find uv even when this terminal was opened before uv was installed.
+if exist "%USERPROFILE%\\.local\\bin\\uv.exe" set "PATH=%USERPROFILE%\\.local\\bin;%PATH%"
 where uv >nul 2>nul
 if errorlevel 1 (
   echo uv is not installed. In PowerShell run:
@@ -719,7 +721,8 @@ if errorlevel 1 (
 set UV_SYSTEM_CERTS=1
 set UV_NATIVE_TLS=1
 set PYTHONUTF8=1
-uv run --quiet --script "%~dp0aiguard_kit.py" %*
+rem Python 3.12: every library the kit needs has ready-made builds for it on Windows and Mac.
+uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %*
 """
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.3
+- Fixed: on a computer with a very new Python (3.15), uv tried to compile `pyyaml` and failed with
+  "Microsoft Visual C++ 14.0 or greater is required". The launchers now run the kit on Python 3.12, which uv
+  downloads if needed, and the kit declares it supports up to 3.14.
+- The Windows launcher finds uv in its default install folder, so it works in the same window right after installing uv.
+- WINDOWS.md: fallbacks when the uv installer is blocked (winget, pip) and the Visual C++ error.
+- CI checks that prebuilt libraries exist for Windows and Mac (Intel and ARM).
+
 ## 1.5.2 (Windows)
 - Fixed: on Windows, the kit could crash with `UnicodeEncodeError` when printing ✓ or ✗ (redirected output,
   `preflight --json > file`, scheduled runs, older consoles). Output is now always UTF-8.

@@ -15,4 +15,5 @@ if [ -z "$UV" ]; then
 fi
 # Trust the OS certificate store so Zscaler SSL inspection doesn't break package downloads.
 export UV_SYSTEM_CERTS=1 UV_NATIVE_TLS=1
-exec "$UV" run --quiet --script "$DIR/aiguard_kit.py" "$@"
+# Python 3.12: every library the kit needs has ready-made builds for it (newer versions may need a compiler).
+exec "$UV" run --quiet --python 3.12 --script "$DIR/aiguard_kit.py" "$@"

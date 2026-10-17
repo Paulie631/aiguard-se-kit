@@ -455,7 +455,7 @@ def test_windows_launcher_written_when_missing(env, monkeypatch, tmp_path, capsy
     kit.ensure_windows_launcher()
     data = (here / "aiguard-kit.cmd").read_bytes()
     assert data.startswith(b"@echo off\r\n") and b"\n" not in data.replace(b"\r\n", b"")
-    assert b'uv run --quiet --script "%~dp0aiguard_kit.py" %*' in data
+    assert b'uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %*' in data
     assert ".\\aiguard-kit.cmd gui" in capsys.readouterr().out
     # the shipped launcher matches the one the kit writes, with Windows line endings
     assert (ROOT / "aiguard-kit.cmd").read_bytes() == data
@@ -503,3 +503,12 @@ def test_output_survives_a_cp1252_console(tmp_path):
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env_)
     assert r.returncode == 0, r.stderr.decode(errors="replace")
     assert "✓ done".encode() in r.stdout
+
+
+def test_launchers_pin_a_python_with_prebuilt_libraries():
+    """Python 3.15 has no prebuilt pyyaml, so uv tried to compile it and failed on Windows without Visual C++."""
+    head = (ROOT / "aiguard_kit.py").read_text(encoding="utf-8")
+    assert '# requires-python = ">=3.10,<3.15"' in head
+    assert "--python 3.12 --script" in (ROOT / "aiguard-kit").read_text()
+    assert b"--python 3.12 --script" in (ROOT / "aiguard-kit.cmd").read_bytes()
+    assert "--python 3.12 --script" in (ROOT / "WINDOWS.md").read_text(encoding="utf-8")

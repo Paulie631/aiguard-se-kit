@@ -16,6 +16,14 @@ jobs:
       - run: pytest -q tests
       - run: python tools/build_plugin.py --check
       - run: python tools/gen_preflight_doc.py --check
+      - name: Prebuilt libraries exist for every laptop type (no compiler needed)
+        if: runner.os == 'Linux'
+        run: |
+          pip install uv
+          printf 'zscaler-sdk-python>=1.11\nrequests>=2.31\nkeyring>=24\ntruststore>=0.9\n' > /tmp/req.in
+          for plat in x86_64-pc-windows-msvc aarch64-pc-windows-msvc aarch64-apple-darwin x86_64-apple-darwin; do
+            uv pip compile -q /tmp/req.in --python-version 3.12 --python-platform $plat --only-binary :all: -o /dev/null
+          done
       - name: Launcher starts the kit (Windows)
         if: runner.os == 'Windows'
         shell: cmd
