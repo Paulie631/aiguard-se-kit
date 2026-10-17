@@ -29,7 +29,7 @@ def camel(d):
 class FakeZia:
     """In-memory ZIA: the parts of the OneAPI SDK the kit calls. Returns camelCase like the real API."""
 
-    def __init__(self, cbi=True, actions=None, file_types=None):
+    def __init__(self, cbi=True, actions=None, file_types=None, strict=("rule_labels",)):
         self.ids = itertools.count(1000)
         self.db = {
             "url_filtering": [{"id": 1, "name": "URL Filtering Rule-1", "order": 1, "state": "DISABLED"},
@@ -51,6 +51,7 @@ class FakeZia:
         self.cbi = [{"id": "cbi-1", "name": "Default isolation", "url": "https://isolation.example", "defaultProfile": True}] if cbi else []
         self.actions = actions
         self.file_types = file_types
+        self.strict = set(strict)   # resources that reject ':' in names, like the real rule-label API
         self.calls = []
         self.activations = 0
         self.zins = {}
@@ -79,6 +80,10 @@ class FakeZia:
 
     def call(self, resource, method, *a, **kw):
         self.calls.append((resource, method, a, kw))
+        name = kw.get("name") or kw.get("configured_name") or ""
+        if method.startswith(("add", "update")) and ":" in str(name) and (resource in self.strict or "*" in self.strict):
+            raise sys.modules[type(self).kit_module].KitError(
+                f'{resource}.{method} failed: {{"status": 400, "message": "Name should be valid"}}')
         if resource.startswith("zid."):
             return self._zid(resource, method, a, kw)
         if resource.startswith("zins."):
@@ -276,7 +281,7 @@ def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
     assert "SE-Demo: Block gambling" in made and "SE-Demo: Block card numbers" in made
     assert "SE-Demo: Isolate games" in made and "SE-Demo: Block demo ports" in made
     assert all(len(n) <= 31 for n in made)
-    label = next(l for l in fake.db["rule_labels"] if l["name"] == "SE-Demo: SE-Demo")
+    label = next(l for l in fake.db["rule_labels"] if l["name"] == "SE-Demo demo kit")
     for r in fake.all_rules():
         if r["name"].startswith("SE-Demo:"):
             assert r["users"] == [502], r["name"]           # only the test user
@@ -425,6 +430,25 @@ def test_tenant_domain_ignores_zscaler_admin_domains(zenv):
     assert z.tenant_domain(fake) == "pyite.buzz"
     fake.zid_users, fake.db["users"] = [{"id": "x", "loginName": "admin@acme.zslogin.net"}], []
     assert z.tenant_domain(fake) is None
+
+
+def test_names_zia_rejects_are_retried_without_the_colon(zenv):
+    kit, z, fake = zenv("zia", "setup", "--user", "traffic.tester@pyite.buzz", "--yes", strict=("*",))
+    checks, _ = z.preflight(kit.load_cfg(), write_probe=True)
+    assert next(c for c in checks if c["id"] == "zia-write")["status"] == "ok" and not fake.db["rule_labels"]
+    kit.cmd_zia()
+    names = mine(fake) + [r["name"] for r in fake.all_rules() if r["name"].startswith("SE-Demo - ")]
+    assert "SE-Demo - Block gambling" in names and not any(":" in n for n in names)
+    assert any(c["configuredName"] == "SE-Demo - tenant check" for c in fake.db["url_categories"])
+    before = len(fake.all_rules())
+    kit.cmd_zia()   # finds them again under the safe names
+    assert len(fake.all_rules()) == before
+    kit.ARGS[:] = ["zia", "teardown", "--force"]
+    kit.FORCE = True
+    kit.cmd_zia()
+    assert not [r for r in fake.all_rules() if r["name"].startswith("SE-Demo")]
+    assert not [s for s in fake.db["network_services"] if s["name"].startswith("SE-Demo")]
+    assert not fake.db["rule_labels"]
 
 
 def test_unknown_test_user_is_rejected(zenv, capsys):

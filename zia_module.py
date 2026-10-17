@@ -46,9 +46,36 @@ def g(o, key, default=None):
     return o.get(camel, default)
 
 
+def safe_name(name):
+    """Some ZIA objects (rule labels, at least) reject ':' and other punctuation: 'SE-Demo: x' -> 'SE-Demo - x'."""
+    n = name.replace(f"{K.PREFIX}:", f"{K.PREFIX} -", 1)
+    return re.sub(r"[^A-Za-z0-9 _.()-]", "", n)[:NAME_MAX].rstrip()
+
+
+def label_name():
+    return safe_name(f"{K.PREFIX} demo kit")
+
+
+def names_for(name):
+    return {name, safe_name(name)}
+
+
 def mine(o):
     n = str(g(o, "name") or g(o, "configured_name") or "")
-    return n.startswith(K.PREFIX + ":")
+    return n.startswith(K.PREFIX + ":") or n.startswith(K.PREFIX + " - ") or n == label_name()
+
+
+BAD_NAME = re.compile(r"name should be valid|invalid (character|name)|name.{0,20}not valid", re.I)
+
+
+def with_valid_name(create, name, field="name"):
+    """create(**{field: name}); if ZIA rejects the name's characters, try once more with safe_name()."""
+    try:
+        return create(**{field: name})
+    except K.KitError as e:
+        if not BAD_NAME.search(str(e)) or safe_name(name) == name:
+            raise
+        return create(**{field: safe_name(name)})
 
 
 def zcfg(cfg):
@@ -133,6 +160,9 @@ ZIA_HINTS = [
      "Another admin session is editing ZIA. Wait a minute, or activate pending changes in the console, then retry."),
     (r"DUPLICATE|already exists",
      "An object with that name already exists but isn't visible to the kit's API role. Rename or delete it in the console."),
+    (r"name should be valid",
+     "ZIA rejected characters in a name. Update the kit (this was fixed), or run with --prefix using only letters, "
+     "digits and hyphens."),
     (r"INVALID_INPUT_ARGUMENT|invalid",
      "Your tenant rejected a value (often a category, app or action it doesn't have). Run with --verbose to see which, "
      "then edit zia_policy_template.json or tell the kit owner."),
@@ -282,12 +312,12 @@ def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, p
 def ensure_zia_ref(t, kind, name, log):
     """A ZIA group or department for the test user."""
     lister, adder = {"group": ("list_groups", "add_group"), "department": ("list_departments", "add_department")}[kind]
-    rows = items(t.call("user_management", lister, query_params={"search": name}))
-    hit = next((x for x in rows if g(x, "name") == name), None)
+    rows = items(t.call("user_management", lister, query_params={"search": K.PREFIX}))
+    hit = next((x for x in rows if g(x, "name") in names_for(name)), None)
     if hit:
         return hit
-    made = t.call("user_management", adder, name=name, comments="Created by the SE demo kit")
-    log("ok", f"Created ZIA {kind} '{name}'")
+    made = with_valid_name(lambda **n: t.call("user_management", adder, comments="Created by the SE demo kit", **n), name)
+    log("ok", f"Created ZIA {kind} '{g(made, 'name') or name}'")
     return made
 
 
@@ -498,7 +528,7 @@ def _resolve_refs(body, refs):
 
 
 def ensure_label(t, log):
-    name = zname(template()["label"])
+    name = label_name()   # rule labels reject ':'
     hit = next((x for x in items(t.call("rule_labels", "list_labels")) if g(x, "name") == name), None)
     if hit:
         return g(hit, "id")
@@ -511,29 +541,29 @@ def ensure_tenant_category(t, log):
     tc = template()["tenant_check"]
     name = zname(tc["name"])
     cats = items(t.call("url_categories", "list_categories", query_params={"custom_only": True}))
-    hit = next((c for c in cats if g(c, "configured_name") == name), None)
-    body = dict(configured_name=name, super_category="USER_DEFINED", urls=tc["urls"], custom_category=True,
-                description=tc["description"])
+    hit = next((c for c in cats if g(c, "configured_name") in names_for(name)), None)
+    body = dict(super_category="USER_DEFINED", urls=tc["urls"], custom_category=True, description=tc["description"])
     if hit:
-        t.call("url_categories", "update_url_category", g(hit, "id"), **body)
+        t.call("url_categories", "update_url_category", g(hit, "id"), configured_name=g(hit, "configured_name"), **body)
         return g(hit, "id")
-    c = t.call("url_categories", "add_url_category", **body)
-    log("ok", f"Created URL category '{name}' ({', '.join(tc['urls'])})")
+    c = with_valid_name(lambda **n: t.call("url_categories", "add_url_category", **n, **body), name, "configured_name")
+    log("ok", f"Created URL category '{g(c, 'configured_name') or name}' ({', '.join(tc['urls'])})")
     return g(c, "id")
 
 
 def ensure_network_service(t, log):
     ns = template()["network_service"]
     name = zname(ns["name"])
-    hit = next((s for s in items(t.call("cloud_firewall", "list_network_services", query_params={"search": name}))
-                if g(s, "name") == name), None)
+    hit = next((s for s in items(t.call("cloud_firewall", "list_network_services", query_params={"search": K.PREFIX}))
+                if g(s, "name") in names_for(name)), None)
     ports = [("dest", "tcp", str(p)) for p in ns["dest_tcp"]]
     if hit:
-        t.call("cloud_firewall", "update_network_service", g(hit, "id"), ports=ports, name=name,
+        t.call("cloud_firewall", "update_network_service", g(hit, "id"), ports=ports, name=g(hit, "name"),
                description=ns["description"])
         return g(hit, "id")
-    s = t.call("cloud_firewall", "add_network_service", ports=ports, name=name, description=ns["description"])
-    log("ok", f"Created network service '{name}' (TCP {', '.join(map(str, ns['dest_tcp']))})")
+    s = with_valid_name(lambda **n: t.call("cloud_firewall", "add_network_service", ports=ports,
+                                           description=ns["description"], **n), name)
+    log("ok", f"Created network service '{g(s, 'name') or name}' (TCP {', '.join(map(str, ns['dest_tcp']))})")
     return g(s, "id")
 
 
@@ -545,9 +575,10 @@ def _add_at_top(t, kind, rule_type, body, existing):
     for order in range(1, (taken[-1] if taken else 0) + 2):
         try:
             b = dict(body, order=order)
+            b.pop("name")
             if kind == "cloud_app_control":
-                return t.call("cloudappcontrol", "add_rule", rule_type, **b)
-            return t.call(API[kind], "add_rule", **b)
+                return with_valid_name(lambda **n: t.call("cloudappcontrol", "add_rule", rule_type, **n, **b), body["name"])
+            return with_valid_name(lambda **n: t.call(API[kind], "add_rule", **n, **b), body["name"])
         except K.KitError as e:
             if not re.search(r"order|rank|predefined", str(e), re.I):
                 raise
@@ -576,10 +607,11 @@ def setup_apply(t, cfg, log, facts=None):
             cache[key] = list_rules(t, kind, rule_type)
         existing = cache[key]
         b = _resolve_refs(dict(body, name=name, labels=[label]), refs)
-        hit = next((r for r in existing if g(r, "name") == name), None)
+        hit = next((r for r in existing if g(r, "name") in names_for(name)), None)
         try:
             if hit:
                 b["order"] = g(hit, "order")
+                b["name"] = g(hit, "name")   # keep the name ZIA accepted
                 if kind == "cloud_app_control":
                     t.call("cloudappcontrol", "update_rule", rule_type, g(hit, "id"), **b)
                 else:
@@ -683,6 +715,15 @@ def teardown(t, cfg, log, confirm=True):
 
 
 # ---------------------------------------------------------------- preflight (admin side)
+PROGRESS = {"on": False}
+
+
+def step(msg):
+    """A progress line while preflight runs, so a slow API never looks like a hang (terminal only)."""
+    if PROGRESS["on"]:
+        print(f"    {K.C['d']}… {msg}{K.C['x']}", flush=True)
+
+
 def preflight(cfg, write_probe=False):
     checks = []
 
@@ -694,6 +735,7 @@ def preflight(cfg, write_probe=False):
             fix="Run `./aiguard-kit setup` (or the console's Setup tab) once to save the vanity domain, client ID and secret.")
         return checks, None
     add("zia-creds", "OneAPI credentials saved", "ok", f"client {K.mask(cfg['client_id'])} on '{cfg['vanity_domain']}'")
+    step(f"signing in to '{cfg['vanity_domain']}' with OneAPI")
     try:
         t = connect(cfg)
         add("zia-login", "ZIA API access", "ok")
@@ -702,6 +744,7 @@ def preflight(cfg, write_probe=False):
         return checks, None
 
     tpl = template()
+    step("reading URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules")
     try:
         for kind in ("url_filtering", "file_type_control", "dlp", "firewall", "dns"):
             list_rules(t, kind)
@@ -712,6 +755,7 @@ def preflight(cfg, write_probe=False):
         return checks, None
 
     z = zcfg(cfg)
+    step("reading users and sign-in settings")
     if z.get("users"):
         found, missing = find_users(t, [u.get("email") or u["name"] for u in z["users"]])
         add("zia-user", "Test user exists", "fail" if missing else "ok",
@@ -736,6 +780,7 @@ def preflight(cfg, write_probe=False):
             add("zia-mkuser", "Can create the test user", "warn", str(e)[:160],
                 "Give the ZIA API role User Management access, or create a test user yourself and pass --user.")
 
+    step("reading DLP engines, file types and isolation profiles")
     facts = resolve(t, tpl)
     want = sorted({e for r in tpl["dlp"] for e in r["engines"]})
     have = [e for e in want if e in facts["engines"]]
@@ -743,6 +788,7 @@ def preflight(cfg, write_probe=False):
         f"{len(have)} of {len(want)} found" + (f"; missing {', '.join(e for e in want if e not in have)}" if len(have) < len(want) else ""),
         "" if len(have) == len(want) else "DLP rules will use the engines that exist. Check the DLP subscription.")
     try:
+        step("reading SSL inspection rules")
         ssl = list_rules_ssl(t)
         dec = [r for r in ssl if g(r, "state") == "ENABLED" and str((g(r, "action") or {}).get("type", "")).upper() == "DECRYPT"]
         add("zia-ssl", "SSL inspection decrypts traffic", "ok" if dec else "warn",
@@ -752,11 +798,13 @@ def preflight(cfg, write_probe=False):
         add("zia-ssl", "SSL inspection decrypts traffic", "warn", str(e)[:160], "Couldn't read SSL inspection rules.")
     add("zia-cbi", "Browser Isolation profile", "ok" if facts.get("cbi") else "info",
         g(facts.get("cbi") or {}, "name") or "none - the isolation demo rule is skipped")
+    step("looking for earlier SE-Demo objects")
     mine_ = kit_objects(t, cfg)
     add("zia-existing", "Earlier kit objects in ZIA", "info", f"{len(mine_)} found" if mine_ else "none - fresh setup")
     if write_probe:
+        step("testing create permission (temporary rule label)")
         try:
-            lab = t.call("rule_labels", "add_label", name=zname("preflight probe"), description="temporary")
+            lab = t.call("rule_labels", "add_label", name=safe_name(zname("preflight probe")), description="temporary")
             t.call("rule_labels", "delete_label", g(lab, "id"))
             add("zia-write", "Create and delete permission", "ok", "Created and removed a temporary rule label")
         except Exception as e:
@@ -850,7 +898,10 @@ def cmd_setup():
     print("  Creates SE-Demo URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules for one")
     print("  test user, then activates. Demo/eval tenants only. Teardown: ./aiguard-kit zia teardown")
     K.head("Step 1 of 4 · Preflight (no changes yet)")
-    checks, t = preflight(cfg, write_probe=K.yesno("Also test create permission with a temporary rule label?", True))
+    probe = K.yesno("Also test create permission with a temporary rule label?", True)
+    PROGRESS["on"] = True
+    checks, t = preflight(cfg, write_probe=probe)
+    PROGRESS["on"] = False
     K.print_checks(checks)
     if not t or any(c["status"] == "fail" and c["id"] in ("zia-login", "zia-read", "zia-write") for c in checks):
         print("  Stopped. Nothing was changed.")
@@ -886,6 +937,7 @@ def cmd_preflight():
     as_json = "--json" in K.ARGS
     if not as_json:
         K.head("ZIA preflight (no changes)")
+    PROGRESS["on"] = not as_json
     checks, _ = preflight(cfg, write_probe="--write-probe" in K.ARGS)
     rep = K.preflight_report(cfg, checks)
     if as_json:
