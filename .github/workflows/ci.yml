@@ -12,12 +12,16 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - run: pip install pytest pyflakes requests keyring truststore
       - run: pyflakes aiguard_kit.py tests tools
-      - run: pytest -q tests
+      - name: Tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q -rf --tb=short tests 2>&1 | tee pytest.txt || { python tools/annotate_failures.py pytest.txt; exit 1; }
       - run: python tools/build_plugin.py --check
       - run: python tools/gen_preflight_doc.py --check
       - name: Prebuilt libraries exist for every laptop type (no compiler needed)
