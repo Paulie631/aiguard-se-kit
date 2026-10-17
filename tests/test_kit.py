@@ -754,3 +754,9 @@ def test_lost_secret_retires_only_this_computers_own_key(env):
     kit.setup_apply(t, kit.load_cfg(), kit.default_answers(kit.tenant_facts(t, kit.load_cfg())), lambda *a: None)
     assert own not in {c["id"] for c in t.db["llm_application_credentials"]}
     assert kit.load_cfg()["state"]["apps"][app]["das_cred_id"] != own
+
+
+def test_detection_api_403_points_to_setup(env):
+    kit, _ = env("run")
+    assert "Retry" in kit.hint(kit.KitError("Detection API HTTP 403: forbidden"))
+    assert "ZIdentity" in kit.hint(kit.KitError("policies.list failed: 403 Forbidden"))
