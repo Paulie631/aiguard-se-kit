@@ -59,6 +59,7 @@ class FakeZia:
         self.zid_groups = []
         self.members = []
         self.sync = True          # ZIdentity users show up in ZIA right away
+        self.passwords = {}
         self.zid_allowed = True
 
     def _rules(self, resource, rule_type=None):
@@ -85,7 +86,7 @@ class FakeZia:
             self.activations += method == "activate"
             return {"status": "ACTIVE"}
         if resource == "user_management":
-            return copy.deepcopy(self.db["users"])
+            return self._users(method, a, kw)
         if resource == "dlp_engine":
             return copy.deepcopy(self.engines)
         if resource == "cloud_browser_isolation":
@@ -185,6 +186,27 @@ class FakeZia:
                 return None
         raise AssertionError(f"unexpected call {resource}.{method}")
 
+    def _users(self, method, a, kw):
+        if method == "list_users":
+            return copy.deepcopy(self.db["users"])
+        kind = {"group": "zia_groups", "department": "zia_depts", "user": "users"}[method.split("_", 1)[1].rstrip("s")]
+        objs = self.db.setdefault(kind, [])
+        if method.startswith("list"):
+            q = (kw.get("query_params") or {}).get("search", "")
+            return copy.deepcopy([o for o in objs if q.lower() in o["name"].lower()])
+        if method.startswith("add"):
+            if kind == "users":
+                assert kw["groups"] and kw["department"] and kw["password"]
+                self.passwords[kw["email"]] = kw["password"]
+            o = {k: copy.deepcopy(v) for k, v in kw.items() if k != "password"}
+            o["id"] = next(self.ids)
+            objs.append(o)
+            return copy.deepcopy(o)
+        if method.startswith("delete"):
+            self.db[kind] = [o for o in objs if o["id"] != a[0]]
+            return None
+        raise AssertionError(method)
+
     def push(self, u):
         """ZIdentity -> ZIA user sync."""
         self.db["users"].append({"id": next(self.ids), "name": u["displayName"], "email": u["loginName"], "zid": u["id"]})
@@ -274,22 +296,35 @@ def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
     assert {"URL Filtering Rule-1", "DLP PCI Rule-1", "AI_ML_App_Rule_1"} <= {r["name"] for r in fake.all_rules()}
 
 
-def test_setup_creates_the_test_user_when_none_is_given(zenv, capsys):
+def test_setup_creates_a_zia_test_user_with_a_password(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--yes")
     kit.cmd_zia()
     out = capsys.readouterr().out
-    new = next(u for u in fake.zid_users if u["loginName"] == "se-demo-traffic@pyite.buzz")   # the tenant's domain
-    assert new["displayName"] == "SE-Demo Traffic" and new["status"] is True
-    grp = next(x for x in fake.zid_groups if x["name"] == "SE-Demo: traffic generator")
-    assert (grp["id"], new["id"]) in fake.members
-    zia_user = next(u for u in fake.db["users"] if u["email"] == "se-demo-traffic@pyite.buzz")
-    assert all(r["users"] == [zia_user["id"]] for r in fake.all_rules() if r["name"].startswith("SE-Demo:"))
-    assert "can't set passwords" in out and "se-demo-traffic@pyite.buzz" in out
-    made = kit.load_cfg()["zia"]["created_user"]
-    assert made["email"] == "se-demo-traffic@pyite.buzz" and made["zid_id"] == new["id"]
-    kit.cmd_zia()   # again: reuses the user, no duplicates
-    assert sum(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) == 1
-    assert len(fake.zid_groups) == 1 and len(fake.members) == 1
+    user = next(u for u in fake.db["users"] if u["email"] == "se-demo-traffic@pyite.buzz")   # the tenant's domain
+    grp = next(x for x in fake.db["zia_groups"] if x["name"] == "SE-Demo: traffic generator")
+    dept = next(x for x in fake.db["zia_depts"] if x["name"] == "SE-Demo: traffic generator")
+    assert user["groups"] == [{"id": grp["id"]}] and user["department"] == {"id": dept["id"]}
+    pw = fake.passwords["se-demo-traffic@pyite.buzz"]
+    assert kit._kc["zia-test-user-password"] == pw and len(pw) == 20
+    assert pw not in out                                     # never printed by setup
+    assert all(r["users"] == [user["id"]] for r in fake.all_rules() if r["name"].startswith("SE-Demo:"))
+    assert "zia password" in out
+    assert not fake.zid_users[2:]                             # nothing created in ZIdentity
+    kit.cmd_zia()   # again: reuses the user, no duplicates, same password
+    assert sum(u["email"] == "se-demo-traffic@pyite.buzz" for u in fake.db["users"]) == 1
+    assert len(fake.db["zia_groups"]) == 1 and kit._kc["zia-test-user-password"] == pw
+    kit.ARGS[:] = ["zia", "password"]
+    kit.cmd_zia()
+    assert pw in capsys.readouterr().out
+    assert z.api_password(kit.load_cfg()) == {"email": "se-demo-traffic@pyite.buzz", "password": pw}
+
+
+def test_generated_passwords_meet_zia_rules(zenv):
+    kit, z, _ = zenv("zia")
+    for _ in range(200):
+        pw = z.gen_password()
+        assert len(pw) == 20 and any(c.isupper() for c in pw) and any(c.islower() for c in pw)
+        assert any(c.isdigit() for c in pw) and any(c in "!@#$%^&*-_=+" for c in pw)
 
 
 def test_teardown_removes_the_user_it_created_but_never_yours(zenv):
@@ -298,23 +333,61 @@ def test_teardown_removes_the_user_it_created_but_never_yours(zenv):
     kit.ARGS[:] = ["zia", "teardown", "--force"]
     kit.FORCE = True
     kit.cmd_zia()
-    assert [u["loginName"] for u in fake.zid_users] == ["ztest@pyite.buzz", "admin@paulaiuto.zslogin.net"]
-    assert not fake.zid_groups and "created_user" not in kit.load_cfg()["zia"]
+    assert not [u for u in fake.db["users"] if u["email"] == "se-demo-traffic@pyite.buzz"]
+    assert not fake.db["zia_groups"] and not fake.db["zia_depts"]
+    assert "zia-test-user-password" not in kit._kc and "created_user" not in kit.load_cfg()["zia"]
     # a user you chose yourself stays
     kit.ARGS[:] = ["zia", "setup", "--user", "ztest@pyite.buzz", "--yes"]
     kit.cmd_zia()
     kit.ARGS[:] = ["zia", "teardown", "--force"]
     kit.cmd_zia()
-    assert any(u["loginName"] == "ztest@pyite.buzz" for u in fake.zid_users)
-    assert not [c for c in fake.calls if c[:2] == ("zid.users", "delete_user") and c[2] == ("zu-1",)]
+    assert any(u["email"] == "ztest@pyite.buzz" for u in fake.db["users"])
 
 
-def test_slow_user_sync_stops_cleanly_and_resumes(zenv, monkeypatch):
+def test_an_existing_user_is_reused_and_its_password_left_alone(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    fake.db["users"].append({"id": 777, "name": "Old", "email": "se-demo-traffic@pyite.buzz"})
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    assert "already exists" in out and "Change Password" in out and not fake.passwords
+    assert all(r["users"] == [777] for r in fake.all_rules() if r["name"].startswith("SE-Demo:"))
+
+
+def test_no_user_management_access_explains_both_ways_out(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    real = fake.call
+
+    def denied(resource, method, *a, **kw):
+        if resource == "user_management" and method.startswith("add"):
+            raise kit.KitError("user_management.add_group failed: 403 Forbidden")
+        return real(resource, method, *a, **kw)
+    fake.call = denied
+    with pytest.raises(SystemExit):
+        kit.cmd_zia()
+    out = capsys.readouterr().out
+    assert "can't manage users" in out and "--user" in out and not mine(fake)
+
+
+def test_zidentity_option_creates_the_user_there(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--via", "zidentity", "--yes")
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    new = next(u for u in fake.zid_users if u["loginName"] == "se-demo-traffic@pyite.buzz")
+    grp = next(x for x in fake.zid_groups if x["name"] == "SE-Demo: traffic generator")
+    assert (grp["id"], new["id"]) in fake.members and "Directory > Users" in out
+    assert kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity"
+    kit.ARGS[:] = ["zia", "teardown", "--force"]
+    kit.FORCE = True
+    kit.cmd_zia()
+    assert not [u for u in fake.zid_users if u["loginName"].startswith("se-demo-traffic@")] and not fake.zid_groups
+
+
+def test_slow_zidentity_sync_stops_cleanly_and_resumes(zenv):
     kit, z, fake = zenv("zia")
     fake.sync = False
     cfg = kit.load_cfg()
     with pytest.raises(kit.KitError, match="hasn't received it yet"):
-        z.create_test_user(fake, cfg, lambda *a: None, wait=0)
+        z.create_test_user(fake, cfg, lambda *a: None, via="zidentity", wait=0)
     assert not mine(fake) and kit.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@pyite.buzz"
     fake.push(fake.zid_users[-1])   # ZIA catches up
     kit.ARGS[:] = ["zia", "setup", "--yes"]
@@ -322,15 +395,6 @@ def test_slow_user_sync_stops_cleanly_and_resumes(zenv, monkeypatch):
     kit.cmd_zia()
     assert sum(u["loginName"].startswith("se-demo-traffic@") for u in fake.zid_users) == 1
     assert mine(fake)
-
-
-def test_no_zidentity_access_explains_both_ways_out(zenv, capsys):
-    kit, z, fake = zenv("zia", "setup", "--yes")
-    fake.zid_allowed = False
-    with pytest.raises(SystemExit):
-        kit.cmd_zia()
-    out = capsys.readouterr().out
-    assert "can't manage ZIdentity users" in out and "--user" in out and not mine(fake)
 
 
 def test_tenant_domain_ignores_zscaler_admin_domains(zenv):

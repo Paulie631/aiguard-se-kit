@@ -14,17 +14,41 @@ APIs can create ZIA policy but can't create log entries. Only real traffic throu
 The ZIA tab of the console does the same as these commands.
 
 1. Give the OneAPI client ZIA access (one time):
-   - ZIA > Administration > Role Management: add an **API** role with full access to URL Filtering, Cloud App Control, File Type Control, DLP, Firewall and Activation.
-   - ZIdentity > Integration > API Clients: edit the kit's client and add Zscaler Internet Access with that role.
+   - **Administration > Role Management**: add an **API** role with full access to URL Filtering, Cloud App Control, File Type Control, DLP, Firewall and Activation.
+   - **Administration > API > OneAPI > API Clients**: edit the kit's client and add Zscaler Internet Access with that role.
 2. Create the policy. Setup creates the test user for you:
    ```
    ./aiguard-kit zia preflight
    ./aiguard-kit zia setup
    ```
-   - **The test user.** With no `--user`, setup creates `se-demo-traffic@<your tenant's domain>` in ZIdentity, plus the group `SE-Demo: traffic generator`. It then waits until ZIA has the user, usually under a minute. Use `--domain` to choose the domain, or `--user someone@yourdomain` to use a dedicated user you already have (never your own account).
-   - **The password.** ZIdentity's API can't set passwords, so set one yourself, once: in the ZIdentity admin console, open the user and set a password. That's what you sign in to Client Connector with on the generator. Keep it out of chat and email.
-   - **API access.** The OneAPI client needs ZIdentity user management for this. Without it, setup says so and you can create the user yourself and pass `--user`.
-   - **Teardown.** `zia teardown` removes the user and group only if the kit created them.
+   - **The test user.** With no `--user`, setup creates `se-demo-traffic@<your tenant's domain>` as a ZIA **Internet & SaaS user**, in a new group and department called `SE-Demo: traffic generator`.
+     - Use `--domain` to choose the domain.
+     - Use `--user someone@yourdomain` to use a dedicated user you already have (never your own account).
+   - **The password.** Setup generates one and saves it in this computer's keychain. It isn't printed during setup. When you sign in to Client Connector on the generator, show it with `./aiguard-kit zia password`, or **Show password** on the console's ZIA tab. Keep it out of chat, email and tickets.
+   - **API access.** The OneAPI client's ZIA role needs User Management access. Without it, setup says so; create the user yourself (below) and pass `--user`.
+   - **Teardown.** `zia teardown` removes the user, group and department only if the kit created them, and forgets the password.
+
+### Setting a test user's password by hand
+
+You only need this for a user you created yourself, or to reset a password. The menu names match the Zscaler Experience Center (console.zscaler.com) as of October 2026.
+
+1. In the left menu, choose **Administration**. Under **Internet & SaaS Authentication**, choose **Internet & SaaS Users**.
+2. On the **Users** tab, find the user (filter with **User ID or Name** if the list is long). Click the **pencil** icon under **Actions**.
+3. In the **Edit User** panel, scroll to **Change Password**. Enter the new password in **Password** and again in **Confirm Password**. The password has to meet the tenant's password policy (under **Administration > Authentication**, **Password Policy**).
+4. Click **Save**.
+5. Sign in to Client Connector on the generator with the **User ID** (the email) and that password.
+
+To create a user by hand instead:
+1. Go to the same **Internet & SaaS Users** page and click **Add User**.
+2. Give it a User ID on your tenant's domain, a group and a department, and a password.
+3. Run `./aiguard-kit zia setup --user <that User ID>`.
+
+### If your tenant signs users in through ZIdentity
+
+The tenant setting **Administration > Internet & SaaS Authentication > Internet Authentication Settings** decides whether Client Connector users sign in with the Internet & SaaS user list above or through ZIdentity. If it's ZIdentity:
+1. Run `./aiguard-kit zia setup --via zidentity`. This creates the user and the group `SE-Demo: traffic generator` in ZIdentity instead.
+2. Set the password in **Administration > Authentication > Directory > Users**. The API can't set it, and this guide doesn't have click-by-click steps for that page yet.
+3. ZIA only lists a ZIdentity user once it has signed in, so if setup reports that ZIA hasn't received the user, sign in once on the generator and rerun setup.
 
 ### What setup creates
 
@@ -40,7 +64,7 @@ Every object is scoped to the test user only, labeled `SE-Demo`, placed above yo
 | Firewall | Block TCP 23, 2222, 4444 and 8888 (network service `SE-Demo: demo ports`) |
 | DNS | Block the marijuana category. The web sweep never visits it, so DNS blocks don't hide URL blocks |
 | Shared objects | URL category `SE-Demo: tenant check` (example.com), rule label `SE-Demo: SE-Demo` |
-| ZIdentity (unless you pass `--user`) | User `se-demo-traffic@<domain>`, group `SE-Demo: traffic generator` |
+| Test user (unless you pass `--user`) | ZIA user `se-demo-traffic@<domain>` with a generated password, in group and department `SE-Demo: traffic generator` (with `--via zidentity`: a ZIdentity user and group) |
 
 The rules are defined in `zia_policy_template.json`. Setup checks the template against your tenant and skips or trims anything it doesn't have (an isolation profile, a DLP engine, an app action), saying which in the review.
 
@@ -58,7 +82,7 @@ The rules are defined in `zia_policy_template.json`. Setup checks the template a
 2. **Client Connector.** Install it and enroll in the demo tenant as the test user.
 3. **Z-Tunnel 2.0.** Firewall, DNS and unusual-port traffic only reach ZIA through Z-Tunnel 2.0. Z-Tunnel 1.0 carries web traffic only. In the Client Connector portal:
    1. Under Forwarding Profile, copy your profile as `SE-Demo: Z-Tunnel 2.0`, with Tunnel version set to **Z-Tunnel 2.0** for on-trusted and off-trusted networks.
-   2. Add a Windows app profile `SE-Demo: …` that uses that forwarding profile, assigned only to the group `SE-Demo: traffic generator` (setup creates it).
+   2. Add a Windows app profile `SE-Demo: …` that uses that forwarding profile, assigned only to the group `SE-Demo: traffic generator` (setup creates it), or to the test user.
    
    This leaves your other devices as they are.
 4. **SSL inspection.** It must decrypt the test user's traffic, which `zia preflight` checks. EICAR over HTTPS, DLP and Cloud App Control need it.

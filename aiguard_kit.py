@@ -27,6 +27,7 @@ Internet Access (ZIA), see ZIA.md:
                                scoped to that user, and activate it
   ./aiguard-kit zia preflight  read-only ZIA checks (--write-probe, --json)
   ./aiguard-kit zia status     list the kit's ZIA objects;  zia teardown removes them and activates
+  ./aiguard-kit zia password   show the test user's sign-in for Client Connector (this computer only)
   ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
   ./aiguard-kit zia check      on the traffic generator machine: is traffic reaching the demo tenant? (no keys needed)
   ./aiguard-kit zia traffic    on the generator: one round of demo traffic (--types web,saas,genai,threats,dlp,files,dns,ports
@@ -85,7 +86,7 @@ YES = "--yes" in ARGS or "-y" in ARGS
 FORCE = "--force" in ARGS
 VERBOSE = "--verbose" in ARGS or "-v" in ARGS
 VALUE_OPTS = ("--prefix", "--preset", "--mode", "--rounds", "--tests", "--port", "--profile", "--count", "--every",
-              "--user", "--types", "--domain")
+              "--user", "--types", "--domain", "--via")
 
 
 def opt(name, default=None):
@@ -2620,6 +2621,8 @@ def cmd_gui():
 
                 threading.Thread(target=setup_work, daemon=True).start()
                 return self._send(200, {"id": jid})
+            if path == "/api/zia/password":   # answered directly, never through a job log
+                return self._send(200, product("zia").api_password(c))
             if path.startswith("/api/zia/"):
                 if path.endswith("teardown") and body.get("confirm") != "DELETE":
                     return self._send(400, {"error": "Type DELETE to confirm."})

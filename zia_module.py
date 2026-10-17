@@ -125,8 +125,7 @@ def connect(cfg):
 
 ZIA_HINTS = [
     (r"\b401\b|NOT_AUTHORIZED|Unauthorized",
-     "The OneAPI client works but has no ZIA access. In ZIdentity > Integration > API Clients, edit the client and "
-     "add Zscaler Internet Access with an API role (create one in ZIA > Administration > Role Management, type API)."),
+     "The OneAPI client works but has no ZIA access. X"),
     (r"\b403\b|Forbidden|not permitted|insufficient",
      "The client's ZIA API role is read-only or missing a policy area. Give the role full access to URL Filtering, "
      "Cloud App Control, File Type Control, DLP, Firewall and Activation."),
@@ -169,9 +168,30 @@ def find_users(t, wanted):
 # ---------------------------------------------------------------- the test user
 TEST_USER = {"login": "se-demo-traffic", "display": "SE-Demo Traffic", "first": "SE-Demo", "last": "Traffic"}
 NOT_TENANT_DOMAINS = re.compile(r"zscaler|zslogin|zscloud", re.I)
-PASSWORD_NOTE = ("ZIdentity's API can't set passwords, so set one yourself, once: in the ZIdentity admin console open "
-                 "Users > {email} and set a password. Then sign in to Client Connector on the traffic generator as "
-                 "{email}. Never paste the password into chat or email.")
+PW_KEY = "zia-test-user-password"   # keychain entry for the password of a test user the kit created
+CONSOLE_USERS = "Administration > Internet & SaaS Authentication > Internet & SaaS Users"
+ZID_NOTE = ("ZIdentity's API can't set passwords, so set one yourself, once: Administration > Authentication > "
+            "Directory > Users, click {email}, and set a password. Then sign in to Client Connector on the traffic "
+            "generator as {email}. Never paste the password into chat or email.")
+MANUAL_PW = ("Set or reset its password in the console: " + CONSOLE_USERS + ", click the pencil (Edit) on {email}, "
+             "fill Change Password > Password and Confirm Password, then Save.")
+
+
+def gen_password(n=20):
+    """Random, and meets ZIA's hosted-database password rules (upper, lower, digit, special, 8+ characters)."""
+    import secrets
+    import string
+    special = "!@#$%^&*-_=+"
+    pool = string.ascii_letters + string.digits + special
+    while True:
+        pw = "".join(secrets.choice(pool) for _ in range(n))
+        if (any(c.islower() for c in pw) and any(c.isupper() for c in pw) and any(c.isdigit() for c in pw)
+                and any(c in special for c in pw)):
+            return pw
+
+
+def test_user_password():
+    return K.kc_get(PW_KEY)
 
 
 def tenant_domain(t):
@@ -211,16 +231,84 @@ def zid_group(t, log):
     return grp
 
 
-def create_test_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
-    """Creates the dedicated test user in ZIdentity (plus a group for it), waits until ZIA has it, and scopes the
-    demo to it. Safe to run again: an existing user is reused."""
+def test_email(t, email=None, domain=None):
+    if email:
+        return email
+    domain = domain or tenant_domain(t)
+    if not domain:
+        raise K.KitError("Couldn't tell which email domain this tenant's users use. Pass it: "
+                         "./aiguard-kit zia setup --domain yourdomain.com")
+    return f"{TEST_USER['login']}@{domain}"
+
+
+def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, poll=10):
+    """Creates the dedicated test user and scopes the demo to it. via="zia" (default): a ZIA Internet & SaaS user with
+    a generated password kept in this computer's keychain. via="zidentity": a ZIdentity user (set its password by
+    hand). Safe to run again: an existing user is reused."""
     z = zcfg(cfg)
-    if not email:
-        domain = domain or tenant_domain(t)
-        if not domain:
-            raise K.KitError("Couldn't tell which email domain this tenant's users use. Pass it: "
-                             "./aiguard-kit zia setup --domain yourdomain.com")
-        email = f"{TEST_USER['login']}@{domain}"
+    via = via or (z.get("created_user") or {}).get("via") or "zia"
+    if via == "zidentity":
+        return create_zid_user(t, cfg, log, email, domain, wait, poll)
+    return create_zia_user(t, cfg, log, email, domain)
+
+
+def ensure_zia_ref(t, kind, name, log):
+    """A ZIA group or department for the test user."""
+    lister, adder = {"group": ("list_groups", "add_group"), "department": ("list_departments", "add_department")}[kind]
+    rows = items(t.call("user_management", lister, query_params={"search": name}))
+    hit = next((x for x in rows if g(x, "name") == name), None)
+    if hit:
+        return hit
+    made = t.call("user_management", adder, name=name, comments="Created by the SE demo kit")
+    log("ok", f"Created ZIA {kind} '{name}'")
+    return made
+
+
+def create_zia_user(t, cfg, log, email=None, domain=None):
+    z = zcfg(cfg)
+    email = test_email(t, email, domain)
+    found, _ = find_users(t, [email])
+    made = z.get("created_user") or {}
+    if found:
+        z["users"] = found
+        K.save_cfg(cfg)
+        if made.get("email") == email and test_user_password():
+            log("ok", f"Test user {email} is ready (password in this computer's keychain: ./aiguard-kit zia password)")
+        else:
+            log("ok", f"{email} already exists in ZIA; the demo will use it")
+            log("info", "The kit didn't create it, so it doesn't know its password. " + MANUAL_PW.format(email=email))
+        return found[0]
+    name = zname("traffic generator")
+    try:
+        grp = ensure_zia_ref(t, "group", name, log)
+        dept = ensure_zia_ref(t, "department", name, log)
+        pw = gen_password()
+        user = t.call("user_management", "add_user", name=TEST_USER["display"], email=email, password=pw,
+                      groups=[{"id": g(grp, "id")}], department={"id": g(dept, "id")},
+                      comments="Test user for the SE demo kit's ZIA traffic generator")
+    except K.KitError as e:
+        if re.search(r"\b40[13]\b|unauthori|forbidden|not authorized", str(e), re.I):
+            raise K.KitError(f"The OneAPI client's ZIA role can't manage users ({str(e)[:120]}). x, or create {email} "
+                             f"yourself in {CONSOLE_USERS} and rerun with --user {email}.") from e
+        if re.search(r"password", str(e), re.I):
+            raise K.KitError(f"ZIA rejected the generated password ({str(e)[:160]}). Check the password policy "
+                             f"(Administration > Authentication > Password Policy), or create {email} yourself and rerun "
+                             f"with --user {email}.") from e
+        raise
+    K.kc_set(PW_KEY, pw)
+    z["created_user"] = {"via": "zia", "email": email, "zia_id": g(user, "id"), "group": name,
+                         "zia_group_id": g(grp, "id"), "zia_dept_id": g(dept, "id")}
+    z["users"] = [{"id": g(user, "id"), "name": g(user, "name") or TEST_USER["display"], "email": email}]
+    K.save_cfg(cfg)
+    log("ok", f"Created ZIA user {email} in group and department '{name}'")
+    log("ok", "Its password is saved in this computer's keychain. Show it with ./aiguard-kit zia password "
+              "(or Show password in the console's ZIA tab) when you sign in to Client Connector on the generator.")
+    return z["users"][0]
+
+
+def create_zid_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
+    z = zcfg(cfg)
+    email = test_email(t, email, domain)
     found, _ = find_users(t, [email])
     if found and not (z.get("created_user") or {}).get("email") == email:
         z["users"] = found
@@ -243,11 +331,12 @@ def create_test_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
                 log("warn", f"Couldn't add the user to '{g(grp, 'name')}': {str(e)[:120]}")
     except K.KitError as e:
         if re.search(r"\b40[13]\b|unauthori|forbidden|not authorized", str(e), re.I):
-            raise K.KitError(f"The OneAPI client can't manage ZIdentity users ({str(e)[:120]}). In ZIdentity > "
-                             f"Integration > API Clients, give the kit's client the ZIdentity user-management scope, or "
+            raise K.KitError(f"The OneAPI client can't manage ZIdentity users ({str(e)[:120]}). In Administration > "
+                             f"API > OneAPI > API Clients, give the kit's client the ZIdentity user-management scope, or "
                              f"create {email} yourself and rerun with --user {email}.") from e
         raise
-    z["created_user"] = {"email": email, "zid_id": g(user, "id"), "group": g(grp, "name"), "group_id": g(grp, "id")}
+    z["created_user"] = {"via": "zidentity", "email": email, "zid_id": g(user, "id"), "group": g(grp, "name"),
+                         "group_id": g(grp, "id")}
     K.save_cfg(cfg)
     if not found:
         log("info", "Waiting for ZIdentity to sync the user to ZIA (usually under a minute)…")
@@ -263,7 +352,7 @@ def create_test_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
     z["users"] = found
     K.save_cfg(cfg)
     log("ok", f"ZIA has the test user; the demo rules will apply only to {email}")
-    log("warn", PASSWORD_NOTE.format(email=email))
+    log("warn", ZID_NOTE.format(email=email))
     return found[0]
 
 
@@ -514,7 +603,13 @@ def kit_objects(t, cfg=None):
         if mine(lab):
             found.append(("label", None, lab))
     made = (zcfg(cfg).get("created_user") if cfg else None) or {}
-    if made.get("zid_id"):   # only a user and group this kit created; never one you made yourself
+    # only a user, group and department this kit created; never ones you made yourself
+    if made.get("zia_id"):
+        found.append(("zia_user", None, {"id": made["zia_id"], "name": made["email"]}))
+        for kind, key in (("zia_group", "zia_group_id"), ("zia_department", "zia_dept_id")):
+            if made.get(key):
+                found.append((kind, None, {"id": made[key], "name": made.get("group")}))
+    if made.get("zid_id"):
         found.append(("zidentity_user", None, {"id": made["zid_id"], "name": made["email"]}))
         if made.get("group_id"):
             found.append(("zidentity_group", None, {"id": made["group_id"], "name": made.get("group")}))
@@ -535,7 +630,9 @@ def teardown(t, cfg, log, confirm=True):
         deleters = {"url_category": ("url_categories", "delete_category"),
                     "network_service": ("cloud_firewall", "delete_network_service"),
                     "label": ("rule_labels", "delete_label"),
-                    "zidentity_user": ("zid.users", "delete_user"), "zidentity_group": ("zid.groups", "delete_group")}
+                    "zidentity_user": ("zid.users", "delete_user"), "zidentity_group": ("zid.groups", "delete_group"),
+                    "zia_user": ("user_management", "delete_user"), "zia_group": ("user_management", "delete_group"),
+                    "zia_department": ("user_management", "delete_department")}
         for kind, rt, o in objs:   # rules first, then the objects they reference
             label = g(o, "name") or g(o, "configured_name")
             try:
@@ -553,6 +650,7 @@ def teardown(t, cfg, log, confirm=True):
     z.pop("state", None)
     if z.pop("created_user", None):
         z.pop("users", None)
+        K.kc_del(PW_KEY)
     K.save_cfg(cfg)
     return True
 
@@ -591,19 +689,19 @@ def preflight(cfg, write_probe=False):
         found, missing = find_users(t, [u.get("email") or u["name"] for u in z["users"]])
         add("zia-user", "Test user exists", "fail" if missing else "ok",
             ", ".join(u.get("email") or u["name"] for u in found) + (f"; missing: {', '.join(missing)}" if missing else ""),
-            "Create the user in ZIdentity (or your IdP) and sign in to Client Connector once, then rerun." if missing else "")
+            f"Rerun setup without --user to create a new one, or add the user in {CONSOLE_USERS}." if missing else "")
     else:
         add("zia-user", "Test user chosen", "info", "not yet - setup creates one",
-            "Setup creates a dedicated test user in ZIdentity, or pass --user to use one you already have.")
+            "Setup creates a dedicated ZIA test user with a generated password, or pass --user to use one you have.")
         try:
             dom = tenant_domain(t)
-            items(t.call("zid.groups", "list_groups", query_params={"limit": 1}))
-            add("zia-zid", "Can create the test user in ZIdentity", "ok" if dom else "warn",
+            items(t.call("user_management", "list_groups", query_params={"search": K.PREFIX}))
+            add("zia-mkuser", "Can create the test user", "ok" if dom else "warn",
                 f"would create {TEST_USER['login']}@{dom}" if dom else "couldn't tell the tenant's email domain",
                 "" if dom else "Pass --domain yourdomain.com to setup.")
         except Exception as e:
-            add("zia-zid", "Can create the test user in ZIdentity", "warn", str(e)[:160],
-                "Give the OneAPI client ZIdentity user-management access, or create a test user yourself and pass --user.")
+            add("zia-mkuser", "Can create the test user", "warn", str(e)[:160],
+                "Give the ZIA API role User Management access, or create a test user yourself and pass --user.")
 
     facts = resolve(t, tpl)
     want = sorted({e for r in tpl["dlp"] for e in r["engines"]})
@@ -688,21 +786,21 @@ def choose_users(t, cfg):
         found, missing = find_users(t, wanted.split(","))
         if missing:
             raise K.KitError(f"No ZIA user {', '.join(missing)}. Leave out --user and setup creates a test user for you, "
-                             f"or create it in ZIdentity (or your IdP) and rerun.")
+                             f"or create it in {CONSOLE_USERS} and rerun.")
         z["users"] = found
         return
     if z.get("users") and K.yesno("Scope the demo rules to " + ", ".join(u.get("email") or u["name"] for u in z["users"]) + "?", True):
         return
     pending = (z.get("created_user") or {}).get("email")
     if K.YES or pending or "--create-user" in K.ARGS:
-        create_test_user(t, cfg, K.cli_log, email=pending, domain=K.opt("domain"))
+        create_test_user(t, cfg, K.cli_log, email=pending, domain=K.opt("domain"), via=K.opt("via"))
         return
     K.info("The demo rules apply only to one test user: the one signed in to Client Connector on the traffic generator.")
     domain = K.opt("domain") or tenant_domain(t) or "yourdomain"
     i = K.menu("Which test user?", [f"Create one for me: {TEST_USER['login']}@{domain} (recommended)",
                                     "Use a user I already have (never your own account)"])
     if i == 0:
-        create_test_user(t, cfg, K.cli_log, domain=None if domain == "yourdomain" else domain)
+        create_test_user(t, cfg, K.cli_log, domain=None if domain == "yourdomain" else domain, via=K.opt("via"))
         return
     while True:
         w = K.ask("Test user email (comma-separate several)")
@@ -788,6 +886,30 @@ def cmd_status():
         K.info(f"Last traffic round on this machine: {json.loads(last.read_text(encoding='utf-8')).get('summary')}")
 
 
+def cmd_password():
+    """Shows the kit-created test user's password, on this computer only."""
+    cfg = K.load_cfg()
+    made = zcfg(cfg).get("created_user") or {}
+    pw = test_user_password()
+    K.head("ZIA test user")
+    if not (made.get("email") and pw):
+        K.warn("The kit hasn't created a test user with a password on this computer.")
+        K.info("Run ./aiguard-kit zia setup to create one. For a user you made yourself: " +
+               MANUAL_PW.format(email="the user"))
+        return
+    print(f"  Sign in to Client Connector on the traffic generator as:\n    {made['email']}\n    {pw}")
+    K.info("Shown here only. Don't paste it into chat, email or tickets. It's kept in this computer's keychain.")
+
+
+def api_password(cfg):
+    made = zcfg(cfg).get("created_user") or {}
+    pw = test_user_password()
+    if not (made.get("email") and pw):
+        return {"error": "The kit hasn't created a test user with a password on this computer.",
+                "fix": MANUAL_PW.format(email="your test user")}
+    return {"email": made["email"], "password": pw}
+
+
 def cmd_teardown():
     cfg = K.load_cfg()
     K.head("ZIA teardown")
@@ -838,9 +960,9 @@ def cli(args):
     sub = next((a for a in args if not a.startswith("-") and a not in _values(args)), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "status": cmd_status, "teardown": cmd_teardown,
             "dashboards": cmd_dashboards, "check": cmd_check, "traffic": cmd_traffic,
-            "schedule": lambda: K.cmd_schedule("zia")}
+            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password}
     if sub not in cmds:
-        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|check|traffic|schedule  (see ZIA.md)")
+        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|check|traffic|schedule  (see ZIA.md)")
         return
     try:
         cmds[sub]()
@@ -890,7 +1012,7 @@ def api_job(path, body, cfg, tenant, log, job):
         return True
     if path == "/api/zia/user":
         job["verify"] = create_test_user(tenant(), cfg, log, email=(body.get("email") or "").strip() or None,
-                                         domain=(body.get("domain") or "").strip() or None)
+                                         domain=(body.get("domain") or "").strip() or None, via=body.get("via"))
         return True
     if path == "/api/zia/apply":
         t = tenant()

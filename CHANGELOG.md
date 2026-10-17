@@ -21,10 +21,11 @@
     tenant-check category), Browser Isolation where licensed, Cloud App Control, File Type Control, DLP, firewall
     with a demo-ports service, and DNS. Every rule is scoped to one test user and labeled `SE-Demo`. Anything the
     tenant lacks is skipped and named. `zia teardown` removes it all and activates.
-  - Setup creates the test user for you: `se-demo-traffic@<tenant domain>` in ZIdentity, with the group
-    `SE-Demo: traffic generator` for the Client Connector profile. It waits for ZIA to sync it, then scopes the
-    demo to it. You set its password once in ZIdentity, because the API can't. `--user` uses an existing user
-    instead. Teardown removes the user and group only if the kit created them.
+  - Setup creates the test user for you: `se-demo-traffic@<tenant domain>` as a ZIA Internet & SaaS user, in a
+    group and department called `SE-Demo: traffic generator`, with a generated password kept in the keychain.
+    `zia password` (or **Show password** in the console) shows it, on this computer only, when you sign in to
+    Client Connector. `--via zidentity` creates a ZIdentity user instead (you set its password by hand). `--user`
+    uses an existing user. Teardown removes the user, group and department only if the kit created them.
   - `zia preflight` checks ZIA API access, the test user, DLP engines, SSL inspection, Browser Isolation and create
     permission.
   - `zia dashboards` lists which Insights panels are still empty.
