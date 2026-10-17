@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+- Double-click installers: `Install AI Guard Kit.cmd` (Windows) and `Install AI Guard Kit.command` (Mac). They install
+  uv if needed (official installer, then winget or Homebrew), prepare Python 3.12, copy the kit to
+  `~/.aiguard-se-kit/app`, add an **AI Guard Demo Console** desktop shortcut (and Start menu entries on Windows),
+  add `aiguard-kit` to PATH, and open the console.
+- New commands `install` and `uninstall`. Uninstall keeps settings, keys and tenant objects.
+- Installing re-points existing scheduled traffic at the installed copy. The schedule's interval and count are now
+  remembered.
+- The command line is unchanged. New INSTALL.md.
+
 ## 1.5.3
 - Fixed: on a computer with a very new Python (3.15), uv tried to compile `pyyaml` and failed with
   "Microsoft Visual C++ 14.0 or greater is required". The launchers now run the kit on Python 3.12, which uv

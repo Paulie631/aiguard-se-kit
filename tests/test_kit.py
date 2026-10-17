@@ -512,3 +512,74 @@ def test_launchers_pin_a_python_with_prebuilt_libraries():
     assert "--python 3.12 --script" in (ROOT / "aiguard-kit").read_text()
     assert b"--python 3.12 --script" in (ROOT / "aiguard-kit.cmd").read_bytes()
     assert "--python 3.12 --script" in (ROOT / "WINDOWS.md").read_text(encoding="utf-8")
+
+
+def test_install_and_uninstall_mac_linux(env, monkeypatch, tmp_path, capsys):
+    import subprocess
+    kit, _ = env("install", "--yes")
+    home = tmp_path / "home"
+    monkeypatch.setattr(kit, "HOME", home)
+    monkeypatch.setattr(kit, "BASE_DIR", home / ".aiguard-se-kit")
+    monkeypatch.setattr(kit, "APP_DIR", home / ".aiguard-se-kit" / "app")
+    monkeypatch.setattr(kit, "schedule_installed", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    kit.cmd_install()
+    app = home / ".aiguard-se-kit" / "app"
+    assert (app / "aiguard_kit.py").read_bytes() == (ROOT / "aiguard_kit.py").read_bytes()
+    assert (app / "packs").is_dir() and (app / "aiguard-kit").stat().st_mode & 0o111
+    assert not (app / "aiguard-kit.cmd").exists() and not (app / "tests").exists()
+    shortcut = home / "Desktop" / "AI Guard Demo Console.command"
+    assert f'exec "{app / "aiguard-kit"}" gui' in shortcut.read_text() and shortcut.stat().st_mode & 0o111
+    assert f'exec "{app / "aiguard-kit"}" "$@"' in (home / ".local/bin/aiguard-kit").read_text()
+    # reinstalling keeps the previous copy for rollback
+    kit.cmd_install()
+    assert (app.with_name("app.previous") / "aiguard_kit.py").exists()
+    kit.cmd_uninstall()
+    assert not app.exists() and not shortcut.exists() and not (home / ".local/bin/aiguard-kit").exists()
+    assert not app.with_name("app.previous").exists()
+
+
+def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path):
+    import subprocess
+    kit, _ = env("install", "--yes")
+    windows(kit, monkeypatch, tmp_path)
+    for f in kit.INSTALL_FILES:  # the kit folder under test
+        src = ROOT / f
+        if src.is_file():
+            (kit.HERE / f).write_bytes(src.read_bytes())
+    (kit.HERE / "packs").mkdir()
+    home = tmp_path / "home"
+    monkeypatch.setattr(kit, "HOME", home)
+    monkeypatch.setattr(kit, "BASE_DIR", home / ".aiguard-se-kit")
+    monkeypatch.setattr(kit, "APP_DIR", home / ".aiguard-se-kit" / "app")
+    monkeypatch.setenv("APPDATA", str(home / "AppData/Roaming"))
+    shortcuts, path = [], []
+    monkeypatch.setattr(kit, "_desktop_dir", lambda: home / "OneDrive/Desktop")
+    monkeypatch.setattr(kit, "_win_shortcut", lambda p, target, args, wd, desc: shortcuts.append((p.name, target.name, args)))
+    monkeypatch.setattr(kit, "_win_user_path", lambda add=None, remove=None: path.append((add, remove)))
+    monkeypatch.setattr(kit, "schedule_installed", lambda: True)
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: ran.append(cmd) or types.SimpleNamespace(returncode=0, stderr="", stdout=""))
+    kit.cmd_install()
+    app = home / ".aiguard-se-kit" / "app"
+    assert (app / "aiguard-kit.cmd").exists() and not (app / "aiguard-kit").exists()
+    assert (app / "Uninstall AI Guard Kit.cmd").exists() and not (app / "Uninstall AI Guard Kit.command").exists()
+    assert ("AI Guard Demo Console.lnk", "aiguard-kit.cmd", "gui") in shortcuts
+    assert ("Uninstall AI Guard Demo Kit.lnk", "Uninstall AI Guard Kit.cmd", "") in shortcuts
+    assert path == [(str(app), None)]
+    # the existing schedule now runs the installed copy
+    assert ran[-1][:2] == ["schtasks", "/Create"]
+    assert f'cd /d "{app}"' in (kit.CFG_DIR / "trickle.cmd").read_text()
+    assert f'"{app / "aiguard-kit.cmd"}"' in (kit.CFG_DIR / "trickle.cmd").read_text()
+    assert kit.load_cfg()["schedule"] == {"every": 60, "count": 12}
+
+
+def test_double_click_installers_are_well_formed():
+    win = (ROOT / "Install AI Guard Kit.cmd").read_bytes()
+    assert win.startswith(b"@echo off\r\n") and b"\n" not in win.replace(b"\r\n", b"")
+    assert b'uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" install' in win
+    mac = ROOT / "Install AI Guard Kit.command"
+    assert mac.stat().st_mode & 0o111 and b"\r" not in mac.read_bytes()
+    assert "--python 3.12 --script ./aiguard_kit.py install" in mac.read_text()
+    for f in ("Install AI Guard Kit.command", "Uninstall AI Guard Kit.command", "aiguard-kit"):
+        assert (ROOT / f).stat().st_mode & 0o111, f

@@ -6,6 +6,10 @@ Fill every Zscaler AI Guard dashboard in **your own** tenant in about ten minute
 
 ## Quickstart
 
+**Easiest:** unzip the kit and double-click **Install AI Guard Kit.cmd** (Windows) or **Install AI Guard Kit.command** (Mac). It installs everything, adds an **AI Guard Demo Console** shortcut to your desktop and opens the Setup tab. See [INSTALL.md](INSTALL.md). Then continue from step 2 below for the OneAPI client.
+
+**Command line:**
+
 1. **Install uv** (one time): `brew install uv` (Mac) or see the Windows note below.
 2. **Create a OneAPI client** in ZIdentity → Integration → API Clients, with AI Guard access. Copy the client ID and secret, and note your vanity domain: the `acme` in `acme.zslogin.net`.
 3. **Open the console** from this folder. It starts on the **Setup** tab the first time:
@@ -94,6 +98,7 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ./aiguard-kit schedule install [--every 60] [--count 12]    also: schedule status, schedule remove
 ./aiguard-kit status                     login, policy, keys, Detection API, kit updates
 ./aiguard-kit teardown                   deletes every SE-Demo object and the local keys (--force: no prompt)
+./aiguard-kit install | uninstall        desktop shortcut + `aiguard-kit` on PATH (what the double-click installers run)
 
 Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 ```
@@ -139,4 +144,4 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 
 ## Files
 
-`aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.
+`Install AI Guard Kit.cmd` / `.command`: double-click installers (see INSTALL.md) · `aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.

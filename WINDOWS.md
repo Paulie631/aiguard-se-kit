@@ -1,5 +1,7 @@
 # Running the kit on Windows
 
+**Easiest:** double-click **Install AI Guard Kit.cmd** in the kit folder. It installs uv and the kit and adds an **AI Guard Demo Console** shortcut to your desktop. See [INSTALL.md](INSTALL.md). The steps below are the command-line route.
+
 Use **PowerShell** or **Windows Terminal**. Run every command from inside the `aiguard-se-kit` folder.
 
 ## 1. Install uv (one time)

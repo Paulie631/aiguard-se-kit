@@ -16,6 +16,8 @@
                            keep dashboards fresh with a small batch every N minutes
   ./aiguard-kit status     check credentials, tenant objects, the detection API and kit updates
   ./aiguard-kit teardown   delete everything this kit created (objects named with the prefix)
+  ./aiguard-kit install    copy the kit to ~/.aiguard-se-kit/app, add a desktop shortcut and the `aiguard-kit` command
+                           (what the double-click installers run); uninstall removes them
 
 Options: --yes (accept defaults), --force (teardown without asking), --verbose (API details, keys masked),
          --prefix NAME, --profile NAME (keep several tenants apart).
@@ -34,7 +36,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.5.3"
+VERSION = "1.6.0"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -726,8 +728,11 @@ uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" %*
 """
 
 
+SCHEDULE_BASE = None  # set by `install` so an existing schedule is re-pointed at the installed copy
+
+
 def schedule_cmdline(count):
-    exe = HERE / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
+    exe = (SCHEDULE_BASE or HERE) / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
     return [str(exe), "run", "--trickle", "--count", str(count), "--profile", PROFILE, "--yes"]
 
 
@@ -735,7 +740,16 @@ def cmd_schedule():
     import platform
     import subprocess
     action = next((a for a in ARGS if a in ("install", "remove", "status")), "status")
-    every, count = max(15, int(opt("every", "60"))), int(opt("count", "12"))
+    saved = load_cfg().get("schedule") or {}
+    every = max(15, int(opt("every", str(saved.get("every", 60)))))
+    count = int(opt("count", str(saved.get("count", 12))))
+    if action in ("install", "remove"):
+        cfg_ = load_cfg()
+        if action == "install":
+            cfg_["schedule"] = {"every": every, "count": count}
+        else:
+            cfg_.pop("schedule", None)
+        save_cfg(cfg_)
     label = f"com.aiguard-se-kit.{PROFILE}"
     system = platform.system()
     head(f"Scheduled traffic ({system})")
@@ -773,7 +787,7 @@ def cmd_schedule():
             # schtasks limits /TR to 261 characters and doesn't capture output, so run a small wrapper that logs
             wrapper = CFG_DIR / "trickle.cmd"
             cmdline = " ".join(f'"{x}"' for x in schedule_cmdline(count))
-            wrapper.write_bytes((f'@echo off\r\nset NO_COLOR=1\r\ncd /d "{HERE}"\r\n'
+            wrapper.write_bytes((f'@echo off\r\nset NO_COLOR=1\r\ncd /d "{SCHEDULE_BASE or HERE}"\r\n'
                                  f'call {cmdline} >> "{CFG_DIR / "trickle.log"}" 2>&1\r\n').encode("utf-8"))
             tr = f'"{wrapper}"'
             r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(every), "/TN", name, "/TR", tr],
@@ -802,6 +816,205 @@ def cmd_schedule():
             ok("Installed" if action == "install" else "Removed")
         else:
             (ok if marker in cur else info)("Installed" if marker in cur else "Not installed")
+
+
+# ---------------------------------------------------------------- install (double-click installers)
+APP_DIR = BASE_DIR / "app"
+APP_NAME = "AI Guard Demo Console"
+INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "packs", "policy_template.json",
+                 "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
+                 "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command"]
+
+
+def _install_files():
+    skip = {"aiguard-kit", "Uninstall AI Guard Kit.command"} if WINDOWS else {"aiguard-kit.cmd", "Uninstall AI Guard Kit.cmd"}
+    return [f for f in INSTALL_FILES if f not in skip and (HERE / f).exists()]
+
+
+def copy_kit(dest):
+    """Copy the kit into dest via a staging folder, keeping the previous copy as dest.previous for rollback."""
+    import shutil
+    stage, prev = dest.with_name(dest.name + ".new"), dest.with_name(dest.name + ".previous")
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True)
+    for f in _install_files():
+        src = HERE / f
+        if src.is_dir():
+            shutil.copytree(src, stage / f, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copy2(src, stage / f)
+    for f in ("aiguard-kit", "Uninstall AI Guard Kit.command"):
+        if (stage / f).exists():
+            os.chmod(stage / f, 0o755)
+    if dest.exists():
+        shutil.rmtree(prev, ignore_errors=True)
+        try:
+            dest.rename(prev)
+        except OSError:  # Windows: a folder in use can't be renamed, so copy over it instead
+            shutil.copytree(stage, dest, dirs_exist_ok=True)
+            shutil.rmtree(stage, ignore_errors=True)
+            return
+    stage.rename(dest)
+
+
+def _desktop_dir():
+    if WINDOWS:
+        import subprocess
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('Desktop')"],
+                           capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            return Path(r.stdout.strip())
+    return HOME / "Desktop"
+
+
+def _win_shortcut(path, target, args, workdir, description):
+    import subprocess
+    ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK);$s.TargetPath=$env:TGT;"
+          "$s.Arguments=$env:ARGS_;$s.WorkingDirectory=$env:WD;$s.Description=$env:DESC;$s.Save()")
+    env = {**os.environ, "LNK": str(path), "TGT": str(target), "ARGS_": args, "WD": str(workdir), "DESC": description}
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, env=env)
+    if r.returncode:
+        raise KitError(f"Couldn't create the shortcut {path.name}: {(r.stderr or r.stdout).strip()[:200]}")
+
+
+def shortcut_paths():
+    """Where install puts shortcuts and the command-line wrapper, per OS."""
+    if WINDOWS:
+        menu_dir = Path(os.getenv("APPDATA", HOME)) / "Microsoft/Windows/Start Menu/Programs"
+        return {"desktop": _desktop_dir() / f"{APP_NAME}.lnk", "start": menu_dir / f"{APP_NAME}.lnk",
+                "start_uninstall": menu_dir / "Uninstall AI Guard Demo Kit.lnk"}
+    return {"desktop": HOME / "Desktop" / f"{APP_NAME}.command", "wrapper": HOME / ".local/bin/aiguard-kit"}
+
+
+def _win_user_path(add=None, remove=None):
+    """Read or change the user's PATH (HKCU\\Environment). Returns the entries."""
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as k:
+        try:
+            val, kind = winreg.QueryValueEx(k, "Path")
+        except FileNotFoundError:
+            val, kind = "", winreg.REG_EXPAND_SZ
+        parts = [p for p in val.split(";") if p]
+        norm = lambda p: os.path.normcase(os.path.normpath(os.path.expandvars(p)))  # noqa: E731
+        new = parts
+        if add and norm(add) not in {norm(p) for p in parts}:
+            new = parts + [add]
+        if remove:
+            new = [p for p in new if norm(p) != norm(remove)]
+        if new != parts:
+            winreg.SetValueEx(k, "Path", 0, kind, ";".join(new))
+            try:  # tell Explorer so new terminals see the change
+                import ctypes
+                ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 2, 5000, None)
+            except Exception:
+                pass
+        return new
+
+
+def schedule_installed():
+    import platform
+    import subprocess
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            return (HOME / "Library/LaunchAgents" / f"com.aiguard-se-kit.{PROFILE}.plist").exists()
+        if system == "Windows":
+            return subprocess.run(["schtasks", "/Query", "/TN", f"AIGuardSEKit-{PROFILE}"], capture_output=True).returncode == 0
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        return f"# aiguard-se-kit:{PROFILE}" in r.stdout
+    except OSError:  # no crontab / schtasks on this machine
+        return False
+
+
+def cmd_install():
+    global SCHEDULE_BASE
+    head(f"Installing the AI Guard SE demo kit {VERSION}")
+    here_is_app = HERE.resolve() == APP_DIR.resolve() if APP_DIR.exists() else False
+    if not here_is_app:
+        copy_kit(APP_DIR)
+        ok(f"Kit copied to {APP_DIR}")
+    else:
+        ok(f"Kit already in {APP_DIR}; refreshing shortcuts")
+    sp = shortcut_paths()
+    if WINDOWS:
+        launcher = APP_DIR / "aiguard-kit.cmd"
+        for key, args, desc in (("desktop", "gui", "Open the AI Guard demo console"),
+                                ("start", "gui", "Open the AI Guard demo console")):
+            try:
+                sp[key].parent.mkdir(parents=True, exist_ok=True)
+                _win_shortcut(sp[key], launcher, args, APP_DIR, desc)
+                ok(f"Shortcut: {sp[key]}")
+            except KitError as e:
+                warn(str(e))
+        try:
+            _win_shortcut(sp["start_uninstall"], APP_DIR / "Uninstall AI Guard Kit.cmd", "", APP_DIR, "Remove the AI Guard demo kit")
+        except KitError as e:
+            vlog(str(e))
+        try:
+            _win_user_path(add=str(APP_DIR))
+            ok("Added to your PATH: in a new terminal, run  aiguard-kit gui  from any folder")
+        except Exception as e:
+            warn(f"Couldn't add the kit to your PATH ({e}). Use the desktop shortcut, or {APP_DIR / 'aiguard-kit.cmd'}")
+    else:
+        sp["desktop"].parent.mkdir(parents=True, exist_ok=True)
+        sp["desktop"].write_text(f'#!/bin/bash\n# Opens the AI Guard demo console. Close this window to stop it.\n'
+                                 f'exec "{APP_DIR / "aiguard-kit"}" gui\n', encoding="utf-8")
+        os.chmod(sp["desktop"], 0o755)
+        ok(f"Shortcut: {sp['desktop']} (double-click to open the console)")
+        sp["wrapper"].parent.mkdir(parents=True, exist_ok=True)
+        sp["wrapper"].write_text(f'#!/bin/bash\nexec "{APP_DIR / "aiguard-kit"}" "$@"\n', encoding="utf-8")
+        os.chmod(sp["wrapper"], 0o755)
+        on_path = str(sp["wrapper"].parent) in os.getenv("PATH", "").split(os.pathsep)
+        ok("Command: aiguard-kit (from any folder" + (")" if on_path else "; open a new terminal first)"))
+    if schedule_installed():
+        SCHEDULE_BASE = APP_DIR
+        global ARGS
+        ARGS = ["schedule", "install"]
+        try:
+            cmd_schedule()
+            ok("Scheduled traffic now runs from the installed copy")
+        except Exception as e:
+            warn(f"Couldn't re-point scheduled traffic ({e}). Run: aiguard-kit schedule install")
+    info(f"Settings and keys stay in {BASE_DIR} and the system keychain (unchanged).")
+    ok(f"Installed. Open '{APP_NAME}' on your desktop, or run: aiguard-kit gui")
+
+
+def cmd_uninstall():
+    import shutil
+    head("Uninstall the AI Guard SE demo kit")
+    print("  Removes the installed kit, its shortcuts and its PATH entry, and stops scheduled traffic.")
+    print("  Keeps your settings, keys and the demo objects in your tenant.")
+    print(f"  {C['d']}To remove the tenant objects too, run  aiguard-kit teardown  first.{C['x']}")
+    if not yesno("Uninstall now?", True):
+        print("  Cancelled.")
+        return
+    if schedule_installed():
+        global ARGS
+        ARGS = ["schedule", "remove"]
+        cmd_schedule()
+    sp = shortcut_paths()
+    for key in ("desktop", "start", "start_uninstall", "wrapper"):
+        p = sp.get(key)
+        if p and p.exists():
+            p.unlink()
+            ok(f"Removed {p}")
+    if WINDOWS:
+        try:
+            _win_user_path(remove=str(APP_DIR))
+            ok("Removed from your PATH")
+        except Exception as e:
+            vlog(f"PATH: {e}")
+    for d in (APP_DIR.with_name(APP_DIR.name + ".previous"), APP_DIR.with_name(APP_DIR.name + ".new")):
+        shutil.rmtree(d, ignore_errors=True)
+    if APP_DIR.exists():
+        if WINDOWS and HERE.resolve() == APP_DIR.resolve():
+            import subprocess  # this launcher is still running from the folder, so remove it a moment after we exit
+            subprocess.Popen(f'cmd /c ping -n 3 127.0.0.1 >nul & rmdir /s /q "{APP_DIR}"', shell=True,
+                             creationflags=0x00000008 | 0x00000200)  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        else:
+            shutil.rmtree(APP_DIR, ignore_errors=True)
+        ok(f"Removed {APP_DIR}")
+    ok("Uninstalled. To set it up again later, run the installer.")
 
 
 # ---------------------------------------------------------------- setup
@@ -1813,7 +2026,7 @@ def main():
     vals = {ARGS[i + 1] for i, a in enumerate(ARGS[:-1]) if a in VALUE_OPTS}
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
-            "policy": cmd_policy, "schedule": cmd_schedule}
+            "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall}
     if cmd not in cmds:
         print(__doc__)
         return
