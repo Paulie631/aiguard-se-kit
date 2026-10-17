@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.7.2
+- **Setup health check and Repair.** When the console opens (and after setup or an update) it checks, read-only, that
+  this computer's keys still exist in AI Guard and are in the kit's rules, and that the demo policy and apps are
+  there. If not, a banner lists what's wrong with **Repair now**, which reruns setup with your saved choices. Repair
+  keeps your current policy profile and never touches other computers' keys. Test errors caused by a missing key
+  show a **Repair setup** button. From a terminal: `aiguard-kit repair`.
+- Setup now saves your choices (never secrets), so Repair rebuilds exactly what you set up.
+- **Logs tab.** Every AI Guard API call, Detection API scan, LLM proxy call, setup step, policy change and update,
+  with the full request and response. It has filters, an **Errors only** view, a **Hide prompt text** switch and
+  **Download diagnostics** (a zip of logs and versions to send to the kit owner). Logs are saved in
+  `~/.aiguard-se-kit/logs` for 7 days. Keys and secrets are always masked. From a terminal: `aiguard-kit logs`
+  (`--errors`, `--follow`).
+- **Under the hood** on every result and guided-demo step: the exact request sent to AI Guard and its full JSON
+  response, with Copy.
 - A Detection API 401 or 403 now explains that this computer's key was deleted or isn't in the rule, and to rerun setup, instead of pointing at ZIdentity permissions.
 - The update check asks proxies and CDNs not to answer from cache, so **Check again** always sees a new release.
 

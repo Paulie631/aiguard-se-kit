@@ -100,6 +100,15 @@ pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:
 .empty{padding:28px;text-align:center;color:var(--muted)}
 .live-out{margin-top:12px;padding:12px;border-radius:10px;background:var(--soft);display:none}
 .hint{font-size:12px;color:var(--muted);margin-top:8px}
+.healthbar{display:none;margin:12px 24px 0;padding:10px 14px;border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:13px;align-items:flex-start;gap:12px}
+.healthbar.on{display:flex}.healthbar ul{margin:4px 0 0 18px;padding:0}.healthbar .sp{flex:1}
+.hood{margin-top:10px}.hood summary{cursor:pointer;font-size:12.5px;color:var(--accent)}
+.hood .lbl2{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-top:8px}
+.logbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.logbar select,.logbar input[type=search]{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px}
+.lv{font:600 11px var(--mono);padding:1px 6px;border-radius:5px}
+.lv.ok{background:var(--ok-bg);color:var(--ok)}.lv.error{background:var(--bad-bg);color:var(--bad)}.lv.warn{background:var(--warn-bg);color:var(--warn)}.lv.info{background:var(--soft);color:var(--muted)}
+.tabcount{display:inline-block;min-width:16px;padding:0 5px;margin-left:5px;border-radius:99px;background:var(--bad);color:#fff;font-size:11px;line-height:16px;text-align:center}
 .notice{padding:10px 12px;border-radius:8px;background:var(--warn-bg);color:var(--warn);font-size:13px;margin-bottom:12px;display:none}
 .notice.good{background:var(--ok-bg);color:var(--ok)}
 .twocol{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
@@ -180,7 +189,13 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <button data-t="runner" class="on">Test runner</button>
   <button data-t="demo">Guided demo</button>
   <button data-t="packs">Test packs</button>
+  <button data-t="logs">Logs<span class="tabcount" id="logerr" style="display:none"></span></button>
 </nav>
+<div class="healthbar" id="healthbar">
+  <div><b>This computer's demo setup needs a repair.</b><ul id="healthlist"></ul></div>
+  <span class="sp"></span>
+  <button class="primary" id="repairbtn">Repair now</button>
+</div>
 
 <!-- ============ SETUP ============ -->
 <div class="view" id="v-setup">
@@ -310,6 +325,28 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   </div>
 </div>
 </div>
+<div class="view" id="v-logs">
+<div class="wrap stack">
+  <div class="panel">
+    <div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0">Activity log</h2><span class="muted" id="logdir" style="font-size:12px"></span></div>
+    <p class="muted" style="font-size:13px;margin:6px 0 12px">Everything the kit does: AI Guard API calls, Detection API scans, LLM proxy calls, setup, policy changes and updates. Click an entry to see the full request and response. Keys and secrets are always masked.</p>
+    <div class="logbar">
+      <select id="logkind"><option value="">All activity</option><option value="!">Errors and warnings</option><option value="scan">Detection API scans</option><option value="proxy">LLM proxy calls</option><option value="api">AI Guard API (setup, policy)</option><option value="setup">Setup and repair</option><option value="policy">Policy changes</option><option value="update">Updates</option></select>
+      <input type="search" id="logq" placeholder="Filter text…" style="width:200px">
+      <label class="chk" style="margin:0"><input type="checkbox" id="loghide">Hide prompt text</label>
+      <label class="chk" style="margin:0"><input type="checkbox" id="logpause">Pause</label>
+      <span class="sp" style="flex:1"></span>
+      <button id="logclear">Clear view</button>
+      <button id="logdiag">Download diagnostics</button>
+    </div>
+    <div class="tablewrap"><table><thead><tr><th style="width:84px">Time</th><th style="width:70px">Type</th><th style="width:62px">Result</th><th>What happened</th><th style="width:60px">ms</th></tr></thead><tbody id="logrows"><tr><td colspan="5" class="empty">No activity yet.</td></tr></tbody></table></div>
+  </div>
+</div>
+</div>
+<div class="modal" id="jobmodal"><div class="panel">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0" id="jobtitle">Repair setup</h2><button id="jobclose">Close</button></div>
+  <ul id="joblog" class="updlog"></ul>
+</div></div>
 
 <div class="modal" id="polmodal"><div class="panel">
   <div class="row" style="justify-content:space-between"><h2 style="margin:0">Custom policy: choose what blocks</h2><button id="pmclose">Close</button></div>
@@ -358,6 +395,71 @@ async function loadState(){
   if(st.update_behind){const u=$("#upd");u.classList.add("new");u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
   return st;
 }
+
+
+/* ---------- under the hood ---------- */
+function hideText(o){if(Array.isArray(o))return o.map(hideText);if(o&&typeof o=="object"){const r={};for(const[k,v]of Object.entries(o))r[k]=/^(content|prompt|text)$/.test(k)&&typeof v=="string"?"(hidden)":hideText(v);return r}return o}
+function pretty(o,hide){if(o==null)return"";let v=o;if(typeof v=="string"){try{v=JSON.parse(v)}catch(e){return v}}return JSON.stringify(hide?hideText(v):v,null,2)}
+function hoodHTML(ex,open){
+  if(!ex||!ex.request)return"";
+  const req=ex.request,hide=$("#loghide")&&$("#loghide").checked;
+  return `<details class="hood"${open?" open":""}><summary>Under the hood: request and response</summary>
+    <div class="lbl2">Request</div><pre>${esc(req.method||"POST")} ${esc(req.url||"")}\n${esc(pretty(req.body,hide))}</pre>
+    <div class="lbl2">Response${ex.status?" · HTTP "+esc(ex.status):""}</div><pre>${esc(pretty(ex.response,hide))}</pre>
+    <button class="copyx" style="margin-top:6px;font-size:12px">Copy</button></details>`;
+}
+document.addEventListener("click",e=>{if(e.target.classList.contains("copyx")){const t=[...e.target.parentElement.querySelectorAll("pre")].map(p=>p.textContent).join("\n\n");navigator.clipboard.writeText(t);e.target.textContent="Copied";setTimeout(()=>e.target.textContent="Copy",1200)}});
+
+/* ---------- health and repair ---------- */
+async function checkHealth(){
+  let h;try{h=await api("/api/health")}catch(e){return}
+  const bar=$("#healthbar");
+  if(h.set_up&&h.ok===false){$("#healthlist").innerHTML=h.problems.map(p=>`<li>${esc(p)}</li>`).join("");bar.classList.add("on")}
+  else bar.classList.remove("on");
+}
+async function runRepair(){
+  $("#jobtitle").textContent="Repair setup";$("#joblog").innerHTML="";$("#jobmodal").classList.add("on");
+  const line=(lv,m)=>{const li=document.createElement("li");li.className=lv;li.textContent=m;if(lv=="head")li.style.fontWeight="600";$("#joblog").appendChild(li)};
+  try{const {id}=await api("/api/repair",{});let since=0,j;
+    do{await new Promise(r=>setTimeout(r,700));j=await api(`/api/job?id=${id}&since=${since}`);since+=j.results.length;j.results.forEach(x=>line(x.level,x.msg))}while(!j.done);
+    if(j.error){line("fail",j.error.fix?`Fix: ${j.error.fix}`:"");return}
+    const bad=(j.verify||[]).filter(c=>c.status=="fail");
+    line(bad.length?"fail":"ok",bad.length?"Repair finished, but verification still has problems (see above).":"Repaired. You can run tests now.");
+    checkHealth();
+  }catch(e){line("fail",e.message)}
+}
+$("#repairbtn").onclick=runRepair;$("#jobclose").onclick=()=>$("#jobmodal").classList.remove("on");
+
+/* ---------- logs ---------- */
+const LOGS={items:[],seq:0,errs:0,seen:0};
+function logMatch(e){const k=$("#logkind").value,q=$("#logq").value.toLowerCase();
+  if(k=="!"&&!(e.level=="error"||e.level=="warn"))return false;if(k&&k!="!"&&e.kind!=k)return false;
+  return !q||(e.summary+" "+JSON.stringify(e.detail||{})).toLowerCase().includes(q)}
+function drawLogs(){
+  const rows=LOGS.items.filter(logMatch).slice(-400).reverse();
+  $("#logrows").innerHTML=rows.length?rows.map(e=>`<tr class="r lg" data-s="${e.seq}"><td>${esc(e.t.slice(11))}</td><td>${esc(e.kind)}</td><td><span class="lv ${esc(e.level)}">${esc(e.level)}</span></td><td>${esc(e.summary)}</td><td>${e.detail&&e.detail.ms!=null?e.detail.ms:""}</td></tr>`).join(""):'<tr><td colspan="5" class="empty">Nothing matches.</td></tr>';
+  $$("tr.lg").forEach(tr=>tr.onclick=()=>{const nx=tr.nextElementSibling;if(nx&&nx.classList.contains("detail")){nx.remove();return}
+    const e=LOGS.items.find(x=>x.seq==+tr.dataset.s),d=e.detail||{},hide=$("#loghide").checked,parts=[];
+    if(d.url||d.request)parts.push(`<div class="lbl2">Request</div><pre>${d.url?esc(d.url)+"\n":""}${esc(pretty(d.request,hide))}</pre>`);
+    if(d.status!=null||d.response!=null)parts.push(`<div class="lbl2">Response${d.status?" · HTTP "+esc(d.status):""}</div><pre>${esc(pretty(d.response,hide))}</pre>`);
+    if(d.error)parts.push(`<div class="lbl2">Error</div><pre>${esc(d.error)}</pre>`);
+    const rest=Object.fromEntries(Object.entries(d).filter(([k])=>!["url","request","response","status","error","ms"].includes(k)));
+    if(Object.keys(rest).length)parts.push(`<div class="lbl2">Details</div><pre>${esc(pretty(rest,hide))}</pre>`);
+    const x=document.createElement("tr");x.className="detail";x.innerHTML=`<td colspan="5">${parts.join("")||'<span class="muted">No further detail.</span>'}<button class="copyx" style="margin-top:6px;font-size:12px">Copy</button></td>`;tr.after(x)});
+}
+async function pollLogs(){
+  try{if(!$("#logpause").checked){const j=await api(`/api/logs?since=${LOGS.seq}`);
+    if(j.dir)$("#logdir").textContent="Saved in "+j.dir;
+    if(j.items.length){LOGS.items.push(...j.items);LOGS.items.splice(0,Math.max(0,LOGS.items.length-3000));LOGS.seq=j.items[j.items.length-1].seq;
+      LOGS.errs+=j.items.filter(e=>e.level=="error").length;
+      const onLogs=$("#v-logs").classList.contains("on");if(onLogs){LOGS.seen=LOGS.errs;drawLogs()}
+      const n=LOGS.errs-LOGS.seen,b=$("#logerr");b.style.display=n>0?"inline-block":"none";b.textContent=n}}}catch(e){}
+  setTimeout(pollLogs,2500);
+}
+["logkind","logq","loghide"].forEach(id=>$("#"+id).addEventListener("input",drawLogs));
+$("#logclear").onclick=()=>{LOGS.items=[];drawLogs()};
+$("#logdiag").onclick=async()=>{const r=await fetch("/api/diagnostics",{headers:{"X-Kit-Token":TOKEN}});const b=await r.blob();const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(r.headers.get("Content-Disposition")||"").match(/filename="([^"]+)"/)?.[1]||"aiguard-kit-diagnostics.zip";a.click()};
+document.querySelector('#tabs button[data-t="logs"]').addEventListener("click",()=>{LOGS.seen=LOGS.errs;$("#logerr").style.display="none";drawLogs()});
 
 /* ---------- updates ---------- */
 let UPD=null;
@@ -409,6 +511,7 @@ $("#updroll").onclick=async()=>{
 async function init(){
   let st;try{st=await loadState()}catch(e){$("#tenant").textContent="error: "+e.message;return}
   if(!st.update_behind)setTimeout(()=>checkUpd(false),1500);
+  pollLogs();checkHealth();
   drawPresets();refreshRunner();
   seg("mode",v=>{S.mode=v;$("#rtagsf").style.display=v=="proxy"?"":"none";$$("#apps .chk").forEach(l=>{const a=S.apps.find(x=>x.name==l.dataset.a);l.classList.toggle("off",v=="proxy"&&!a.proxy)});
     if(v=="proxy"&&!S.apps.some(a=>a.proxy))note("No app has a proxy key. Add an OpenAI or Anthropic key in the Setup tab to use proxy mode.");else note("")});
@@ -508,7 +611,7 @@ function drawRows(){
   tb.innerHTML=S.results.length?S.results.map((r,i)=>rowHTML(r,i)).reverse().join(""):'<tr><td colspan="8" class="empty">No results yet.</td></tr>';
   $$("tr.r").forEach(tr=>tr.onclick=()=>{const nx=tr.nextElementSibling;if(nx&&nx.classList.contains("detail")){nx.remove();return}
     const r=S.results[+tr.dataset.i];const d=document.createElement("tr");d.className="detail";
-    d.innerHTML=`<td colspan="8"><b>Prompt</b><pre>${esc(r.text)}</pre>${r.reply?`<b>${r.action=="BLOCK"?"Proxy response":"Model reply"}</b><pre>${esc(r.reply)}</pre>`:""}${r.error?`<b>Error</b><pre>${esc(r.error)}</pre><b>Fix</b><pre>${esc(r.fix)}</pre>`:""}${r.raw?`<b>Detector responses</b><pre>${esc(JSON.stringify(r.raw,null,1))}</pre>`:""}${r.transaction_id?`<div class="muted">transaction ${esc(r.transaction_id)}</div>`:""}</td>`;tr.after(d)});
+    d.innerHTML=`<td colspan="8"><b>Prompt</b><pre>${esc(r.text)}</pre>${r.reply?`<b>${r.action=="BLOCK"?"Proxy response":"Model reply"}</b><pre>${esc(r.reply)}</pre>`:""}${r.error?`<b>Error</b><pre>${esc(r.error)}</pre><b>Fix</b><pre>${esc(r.fix)}</pre>`:""}${r.raw?`<b>Detector responses</b><pre>${esc(JSON.stringify(r.raw,null,1))}</pre>`:""}${r.transaction_id?`<div class="muted">transaction ${esc(r.transaction_id)}</div>`:""}${hoodHTML(r.exchange,false)}</td>`;tr.after(d)});
   const ok=S.results.filter(r=>r.status=="OK");
   $("#s-done").textContent=S.results.length;$("#s-hits").textContent=ok.filter(r=>(r.detectors||[]).length).length;
   $("#s-block").textContent=ok.filter(r=>r.action=="BLOCK").length;
@@ -532,7 +635,7 @@ async function poll(){
     S.job.got+=j.results.length;S.results.push(...j.results);
     $("#bar").style.width=Math.round(100*S.job.got/S.job.total)+"%";
     if(j.results.length)drawRows();
-    if(first&&first.status=="ERROR")note(`<b>First test failed:</b> ${esc(first.error)}<br><b>Fix:</b> ${esc(first.fix)}`);
+    if(first&&first.status=="ERROR"){note(`<b>First test failed:</b> ${esc(first.error)}<br><b>Fix:</b> ${esc(first.fix)}`+(/Detection API HTTP (401|403)|no detection key|no proxy key/.test(first.error)?` <button class="primary" style="margin-left:8px;padding:4px 12px" onclick="runRepair()">Repair setup</button>`:""));checkHealth()}
     if(j.done){S.job=null;$("#run").disabled=false;$("#stop").disabled=true;
       if($("#notice").style.display!="block")note(`Done. Dashboards update in 10–15 minutes: <a href="${esc(S.console)}" target="_blank">open Insights</a>.`,true);return}
   }catch(e){note(esc(e.message))}
@@ -540,9 +643,9 @@ async function poll(){
 }
 async function scanOne(payload){const r=await api("/api/scan",payload);S.results.push(r);drawRows();return r}
 function verdictHTML(r){
-  if(r.status=="ERROR")return `<span class="badge ERROR">ERROR</span> ${esc(r.error)}<div class="muted">${esc(r.fix)}</div>`;
-  if(r.mode=="proxy")return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)}</div><pre>${esc(r.action=="BLOCK"?blockMsg(r.reply):r.reply)}</pre>${(r.resp_detectors||[]).length?`<div><span class="lbl">Reply check:</span> ${r.resp_detectors.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</div>`:""}`;
-  return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.severity?"severity "+esc(r.severity)+" · ":""}${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)||'<span class="muted">No detectors triggered</span>'}</div>`;
+  if(r.status=="ERROR")return `<span class="badge ERROR">ERROR</span> ${esc(r.error)}<div class="muted">${esc(r.fix)}</div>`+(/Detection API HTTP (401|403)|no detection key|no proxy key/.test(r.error)?`<button class="primary" style="margin-top:8px;padding:4px 12px" onclick="runRepair()">Repair setup</button>`:"");
+  if(r.mode=="proxy")return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)}</div><pre>${esc(r.action=="BLOCK"?blockMsg(r.reply):r.reply)}</pre>${(r.resp_detectors||[]).length?`<div><span class="lbl">Reply check:</span> ${r.resp_detectors.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</div>`:""}${hoodHTML(r.exchange,false)}`;
+  return `<span class="badge ${esc(r.action)}">${esc(r.action)}</span> <span class="muted">${r.severity?"severity "+esc(r.severity)+" · ":""}${r.latency_ms??""} ms</span><div style="margin-top:8px">${chips(r,false)||'<span class="muted">No detectors triggered</span>'}</div>${hoodHTML(r.exchange,false)}`;
 }
 $("#scan").onclick=async()=>{
   const out=$("#liveout");out.style.display="block";out.innerHTML='<span class="muted">Scanning…</span>';
@@ -855,7 +958,7 @@ async function wizard(){
     st.innerHTML=`<div class="kicker">STEP 5 OF 5</div><h3>Create and verify</h3><div class="log" id="wlog"></div><div id="wend" style="margin-top:16px"></div>`;
     runJob("/api/setup/apply",{answers:W.ans},$("#wlog"),async j=>{
       Object.values(W.ans.providers).forEach(p=>p.key=null);   // don't keep provider keys in the page
-      const v=j.verify||[],bad=v.filter(c=>c.status!="ok");
+      const v=j.verify||[],bad=v.filter(c=>c.status!="ok");checkHealth();
       if(j.error){$("#wend").innerHTML=`<div class="notice" style="display:block"><b>${esc(j.error.error)}</b><br>Fix: ${esc(j.error.fix)}<br>Everything created so far is kept. Retry fills in the rest.</div><div class="row" style="gap:10px"><button class="primary" id="wretry">Retry</button><button id="wback">‹ Back to choices</button></div>`;
         $("#wretry").onclick=()=>wizard();$("#wback").onclick=()=>{W.step=2;wizard()};return}
       $("#wend").innerHTML=`<h2 style="margin-top:6px">Verification</h2>${checksHTML(v,j.help||W.help)}

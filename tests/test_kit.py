@@ -23,6 +23,7 @@ def load_kit(monkeypatch, tmp_path, argv):
     spec.loader.exec_module(kit)
     kit.CFG_DIR = tmp_path
     kit.CFG_FILE = tmp_path / "config.json"
+    kit.LOG_DIR = tmp_path / "logs"  # never write test activity into the real ~/.aiguard-se-kit
     kc = {}
     kit.kc_get = kc.get
     kit.kc_set = kc.__setitem__
@@ -93,7 +94,7 @@ def env(monkeypatch, tmp_path):
         sys.modules[kit.__name__] = kit
         kit.import_claude_desktop = lambda: {"ZSCALER_CLIENT_ID": "cid", "ZSCALER_CLIENT_SECRET": "sec",
                                              "ZSCALER_VANITY_DOMAIN": "acme"}
-        kit.das_scan = lambda key, text, direction="IN", user=None, timeout=60: (
+        kit.das_scan = lambda key, text, direction="IN", user=None, timeout=60, trace=None: (
             {"action": "ALLOW", "severity": "LOW", "policyName": "SE-Demo: Test all",
              "detectorResponses": {"pii": {"triggered": "SSN" in text}, "language": {"triggered": True}}}, 42)
         return kit, t
@@ -193,7 +194,7 @@ def test_proxy_run_with_tags(env):
     kit.setup_apply(t, cfg, ans, lambda *a: None)
     kit.proxy_chat = lambda *a, **k: ("Here is a record: SSN 123-45-6789", 10)
     scans = []
-    kit.das_scan = lambda key, text, direction="IN", user=None, timeout=60: (scans.append(direction) or {
+    kit.das_scan = lambda key, text, direction="IN", user=None, timeout=60, trace=None: (scans.append(direction) or {
         "action": "ALLOW", "detectorResponses": {"pii": {"triggered": True}, "secrets": {"triggered": direction == "IN"}}}, 5)
     test = {"id": "x", "text": "make a record", "direction": "IN", "expect": ["secrets"]}
     r = kit.run_one(cfg, test, "SE-Demo: OpenAI App", "a@b.c", "proxy", tags=True)
@@ -758,5 +759,71 @@ def test_lost_secret_retires_only_this_computers_own_key(env):
 
 def test_detection_api_403_points_to_setup(env):
     kit, _ = env("run")
-    assert "Retry" in kit.hint(kit.KitError("Detection API HTTP 403: forbidden"))
+    assert "Repair setup" in kit.hint(kit.KitError("Detection API HTTP 403: forbidden"))
     assert "ZIdentity" in kit.hint(kit.KitError("policies.list failed: 403 Forbidden"))
+
+
+def test_activity_log_masks_secrets_everywhere(env, tmp_path):
+    kit, _ = env("status")
+    kit.LOG_DIR = tmp_path / "logs"
+    kit.remember_secret("sk-REALSECRETVALUE1234")
+    e = kit.activity("api", "add_credential", "ok",
+                     request={"body": {"name": "x", "apiCredentials": {"type": "API_KEY", "key": "sk-REALSECRETVALUE1234"}}},
+                     response={"id": 5, "key": "zz-newappkey-9999", "note": "uses sk-REALSECRETVALUE1234 inside"})
+    text = json.dumps(e) + (tmp_path / "logs").joinpath(next((tmp_path / "logs").iterdir()).name).read_text()
+    assert "REALSECRETVALUE" not in text and "newappkey" not in text
+    assert e["detail"]["request"]["body"]["apiCredentials"]["type"] == "API_KEY"
+    assert e["detail"]["response"]["id"] == 5
+    # diagnostics bundle carries the logs, still masked
+    import io
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(kit.diagnostics_zip()))
+    assert "about.json" in z.namelist() and any(n.startswith("logs/") for n in z.namelist())
+    assert all("REALSECRETVALUE" not in z.read(n).decode() for n in z.namelist())
+
+
+def test_health_and_repair_after_key_deleted_elsewhere(env):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    cfg = kit.load_cfg()
+    assert kit.health(t, cfg)["ok"]
+    assert cfg["answers"]["mode"] == "monitor" and "key" not in json.dumps(cfg["answers"]).replace('"keep"', "")
+    # the SE switched to a blocking profile, then another computer deleted this one's key
+    kit.policy_mode(t, cfg, "everything")
+    app = next(iter(cfg["state"]["apps"]))
+    gone = cfg["state"]["apps"][app]["das_cred_id"]
+    t.db["llm_application_credentials"] = [c for c in t.db["llm_application_credentials"] if c["id"] != gone]
+    for r in t.db["policy_match_rules"]:
+        for e in (r.get("matchCriteria") or {}).get("llmApplications") or []:
+            e["applicationCredentialsIds"] = [i for i in e["applicationCredentialsIds"] if i != gone]
+    h = kit.health(t, kit.load_cfg())
+    assert not h["ok"] and any("removed from AI Guard" in p for p in h["problems"])
+    kit.repair(t, kit.load_cfg(), lambda *a: None)
+    cfg = kit.load_cfg()
+    assert kit.health(t, cfg)["ok"]
+    assert kit.policy_mode(t, cfg)[0] == "everything", "repair must keep the SE's policy profile"
+
+
+def test_health_flags_key_missing_from_rule(env):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    rule = next(r for r in t.db["policy_match_rules"] if r["name"] == "SE-Demo: detection apps")
+    rule["matchCriteria"]["llmApplications"] = rule["matchCriteria"]["llmApplications"][:1]
+    h = kit.health(t, kit.load_cfg())
+    assert not h["ok"] and any("isn't in the rule" in p for p in h["problems"])
+
+
+def test_scan_result_carries_request_and_response(env):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    cfg = kit.load_cfg()
+
+    def fake_scan(key, text, direction="IN", user=None, timeout=60, trace=None):
+        d = {"action": "ALLOW", "severity": "LOW", "detectorResponses": {}}
+        if trace is not None:
+            trace.update(request={"method": "POST", "body": {"content": text, "direction": direction, "user": user}},
+                         status=200, response=d)
+        return d, 3
+    kit.das_scan = fake_scan
+    r = kit.run_one(cfg, {"text": "hello", "direction": "IN"}, next(iter(cfg["state"]["apps"])), "a@b.c", "detect")
+    assert r["exchange"]["request"]["body"]["content"] == "hello" and r["exchange"]["response"]["action"] == "ALLOW"

@@ -31,6 +31,7 @@ Fill every Zscaler AI Guard dashboard in **your own** tenant in about ten minute
 |---|---|
 | **Test runner** | 72 core tests in 7 groups, presets, industry packs and imported packs. Pick apps, users, rounds and mode. The **Live prompt** box scans anything you type. **Dashboard coverage** shows which console panels you've fed. Results show detector tags (expected-but-missed detectors in amber, which you can hide before a customer demo), and export as CSV or a **Report**. |
 | **Guided demo** | Step-by-step storylines with a talk track: *AI Guard in 8 steps* and *Data protection (3 minutes)*. Use ← → to move and Enter to run. By default each step is a Detection API scan (no model call). Turn on **Send to the model** to send prompts to OpenAI or Anthropic through the AI Guard proxy and show the real reply, or AI Guard's block message in Enforce. **Detector tags** adds a Detection API scan of the prompt and of the model's reply, so you see which detectors fired (this logs extra events). Steps that switch the policy wait about 30 seconds for it to apply. Hide the talk track when sharing your screen. |
+| **Logs** | Everything the kit does (AI Guard API calls, scans, proxy calls, setup, policy changes, updates) with the full request and response; keys always masked. **Download diagnostics** gives a zip to send to the kit owner. Every result also has **Under the hood**: the exact request and AI Guard's JSON response. |
 | **Test packs** | Healthcare, Financial services and Legal packs, plus **CSV import** of a customer's own prompts for a proof of concept. Imported packs stay on your machine. |
 
 The **Policy** menu in the header sets what the kit's demo policy blocks. It only ever changes the kit's own policy, and changes take about 30 seconds to apply.
@@ -99,6 +100,8 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ./aiguard-kit policy [monitor|attacks|data|everything]   show or switch what blocks
 ./aiguard-kit schedule install [--every 60] [--count 12]    also: schedule status, schedule remove
 ./aiguard-kit status                     login, policy, keys, Detection API, kit updates
+./aiguard-kit repair                     check this computer's setup in the tenant and fix anything missing
+./aiguard-kit logs [--errors] [--follow]   recent activity; files in ~/.aiguard-se-kit/logs
 ./aiguard-kit teardown                   deletes every SE-Demo object and the local keys (--force: no prompt)
 ./aiguard-kit install | uninstall        desktop shortcut + `aiguard-kit` on PATH (what the double-click installers run)
 

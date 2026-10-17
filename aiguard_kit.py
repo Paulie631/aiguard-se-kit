@@ -16,6 +16,8 @@
                            keep dashboards fresh with a small batch every N minutes
   ./aiguard-kit status     check credentials, tenant objects, the detection API and kit updates
   ./aiguard-kit teardown   delete everything this kit created (objects named with the prefix)
+  ./aiguard-kit repair     check this computer's demo setup in the tenant and fix anything missing (--force: rerun)
+  ./aiguard-kit logs       show recent activity (--errors, --follow); files are in ~/.aiguard-se-kit/logs
   ./aiguard-kit update     install the latest release from GitHub (--check: only check, --rollback: previous version)
   ./aiguard-kit install    copy the kit to ~/.aiguard-se-kit/app, add a desktop shortcut and the `aiguard-kit` command
                            (what the double-click installers run); uninstall removes them
@@ -37,7 +39,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.7.1"
+VERSION = "1.7.2"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -160,8 +162,8 @@ HINTS = [
      "your Zscaler root CA is in the system keychain (on Windows, the Trusted Root Certification Authorities store). As a last resort set SSL_CERT_FILE to a bundle that includes it."),
     (r"Detection API HTTP (401|403)",
      "AI Guard didn't accept this computer's detection key: it was deleted (for example by setup on another computer) "
-     "or isn't in the kit's rule. Open Setup and click Retry, or run ./aiguard-kit setup. New keys can take a minute to "
-     "start working."),
+     "or isn't in the kit's rule. Click Repair setup in the console, or run ./aiguard-kit repair. New keys can take a "
+     "minute to start working."),
     (r"\b401\b|NOT_AUTHORIZED|Unauthorized",
      "Authenticated but not allowed. In ZIdentity, the API client needs the AI Guard scope (and for ZIA, an API role - "
      "not an admin role - created in ZIA > Role Management)."),
@@ -197,6 +199,98 @@ def hint(err) -> str:
     return "Run again with --verbose and send the output to the kit owner."
 
 
+
+# ---------------------------------------------------------------- activity log
+# Everything the kit does, for the console's Logs tab and for troubleshooting. Secrets never reach it: known secret
+# fields are masked, and every key or secret the kit loads from the keychain is replaced wherever it appears.
+LOG_DIR = BASE_DIR / "logs"
+LOG_KEEP_DAYS = 7
+ACTIVITY: list = []          # recent entries for the console (newest last)
+_ACT_SEQ = [0]
+_ACT_LOCK = threading.Lock()
+_SECRETS: set = set()
+_SECRET_FIELDS = re.compile(r"^(key|secret|clientsecret|client_secret|token|apikey|api_key|password|authorization|"
+                            r"x-apikey|x-api-key|bearer)$", re.I)
+
+
+def remember_secret(v):
+    if v and isinstance(v, str) and len(v) >= 8:
+        _SECRETS.add(v)
+    return v
+
+
+def redact(o, depth=0):
+    if depth > 12:
+        return "…"
+    if isinstance(o, dict):
+        out = {}
+        for k, v in o.items():
+            if _SECRET_FIELDS.match(str(k)) and isinstance(v, str):
+                out[k] = (v[:4] + "…") if v else v
+            elif str(k) == "apiCredentials":
+                out[k] = {kk: ((vv[:4] + "…") if isinstance(vv, str) and kk != "type" else vv) for kk, vv in (v or {}).items()}
+            else:
+                out[k] = redact(v, depth + 1)
+        return out
+    if isinstance(o, (list, tuple)):
+        return [redact(v, depth + 1) for v in o]
+    if isinstance(o, str):
+        for sec in _SECRETS:
+            if sec in o:
+                o = o.replace(sec, sec[:4] + "…")
+        return o[:20000]
+    return o
+
+
+def activity(kind, summary, level="info", **detail):
+    """kind: api | scan | proxy | setup | policy | update | error."""
+    entry = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind, "level": level, "summary": redact(str(summary))[:300],
+             "detail": redact(detail)}
+    with _ACT_LOCK:
+        _ACT_SEQ[0] += 1
+        entry["seq"] = _ACT_SEQ[0]
+        ACTIVITY.append(entry)
+        del ACTIVITY[:-3000]
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            with open(LOG_DIR / f"kit-{time.strftime('%Y-%m-%d')}.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+    return entry
+
+
+def prune_logs():
+    try:
+        cutoff = time.time() - LOG_KEEP_DAYS * 86400
+        for f in LOG_DIR.glob("kit-*.jsonl"):
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+    except OSError:
+        pass
+
+
+def diagnostics_zip():
+    """A zip of the recent logs, the preflight runbook data and versions, for sending to the kit owner. No secrets."""
+    import io
+    import platform
+    import zipfile
+    buf = io.BytesIO()
+    cfg = load_cfg()
+    info_ = {"kit": VERSION, "profile": PROFILE, "os": platform.platform(), "python": sys.version.split()[0],
+             "tenant": cfg.get("vanity_domain"), "client_id": mask(cfg.get("client_id", "")),
+             "kit_dir": str(HERE), "installed": APP_DIR.exists() and HERE.resolve() == APP_DIR.resolve(),
+             "state": redact(cfg.get("state", {})), "answers": redact(cfg.get("answers", {}))}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("about.json", json.dumps(info_, indent=2))
+        for f in sorted(LOG_DIR.glob("kit-*.jsonl"))[-LOG_KEEP_DAYS:] if LOG_DIR.exists() else []:
+            z.writestr(f"logs/{f.name}", redact(f.read_text(encoding="utf-8", errors="replace")))
+        runs = CFG_DIR / "runs.jsonl"
+        if runs.exists():
+            z.writestr("runs.jsonl", redact("\n".join(runs.read_text(encoding="utf-8", errors="replace").splitlines()[-500:])))
+    return buf.getvalue()
+
+
 # ---------------------------------------------------------------- TLS + secrets
 def tls_setup():
     if os.getenv("AIGUARD_KIT_NO_TRUSTSTORE"):
@@ -213,7 +307,7 @@ def kc_get(name):
     keychain for a missing key (which would create duplicate keys in AI Guard)."""
     import keyring
     try:
-        return keyring.get_password(KC, KC_NS + name)
+        return remember_secret(keyring.get_password(KC, KC_NS + name))
     except Exception as e:
         raise KitError(f"Couldn't read the keychain entry '{name}': {e}. Unlock your keychain or choose "
                        f"'Always Allow' when macOS asks, then try again." if not WINDOWS else
@@ -231,7 +325,7 @@ def kc_has(name):
 
 def kc_set(name, value):
     import keyring
-    keyring.set_password(KC, KC_NS + name, value)
+    keyring.set_password(KC, KC_NS + name, remember_secret(value))
 
 
 def kc_del(name):
@@ -310,11 +404,19 @@ class Tenant:
     def call(self, resource, method, *a, **kw):
         fn = getattr(getattr(self.ag, resource), method)
         vlog(f"{resource}.{method} {a} {json.dumps(kw)[:300] if kw else ''}")
-        _, resp, err = fn(*a, **kw)
+        t0 = time.time()
+        try:
+            _, resp, err = fn(*a, **kw)
+        except Exception as e:
+            err, resp = e, None
+        ms = int((time.time() - t0) * 1000)
+        req = {"args": list(a), "body": kw} if (a or kw) else {}
         if err:
             vlog(f"error: {err}")
+            activity("api", f"AI Guard API {resource}.{method} failed", "error", request=req, error=str(err), ms=ms)
             raise KitError(f"{resource}.{method} failed: {err}")
         body = resp.get_body() if resp is not None else None
+        activity("api", f"AI Guard API {resource}.{method}", "ok", request=req, response=body, ms=ms)
         return body
 
     @staticmethod
@@ -341,22 +443,36 @@ def connect(cfg) -> Tenant:
         raise KitError(f"Couldn't connect: {e}") from e
 
 
-def das_scan(key, text, direction="IN", user=None, timeout=60):
+def das_scan(key, text, direction="IN", user=None, timeout=60, trace=None):
     import requests
     body = {"content": text, "direction": direction, "transactionId": str(uuid.uuid4())}
     if user:
         body["user"] = user
+    remember_secret(key)
     t0 = time.time()
-    r = requests.post(DAS_HOST + DAS_PATH, json=body, timeout=timeout,
-                      headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    url = DAS_HOST + DAS_PATH
+    try:
+        r = requests.post(url, json=body, timeout=timeout,
+                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    except requests.RequestException as e:
+        activity("scan", f"Detection API {direction} scan: network error", "error", url=url, request=body, error=str(e))
+        raise
     ms = int((time.time() - t0) * 1000)
     if r.status_code >= 400:
+        activity("scan", f"Detection API {direction} scan: HTTP {r.status_code}", "error", url=url, request=body,
+                 status=r.status_code, response=r.text[:4000], ms=ms)
         raise KitError(f"Detection API HTTP {r.status_code}: {r.text[:300]}".replace(key, "<key>"))
-    return r.json(), ms
+    d = r.json()
+    if trace is not None:
+        trace.update(request={"method": "POST", "url": url, "body": body}, status=r.status_code, response=d)
+    activity("scan", f"Detection API {direction} scan → {d.get('action', '?')}" + (f" ({user})" if user else ""),
+             "ok", url=url, request=body, status=r.status_code, response=d, ms=ms)
+    return d, ms
 
 
-def proxy_chat(ptype, key, model, prompt, user=None, max_tokens=300, timeout=90):
+def proxy_chat(ptype, key, model, prompt, user=None, max_tokens=300, timeout=90, trace=None):
     import requests
+    remember_secret(key)
     t0 = time.time()
     if ptype == "anthropic":
         r = requests.post(f"{PROXY_HOST}/v1/messages", timeout=timeout, json={
@@ -370,9 +486,17 @@ def proxy_chat(ptype, key, model, prompt, user=None, max_tokens=300, timeout=90)
             **({"user": user} if user else {})},
             headers={"X-ApiKey": key, "Authorization": "Bearer unused", "content-type": "application/json"})
     ms = int((time.time() - t0) * 1000)
+    req = {"method": "POST", "url": r.request.url if r.request is not None else PROXY_HOST,
+           "body": json.loads(r.request.body) if getattr(r.request, "body", None) else None}
+    if trace is not None:
+        trace.update(request=req, status=r.status_code, response=r.text[:8000])
     if r.status_code >= 400:
+        activity("proxy", f"LLM proxy ({ptype}, {model}): HTTP {r.status_code}",
+                 "warn" if re.search(r"block|policy|guard|violat", r.text, re.I) else "error",
+                 request=req, status=r.status_code, response=r.text[:4000], ms=ms)
         raise KitError(f"HTTP {r.status_code}: {r.text[:300]}".replace(key, "<key>"))
     d = r.json()
+    activity("proxy", f"LLM proxy ({ptype}, {model}) → reply", "ok", request=req, status=r.status_code, response=d, ms=ms)
     if ptype == "anthropic":
         text = " ".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
     else:
@@ -484,8 +608,9 @@ def run_one(cfg, test, app_name, user, mode, tags=False):
             if res["direction"] == "OUT":
                 raise KitError("Model-reply tests only run in detection mode.")
             dkey = kc_get(f"{app_name}:detections") if tags else None
+            res["exchange"] = ex = {}
             try:
-                reply, ms = proxy_chat(app["provider_type"], key, app["model"], text, user=user)
+                reply, ms = proxy_chat(app["provider_type"], key, app["model"], text, user=user, trace=ex)
                 res.update(status="OK", action="ALLOW", severity="", detectors=[], latency_ms=ms, reply=reply[:600],
                            missed=[])
             except KitError as e:  # AI Guard answers a blocked prompt with an HTTP error instead of a reply
@@ -509,7 +634,8 @@ def run_one(cfg, test, app_name, user, mode, tags=False):
             key = kc_get(f"{app_name}:detections")
             if not key:
                 raise KitError("This app has no detection key. Run `./aiguard-kit setup`.")
-            d, ms = das_scan(key, text, res["direction"], user)
+            res["exchange"] = ex = {}
+            d, ms = das_scan(key, text, res["direction"], user, trace=ex)
             hits, dets = _hits(d)
             res.update(status="OK", action=d.get("action", ""), severity=d.get("severity", ""), detectors=hits,
                        latency_ms=ms, transaction_id=d.get("transactionId"),
@@ -522,7 +648,7 @@ def run_one(cfg, test, app_name, user, mode, tags=False):
     try:  # local run log for support: no keys, prompts are synthetic or typed by the SE
         CFG_DIR.mkdir(exist_ok=True)
         with open(CFG_DIR / "runs.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps({k: v for k, v in res.items() if k != "raw"}) + "\n")
+            f.write(json.dumps({k: v for k, v in res.items() if k not in ("raw", "exchange")}) + "\n")
     except Exception:
         pass
     return res
@@ -876,6 +1002,41 @@ def rollback():
         shutil.rmtree(prev, ignore_errors=True)
         tmp.rename(prev)
     return m.group(1) if m else "the previous version"
+
+
+def cmd_logs():
+    files = sorted(LOG_DIR.glob("kit-*.jsonl")) if LOG_DIR.exists() else []
+    if not files:
+        info(f"No activity logged yet ({LOG_DIR}).")
+        return
+    errors_only = "--errors" in ARGS
+
+    def show(line):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            return
+        if errors_only and e.get("level") not in ("error", "warn"):
+            return
+        mark = {"ok": "✓", "error": "✗", "warn": "!"}.get(e.get("level"), "·")
+        ms = e.get("detail", {}).get("ms")
+        print(f"  {e['t'][11:]} {mark} {e['kind']:7} {e['summary']}" + (f"  {ms} ms" if ms is not None else ""))
+    lines = files[-1].read_text(encoding="utf-8", errors="replace").splitlines()
+    for line in lines[-60:]:
+        show(line)
+    print(f"  {C['d']}Full details (requests and responses, secrets masked): {files[-1]}{C['x']}")
+    if "--follow" in ARGS:
+        pos = files[-1].stat().st_size
+        try:
+            while True:
+                time.sleep(1)
+                with open(files[-1], encoding="utf-8", errors="replace") as f:
+                    f.seek(pos)
+                    for line in f:
+                        show(line)
+                    pos = f.tell()
+        except KeyboardInterrupt:
+            pass
 
 
 def cmd_update():
@@ -1554,10 +1715,23 @@ def retire_old_keys(t, cfg, log):
     save_cfg(cfg)
 
 
+SETUP_SCHEMA = 1  # bump when a release changes what setup creates; older setups are then flagged for repair
+
+
+def saved_answers(ans):
+    """The setup choices without secrets, so Repair can rebuild what the SE chose."""
+    keep = {k: v for k, v in ans.items() if k in ("policy", "mode", "competitor")}
+    keep["providers"] = {p: {k: v for k, v in (c or {}).items() if k in ("model", "cred_id")}
+                         for p, c in (ans.get("providers") or {}).items()}
+    return keep
+
+
 def setup_apply(t, cfg, ans, log):
     """Creates or fills in everything for the answers given. Safe to run again after a failure."""
     cfg.setdefault("state", {"apps": {}})
     st = cfg["state"]
+    if ans.get("mode") != "keep":
+        cfg["answers"] = saved_answers(ans)
     if ans.get("existing") == "fresh":
         log("head", "Removing earlier kit objects")
         teardown(t, cfg, confirm=False, log=log)
@@ -1573,11 +1747,15 @@ def setup_apply(t, cfg, ans, log):
             st["policy_id"] = mypol["id"]
             log("ok", f"Using '{pname}'")
             mode = ALIASES.get(ans.get("mode", "monitor"), ans.get("mode", "monitor"))
-            if policy_mode(t, cfg)[0] != mode:
+            if mode == "keep":
+                pass  # repair: leave whatever policy profile the SE has switched to
+            elif policy_mode(t, cfg)[0] != mode:
                 policy_mode(t, cfg, mode)
                 log("ok", f"Policy set to {PROFILES[mode].split(':')[0]}")
         else:
             body = json.loads((HERE / "policy_template.json").read_text(encoding="utf-8").replace("{COMPETITOR}", cfg["competitor"]))
+            if ans.get("mode") == "keep":
+                ans = dict(ans, mode=st.get("policy_mode") or "monitor")
             apply_mode(body, ans.get("mode", "detect"))
             body["name"] = pname
             p = t.call("policies", "add_policy", **body)
@@ -1649,6 +1827,7 @@ def setup_apply(t, cfg, ans, log):
             pc = t.call("llm_provider_credentials", "add_credential", name=f"{PREFIX}: {label} API key",
                         providerId=prov["id"], apiCredentials={"type": ctype, field: choice["key"]})
             pc_id = pc["id"]
+            cfg.setdefault("answers", {}).setdefault("providers", {}).setdefault(ptype, {})["cred_id"] = pc_id
             log("ok", f"{label}: new provider key stored in AI Guard")
         elif choice.get("cred_id") is not None:
             if int(choice["cred_id"]) not in usable:
@@ -1703,6 +1882,7 @@ def setup_apply(t, cfg, ans, log):
             r = t.call("policy_match_rules", "add_rule", **body)
             st[f"{kind}_rule_id"] = r["id"]
             log("ok", f"Created rule '{rname}' (order {body['ruleOrder']})")
+    st["schema"] = SETUP_SCHEMA
     save_cfg(cfg)
     if st.get("retire_own"):
         retire_old_keys(t, cfg, log)   # only now: the rules no longer point at them
@@ -2036,6 +2216,87 @@ def trickle(cfg, lib, count):
         sys.exit(1)
 
 
+# ---------------------------------------------------------------- health check and repair
+def health(t, cfg):
+    """Read-only: is this computer's demo setup still intact in the tenant? Returns {set_up, ok, problems}."""
+    st = cfg.get("state") or {}
+    if not st.get("apps"):
+        return {"set_up": False, "ok": True, "problems": []}
+    problems = []
+    add = lambda msg: problems.append(msg)  # noqa: E731
+    if st.get("schema", 1) < SETUP_SCHEMA:
+        add("This version of the kit changes what setup creates.")
+    if st.get("policy_id") and st["policy_id"] not in {p["id"] for p in t.list("policies")}:
+        add("The demo policy no longer exists in AI Guard.")
+    app_ids = {a["id"] for a in t.list("llm_applications")}
+    alive = kit_app_credentials(t, cfg)
+    rules = {r.get("name"): r for r in t.list("policy_match_rules")}
+    for app_name, a in st["apps"].items():
+        label = app_name.split(": ", 1)[-1]
+        if a.get("id") not in app_ids:
+            add(f"{label}: the app no longer exists in AI Guard.")
+            continue
+        for credkey, kind, kc_name in (("das_cred_id", "detection", "detections"), ("proxy_cred_id", "proxy", "proxy")):
+            cid = a.get(credkey)
+            if not cid:
+                if kind == "detection":
+                    add(f"{label}: this computer has no detection key.")
+                continue
+            if cid not in alive:
+                add(f"{label}: this computer's {kind} key was removed from AI Guard (for example by setup or teardown "
+                    f"on another computer).")
+                continue
+            if not kc_has(f"{app_name}:{kc_name}"):
+                add(f"{label}: the {kind} key's secret is missing from this computer's keychain.")
+                continue
+            rule = rules.get(f"{PREFIX}: {kind} apps")
+            in_rule = {i for e in ((rule or {}).get("matchCriteria") or {}).get("llmApplications") or []
+                       for i in e.get("applicationCredentialsIds") or []}
+            if cid not in in_rule:
+                add(f"{label}: this computer's {kind} key isn't in the rule '{PREFIX}: {kind} apps', so AI Guard "
+                    f"won't apply the demo policy to it.")
+    out = {"set_up": True, "ok": not problems, "problems": problems}
+    activity("setup", "Health check: " + ("all good" if not problems else f"{len(problems)} problem(s)"),
+             "ok" if not problems else "warn", problems=problems)
+    return out
+
+
+def repair(t, cfg, log):
+    """Re-runs setup with the saved choices: fills in what's missing, keeps the policy profile, never removes the
+    demo or touches other computers' keys."""
+    facts = tenant_facts(t, cfg)
+    ans = default_answers(facts)
+    saved = cfg.get("answers") or {}
+    ans.update({k: v for k, v in saved.items() if k != "providers"})
+    for p, c in (saved.get("providers") or {}).items():
+        ans["providers"].setdefault(p, {}).update(c)
+    if ans.get("policy") not in (None, "create") and str(ans["policy"]) not in {str(p["id"]) for p in t.list("policies")}:
+        ans["policy"] = "create"
+    ans.update(existing="keep", mode="keep")
+    activity("setup", "Repair started", "info")
+    setup_apply(t, cfg, ans, log)
+    log("head", "Verifying")
+    return verify(cfg, log)
+
+
+def cmd_repair():
+    head("Checking this computer's demo setup")
+    cfg = load_cfg()
+    t = connect(cfg)
+    h = health(t, cfg)
+    if not h["set_up"]:
+        raise KitError("Not set up yet. Run ./aiguard-kit setup")
+    if h["ok"] and "--force" not in ARGS:
+        ok("Everything is in place. Nothing to repair.")
+        return
+    for p in h["problems"]:
+        warn(p)
+    if not yesno("Repair now? (fills in what's missing; your policy profile and other computers' keys are kept)", True):
+        return
+    repair(t, cfg, lambda level, msg: (head if level == "head" else ok if level == "ok" else warn if level in ("warn", "fail")
+                                       else info)(msg))
+
+
 # ---------------------------------------------------------------- GUI server
 JOBS: dict = {}
 SERVER: dict = {}
@@ -2131,6 +2392,30 @@ def cmd_gui():
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE)})
             if path == "/api/update":
                 return self._send(200, update_status(force="force=1" in self.path))
+            if path == "/api/health":
+                c = load_cfg()
+                try:
+                    return self._send(200, health(tenant(c), c))
+                except Exception as e:
+                    return self._send(200, {"set_up": bool(c.get("state", {}).get("apps")), "ok": None,
+                                            "error": str(e), "fix": hint(e), "problems": []})
+            if path == "/api/logs":
+                q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1:] or [""])[0].split("&") if "=" in x)
+                since = int(q.get("since", 0) or 0)
+                with _ACT_LOCK:
+                    items = [e for e in ACTIVITY if e["seq"] > since][-500:]
+                return self._send(200, {"items": items, "dir": str(LOG_DIR)})
+            if path == "/api/diagnostics":
+                data = diagnostics_zip()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition",
+                                 f'attachment; filename="aiguard-kit-diagnostics-{time.strftime("%Y%m%d-%H%M")}.zip"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                activity("setup", "Diagnostics downloaded", "info")
+                return
             if path == "/api/job":
                 q = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1:] or [""])[0].split("&") if "=" in x)
                 j = JOBS.get(q.get("id"))
@@ -2154,10 +2439,34 @@ def cmd_gui():
             body = self._body()
             c = load_cfg()
             lib = load_tests()
+            if path == "/api/repair":
+                try:
+                    t = tenant(c)
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": hint(e)})
+                jid = uuid.uuid4().hex[:8]
+                job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
+
+                def rlog(level, msg):
+                    job["results"].append({"level": level, "msg": msg})
+                    if level != "head":
+                        activity("setup", msg, {"fail": "error"}.get(level, level))
+
+                def repair_work():
+                    try:
+                        job["verify"] = repair(t, load_cfg(), rlog)
+                    except Exception as e:
+                        job["error"] = {"error": str(e), "fix": hint(e)}
+                        rlog("fail", str(e))
+                    job["done"] = True
+                threading.Thread(target=repair_work, daemon=True).start()
+                return self._send(200, {"id": jid})
             if path == "/api/update/apply":
                 jid = uuid.uuid4().hex[:8]
                 job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
-                ulog = lambda level, msg: job["results"].append({"level": level, "msg": msg})  # noqa: E731
+                def ulog(level, msg):
+                    job["results"].append({"level": level, "msg": msg})
+                    activity("update", msg, {"fail": "error"}.get(level, level))
 
                 def update_work():
                     try:
@@ -2226,7 +2535,10 @@ def cmd_gui():
                     return self._send(400, {"error": str(e), "fix": hint(e)})
                 jid = uuid.uuid4().hex[:8]
                 job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
-                log = lambda level, msg: job["results"].append({"level": level, "msg": msg})  # noqa: E731
+                def log(level, msg):
+                    job["results"].append({"level": level, "msg": msg})
+                    if level != "head":
+                        activity("setup", msg, {"fail": "error"}.get(level, level))
                 answers = body.get("answers") or {}
 
                 def setup_work():
@@ -2271,8 +2583,11 @@ def cmd_gui():
             if path == "/api/policy":
                 try:
                     policy_mode(tenant(c), c, body.get("custom") or body.get("mode"))
+                    activity("policy", f"Policy switched to {body.get('mode') or 'custom'}", "ok",
+                             custom=body.get("custom"))
                     return self._send(200, policy_details(tenant(c), c))
                 except Exception as e:
+                    activity("policy", f"Policy switch failed: {e}", "error")
                     return self._send(400, {"error": str(e), "fix": hint(e)})
             if path == "/api/stop":
                 if body.get("id") in JOBS:
@@ -2300,6 +2615,8 @@ def cmd_gui():
     if not srv:
         raise KitError("No free local port between 8765 and 8784.")
     SERVER.update(srv=srv, port=port)
+    prune_logs()
+    activity("setup", f"Console started (kit {VERSION}, profile {PROFILE})", "info")
     url = f"http://127.0.0.1:{port}/"
     head("AI Guard test console")
     print(f"  {url}   (this machine only - press Ctrl+C to stop)")
@@ -2323,13 +2640,14 @@ def main():
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
-            "update": cmd_update}
+            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs}
     if cmd not in cmds:
         print(__doc__)
         return
     try:
         cmds[cmd]()
     except KitError as e:
+        activity("error", str(e), "error", command=cmd, fix=hint(e))
         print(f"\n  {C['r']}✗{C['x']} {e}")
         print(f"    {C['y']}Fix:{C['x']} {hint(e)}")
         sys.exit(1)
