@@ -65,7 +65,7 @@ def mine(o):
     return n.startswith(K.PREFIX + ":") or n.startswith(K.PREFIX + " - ") or n == label_name()
 
 
-BAD_NAME = re.compile(r"name should be valid|invalid (character|name)|name.{0,20}not valid", re.I)
+BAD_NAME = re.compile(r"name should be valid|invalid[ _](character|name)|can only have|name.{0,20}not valid", re.I)
 
 
 def with_valid_name(create, name, field="name"):
@@ -168,6 +168,8 @@ ZIA_HINTS = [
     (r"name should be valid",
      "ZIA rejected characters in a name. Update the kit (this was fixed), or run with --prefix using only letters, "
      "digits and hyphens."),
+    (r"INVALID_NAME|can only have",
+     "ZIA rejected characters in a name. Update the kit (git pull), then rerun setup: it picks up where it stopped."),
     (r"INVALID_INPUT_ARGUMENT|invalid",
      "Your tenant rejected a value (often a category, app or action it doesn't have). Run with --verbose to see which, "
      "then edit zia_policy_template.json or tell the kit owner."),
@@ -565,7 +567,7 @@ def ensure_tenant_category(t, log):
     if hit:
         t.call("url_categories", "update_url_category", g(hit, "id"), configured_name=g(hit, "configured_name"), **body)
         return g(hit, "id")
-    c = with_valid_name(lambda **n: t.call("url_categories", "add_url_category", **n, **body), name, "configured_name")
+    c = t.call("url_categories", "add_url_category", configured_name=safe_name(name), **body)   # no ':' allowed
     log("ok", f"Created URL category '{g(c, 'configured_name') or name}' ({', '.join(tc['urls'])})")
     return g(c, "id")
 
@@ -945,8 +947,8 @@ def cmd_setup():
         print(f"  • {kind.replace('_', ' '):18} {name}  ({what})")
     for n in notes:
         K.warn(n)
-    print(f"  • plus: URL category '{zname(template()['tenant_check']['name'])}', network service "
-          f"'{zname(template()['network_service']['name'])}', rule label '{zname(template()['label'])}'")
+    print(f"  • plus: URL category '{safe_name(zname(template()['tenant_check']['name']))}', network service "
+          f"'{zname(template()['network_service']['name'])}', rule label '{label_name()}'")
     if not K.yesno("Create or update these and activate?", True):
         print("  Cancelled. Nothing was changed.")
         return

@@ -68,7 +68,7 @@ Every object is scoped to the test user only, labeled `SE-Demo`, placed above yo
 | DLP | Block 5+ card numbers. Monitor PCI, PII and secrets |
 | Firewall | Block TCP 23, 2222, 4444 and 8888 (network service `SE-Demo: demo ports`) |
 | DNS | Block the marijuana category. The web sweep never visits it, so DNS blocks don't hide URL blocks |
-| Shared objects | URL category `SE-Demo: tenant check` (example.com), rule label `SE-Demo: SE-Demo` |
+| Shared objects | URL category `SE-Demo - tenant check` (example.com), network service `SE-Demo: demo ports`, rule label `SE-Demo demo kit`. ZIA rejects `:` in category and label names, so these use `-` |
 | Test user (unless you pass `--user`) | ZIA user `se-demo-traffic@<domain>` with a generated password, in group and department `SE-Demo: traffic generator` (with `--via zidentity`: a ZIdentity user and group) |
 
 The rules are defined in `zia_policy_template.json`. Setup checks the template against your tenant and skips or trims anything it doesn't have (an isolation profile, a DLP engine, an app action), saying which in the review.

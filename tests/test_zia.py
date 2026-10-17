@@ -29,7 +29,7 @@ def camel(d):
 class FakeZia:
     """In-memory ZIA: the parts of the OneAPI SDK the kit calls. Returns camelCase like the real API."""
 
-    def __init__(self, cbi=True, actions=None, file_types=None, strict=("rule_labels",)):
+    def __init__(self, cbi=True, actions=None, file_types=None, strict=("rule_labels", "url_categories")):
         self.ids = itertools.count(1000)
         self.db = {
             "url_filtering": [{"id": 1, "name": "URL Filtering Rule-1", "order": 1, "state": "DISABLED"},
@@ -82,8 +82,9 @@ class FakeZia:
         self.calls.append((resource, method, a, kw))
         name = kw.get("name") or kw.get("configured_name") or ""
         if method.startswith(("add", "update")) and ":" in str(name) and (resource in self.strict or "*" in self.strict):
-            raise sys.modules[type(self).kit_module].KitError(
-                f'{resource}.{method} failed: {{"status": 400, "message": "Name should be valid"}}')
+            msg = ('"code": "INVALID_NAME", "message": "Category name can only have alphanumeric, underscore, hyphen, '
+                   'dot, parenthesis and space."' if resource == "url_categories" else '"message": "Name should be valid"')
+            raise sys.modules[type(self).kit_module].KitError(f'{resource}.{method} failed: {{"status": 400, {msg}}}')
         if resource.startswith("zid."):
             return self._zid(resource, method, a, kw)
         if resource.startswith("zins."):
@@ -286,7 +287,7 @@ def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
         if r["name"].startswith("SE-Demo:"):
             assert r["users"] == [502], r["name"]           # only the test user
             assert r["labels"] == [label["id"]] and r["state"] == "ENABLED"
-    tc = next(c for c in fake.db["url_categories"] if c["configuredName"] == "SE-Demo: tenant check")
+    tc = next(c for c in fake.db["url_categories"] if c["configuredName"] == "SE-Demo - tenant check")
     tenant_rule = next(r for r in fake.db["url_filtering"] if r["name"] == "SE-Demo: Block tenant check")
     assert tenant_rule["urlCategories"] == [tc["id"]] and "www.example.com" in tc["urls"]
     ns = next(s for s in fake.db["network_services"] if s["name"] == "SE-Demo: demo ports")
