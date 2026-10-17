@@ -318,11 +318,28 @@ GENERATORS = {"web": gen_web, "saas": gen_saas, "genai": gen_genai, "threats": g
               "files": gen_files, "dns": gen_dns, "ports": gen_ports}
 
 
-def run(types=None, count=4, log=None, log_dir=None, stop=None, quiet=False, seed=None, sess=None):
-    """One round of demo traffic. Returns {"results", "summary", "total", "errors"}."""
+def run(types=None, count=4, log=None, log_dir=None, stop=None, quiet=False, seed=None, sess=None,
+        require_zscaler=True):
+    """One round of demo traffic. Returns {"results", "summary", "total", "errors"}.
+    require_zscaler: first confirm (ip.zscaler.com) that this machine's traffic goes through Zscaler, and send
+    nothing otherwise, so a generator that isn't signed in yet, or a laptop, never sends test traffic directly."""
     rnd = random.Random(seed)
     cat = catalog()
     s = sess or session()
+    if require_zscaler:
+        try:
+            via, clouds = via_zscaler(s)
+        except Exception as e:
+            via, clouds = False, [f"check failed: {str(e)[:80]}"]
+        if not via:
+            msg = ("skipped: this machine's traffic isn't going through Zscaler yet "
+                   f"({', '.join(clouds) or 'ip.zscaler.com says no'}). Sign in to Client Connector as the test user.")
+            if log:
+                log("warn", msg)
+            elif not quiet:
+                print("  " + msg)
+            return {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "summary": msg, "total": 0, "errors": 0,
+                    "by_type": {}, "results": [], "skipped": True}
     types = [t for t in (types or TYPES) if t in GENERATORS]
     results = []
     for kind in types:

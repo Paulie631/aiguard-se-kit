@@ -98,6 +98,43 @@ The rules are defined in `zia_policy_template.json`. Setup checks the template a
    aiguard-kit zia schedule install --every 30 a round every 30 minutes, while you're signed in
    ```
 
+### On AWS: one CloudFormation stack
+
+The simplest generator is a Windows instance in an AWS account you can use for demos. You don't need the AWS CLI or AWS keys on your laptop: the kit writes the template, and you upload it in the AWS console.
+
+1. **Write the template.** On your admin machine, after `zia setup`, run `./aiguard-kit zia aws`. Or use **Download CloudFormation template** on the console's ZIA tab. It's saved to `~/Downloads/se-demo-zia-generator.cfn.json`, filled in with your cloud, user domain and test user.
+   - **Optional: the Client Connector installer.** Give `--zcc-url <https URL of the Windows .msi or .exe>` (for example an S3 presigned URL) to have the instance install Client Connector itself, already pointed at your cloud and domain. Without it, you install Client Connector over remote desktop in step 3.
+2. **Create the stack.**
+   1. In the AWS console, go to **CloudFormation > Create stack > With new resources (standard) > Upload a template file**, choose the file, then **Next**.
+   2. Name the stack, for example `se-demo-zia-generator`, and check the parameters. The defaults are fine for most accounts.
+   3. Tick the IAM acknowledgement, then **Submit**.
+
+   The stack creates:
+   - its own small VPC with direct internet access, so no corporate inspection sits in front of Zscaler;
+   - a security group with **no inbound ports**;
+   - an SSM role;
+   - a Windows Server 2022 instance (t3.medium);
+   - unless you turn it off, a weekday 7am start and a 9pm stop (New York time).
+
+   On first boot, the instance installs uv and the kit (from `KitZipUrl`, currently the `zia-traffic` branch) into `C:\SE-Demo`. It also registers two tasks that run as SYSTEM:
+   - **SE-Demo ZIA traffic**, every 30 minutes;
+   - **SE-Demo ZIA check**, at startup.
+
+   Rounds only send traffic once ip.zscaler.com confirms it goes through Zscaler, so nothing is sent before you sign in.
+3. **Sign in once.**
+   1. After about 10 minutes, open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Sign in with your AWS single sign-on if offered, or with the Administrator password if you set `KeyPairName`.
+   2. Install Client Connector if step 1 didn't.
+   3. Sign in to Client Connector as the test user. `./aiguard-kit zia password` on your admin machine shows the password.
+4. **Check it.** On the instance's desktop, open **SE-Demo ZIA console > Internet Access (ZIA) > Check this machine**, or open **SE-Demo traffic log**. The next scheduled round starts within 30 minutes.
+
+**If the account restricts what stacks can create:**
+- **No new VPC.** Set `NetworkMode` to `ExistingSubnet` and fill in `ExistingVpcId` and `ExistingSubnetId`. Use a subnet whose internet route doesn't go through a corporate inspection appliance.
+- **No new IAM roles.** Set `ExistingInstanceProfile` to an instance profile with `AmazonSSMManagedInstanceCore`, and `WeekdaySchedule` to `false`. The start/stop schedule needs its own role.
+
+**Removing it:** delete the stack. That removes the instance, network, role and schedule. `zia teardown` removes the ZIA side.
+
+**Cost:** roughly what a Windows t3.medium costs in your region. The weekday schedule keeps it to working hours.
+
 ### What `zia check` proves
 
 | Check | How | If it fails |

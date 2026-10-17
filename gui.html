@@ -241,6 +241,10 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
       <button class="primary" id="ziasend">Send one round</button><button id="ziastop" disabled>Stop</button>
       <span class="muted" style="font-size:12px" id="ziasched"></span>
     </div>
+    <div class="row" style="gap:10px;margin-top:10px;flex-wrap:wrap">
+      <span class="lbl">On AWS</span><input type="text" id="ziazcc" placeholder="Client Connector installer URL (optional)" style="width:320px">
+      <button id="ziaaws" title="A CloudFormation template for a Windows generator instance: upload it in the CloudFormation console">Download CloudFormation template</button>
+    </div>
     <div id="ziachkout"></div>
     <div class="log" id="ziatrlog" style="display:none;margin-top:12px;max-height:40vh"></div>
   </div>
@@ -1064,6 +1068,9 @@ $("#ziasend").onclick=()=>{const types=$$("[data-zt]").filter(x=>x.checked).map(
       el.insertAdjacentHTML("beforeend",j.results.map(e=>`<div class="${e.level}">${ICON[e.level]||"·"} ${esc(e.msg)}</div>`).join(""));el.scrollTop=el.scrollHeight;
       if(j.done){$("#ziastop").disabled=true;ZJOB=null;el.insertAdjacentHTML("beforeend",`<div class="h">${esc((j.verify||{}).summary||(j.error||{}).error||"Done")}</div>`);zia()}else setTimeout(tick,700)};tick()}).catch(e=>alert(e.message))};
 $("#ziastop").onclick=()=>ZJOB&&api("/api/stop",{id:ZJOB});
+$("#ziaaws").onclick=async()=>{try{const r=await api("/api/zia/aws",{zcc_url:$("#ziazcc").value});
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(r.template,null,2)],{type:"application/json"}));a.download=r.filename;a.click();
+  $("#ziachkout").innerHTML=`<div class="notice" style="display:block;margin-top:10px">Downloaded <code>${esc(r.filename)}</code> for ${esc(r.settings.test_user)} (cloud ${esc(r.settings.cloud)}). In the AWS console: CloudFormation > Create stack > With new resources > Upload a template file. After about 10 minutes, connect with Fleet Manager remote desktop (stack Outputs) and sign in to Client Connector as the test user. See ZIA.md (AWS).</div>`}catch(e){alert(e.message)}};
 $("#ziadash").onclick=async()=>{$("#ziadashout").innerHTML='<div class="muted">Asking Insights…</div>';try{const r=await api("/api/zia/dashboards");
   if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));
   const lab={ok:"has data",partial:"traffic, no blocks yet",empty:"empty",error:"error"};

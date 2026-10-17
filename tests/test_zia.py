@@ -670,10 +670,10 @@ def test_install_ships_zia_files():
     spec = importlib.util.spec_from_file_location("pkg", ROOT / "tools/package.py")
     pkg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pkg)
-    for f in ("zia_module.py", "zia_traffic.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"):
+    for f in ("zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"):
         assert f in pkg.SHIP and (ROOT / f).exists()
     text = (ROOT / "aiguard_kit.py").read_text(encoding="utf-8")
-    assert '"zia_module.py", "zia_traffic.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"' in text
+    assert '"zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"' in text
 
 
 def test_console_state_endpoint(zenv):
@@ -852,3 +852,91 @@ def test_dns_query_packet_is_well_formed(tm, monkeypatch):
     monkeypatch.setattr(tm.socket, "socket", Sock)
     assert tm.dns_query("8.8.8.8", "www.wikipedia.org") == ("NOERROR", 1)
     assert sent["addr"] == ("8.8.8.8", 53) and b"\x09wikipedia\x03org\x00" in sent["data"]
+
+
+# ---------------------------------------------------------------- AWS template
+@pytest.fixture
+def aws():
+    spec = importlib.util.spec_from_file_location("zia_aws_under_test", ROOT / "zia_aws.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+PSEUDO = {"AWS::Region", "AWS::AccountId", "AWS::Partition", "AWS::NoValue", "AWS::StackName", "AWS::URLSuffix"}
+
+
+def walk(node, refs, subs, conds):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "Ref":
+                refs.add(v)
+            elif k == "Fn::GetAtt":
+                refs.add(v[0])
+            elif k == "Fn::Sub":
+                text = v if isinstance(v, str) else v[0]
+                subs.update(x.split(".")[0] for x in re.findall(r"\$\{(?!!)([^}]+)\}", text))
+            elif k == "Fn::If":
+                conds.add(v[0])
+            elif k == "Condition" and isinstance(v, str):
+                conds.add(v)
+            walk(v, refs, subs, conds)
+    elif isinstance(node, list):
+        for v in node:
+            walk(v, refs, subs, conds)
+
+
+def test_aws_template_is_consistent_and_has_no_secrets(aws):
+    t = aws.build(cloud="zscalertwo", domain="pyite.buzz", test_user="se-demo-traffic@pyite.buzz")
+    json.dumps(t)
+    names = set(t["Parameters"]) | set(t["Resources"]) | PSEUDO
+    refs, subs, conds = set(), set(), set()
+    walk(t, refs, subs, conds)
+    assert refs <= names, refs - names
+    assert subs <= names, subs - names          # the boot script substitutes only real parameters
+    assert conds <= set(t["Conditions"]), conds - set(t["Conditions"])
+    for r in t["Resources"].values():
+        assert r["Type"].startswith("AWS::") and "Properties" in r
+    sg = t["Resources"]["NoInbound"]["Properties"]
+    assert "SecurityGroupIngress" not in sg      # nothing exposed: connect with Fleet Manager
+    assert t["Resources"]["Generator"]["Properties"]["MetadataOptions"] == {"HttpTokens": "required"}
+    p = t["Parameters"]
+    assert p["TestUser"]["Default"] == "se-demo-traffic@pyite.buzz" and p["ZccCloudName"]["Default"] == "zscalertwo"
+    assert p["KitZipUrl"]["Default"].endswith("/zia-traffic.zip") and p["ZccInstallerUrl"]["Default"] == ""
+    assert not [k for k, v in p.items() if v.get("NoEcho") or "password" in k.lower()]   # no secret parameters
+    assert not re.search(r"(?i)(password|secret)\s*[=:]\s*\S", aws.USER_DATA)          # none in the boot script
+    ud = aws.USER_DATA
+    assert "zia %* --yes" in ud and "-User \"SYSTEM\"" in ud and "${TrafficEveryMinutes}" in ud
+    assert "\r\n" not in ud   # CloudFormation JSON carries plain newlines; the script writes CRLF itself
+
+
+def test_zia_aws_command_writes_a_template_for_this_tenant(zenv, tmp_path):
+    out = tmp_path / "gen.json"
+    kit, z, fake = zenv("zia", "aws", "--out", str(out), "--zcc-url", "https://bucket.s3.amazonaws.com/zcc.msi")
+    fake.db["users"].append({"id": 1, "name": "DEFAULT ADMIN", "email": "admin@164554707.zscalertwo.net"})
+    with pytest.raises(SystemExit):
+        kit.cmd_zia()    # no test user yet
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"users": [{"id": 502, "name": "SE Traffic", "email": "traffic.tester@pyite.buzz"}]}
+    kit.save_cfg(cfg)
+    kit.cmd_zia()
+    t = json.loads(out.read_text())
+    assert t["Parameters"]["ZccCloudName"]["Default"] == "zscalertwo"
+    assert t["Parameters"]["ZccUserDomain"]["Default"] == "pyite.buzz"
+    assert t["Parameters"]["ZccInstallerUrl"]["Default"].endswith("zcc.msi")
+    assert z.api_aws(kit.load_cfg(), {}, lambda: fake)["filename"].endswith(".cfn.json")
+
+
+def test_traffic_is_skipped_unless_it_goes_through_zscaler(tm, monkeypatch):
+    class Direct(FakeWeb):
+        def request(self, method, url, **kw):
+            if "ip.zscaler.com" in url:
+                return Resp(200, "The request received from you did not have an XFF header, so you are not going "
+                                 "through Zscaler.")
+            return super().request(method, url, **kw)
+    web = Direct(tm)
+    res = tm.run(count=1, sess=web, quiet=True)
+    assert res["skipped"] and res["total"] == 0 and web.seen == []   # only the ip.zscaler.com check, nothing else
+    assert "isn't going through Zscaler" in res["summary"]
+    monkeypatch.setattr(tm.time, "sleep", lambda s: None)
+    assert tm.run(types=["saas"], count=1, sess=Direct(tm), quiet=True, require_zscaler=False)["total"] == 4

@@ -33,6 +33,12 @@
     signed in as the test user. It needs no keys. It sends web categories, 60 SaaS apps, GenAI apps, EICAR over
     HTTP/HTTPS, Safe Browsing test pages, fake-data DLP posts, file uploads and downloads, DNS and unusual ports.
     `zia check` proves it reaches the demo tenant as the test user and that Z-Tunnel 2.0 is on.
+- `zia aws` (or **Download CloudFormation template** in the console) writes a template for a Windows generator on
+  AWS. It has its own VPC with no inbound ports and Fleet Manager remote desktop. The first-boot script installs uv,
+  the kit and, optionally, Client Connector, and registers SYSTEM tasks for traffic every 30 minutes and a check at
+  startup. It also adds a weekday start and nightly stop. No AWS CLI or secrets are needed; deleting the stack
+  removes it all.
+- Traffic rounds only run once ip.zscaler.com confirms the machine goes through Zscaler (`--anyway` overrides).
 - Products are now modules beside `aiguard_kit.py` (`PRODUCTS`), sharing credentials, config, console, installer and
   updater. AI Guard behavior is unchanged.
 - The scheduler supports more than one job. The AI Guard job keeps its names (`AIGuardSEKit-<profile>`,

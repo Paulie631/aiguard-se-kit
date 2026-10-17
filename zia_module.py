@@ -1043,6 +1043,51 @@ def cmd_status():
         K.info(f"Last traffic round on this machine: {json.loads(last.read_text(encoding='utf-8')).get('summary')}")
 
 
+def aws_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aiguard_kit_zia_aws", HERE / "zia_aws.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def cloud_name(t):
+    """'zscalertwo' from the tenant's own admin addresses (admin@<org>.zscalertwo.net)."""
+    for u in items(t.call("user_management", "list_users", query_params={"page_size": 10000})):
+        m = re.search(r"\.(zscaler[a-z]*)\.net$", str(g(u, "email", "")).lower())
+        if m:
+            return m.group(1)
+    return None
+
+
+def aws_settings(t, cfg, zcc_url=""):
+    z = zcfg(cfg)
+    user = ((z.get("users") or [{}])[0].get("email")) or (z.get("created_user") or {}).get("email")
+    if not user:
+        raise K.KitError("Run ./aiguard-kit zia setup first: the template needs the test user.")
+    return {"cloud": cloud_name(t) or cfg.get("cloud") or "zscalertwo", "domain": user.split("@", 1)[1],
+            "test_user": user, "zcc_url": zcc_url or ""}
+
+
+def cmd_aws():
+    cfg = K.load_cfg()
+    K.head("ZIA traffic generator on AWS: CloudFormation template")
+    st = aws_settings(connect(cfg), cfg, K.opt("zcc-url", ""))
+    downloads = K.HOME / "Downloads"
+    out = Path(K.opt("out") or (downloads if downloads.is_dir() else K.CFG_DIR) / "se-demo-zia-generator.cfn.json")
+    aws_module().write(out, **st)
+    K.ok(f"Wrote {out}")
+    K.info(f"Test user {st['test_user']} · cloud {st['cloud']} · domain {st['domain']}"
+           + ("" if st["zcc_url"] else " · no Client Connector URL: install it by hand on the instance"))
+    print("  Next: AWS console > CloudFormation > Create stack > With new resources > Upload a template file,")
+    print("        choose that file, review the parameters, tick the IAM acknowledgement, Submit. See ZIA.md (AWS).")
+
+
+def api_aws(cfg, body, tenant):
+    st = aws_settings(tenant(), cfg, (body.get("zcc_url") or "").strip())
+    return {"filename": "se-demo-zia-generator.cfn.json", "template": aws_module().build(**st), "settings": st}
+
+
 def cmd_password():
     """Shows the kit-created test user's password, on this computer only."""
     cfg = K.load_cfg()
@@ -1107,7 +1152,8 @@ def cmd_check():
 def cmd_traffic():
     tm = traffic_module()
     types_ = (K.opt("types") or "").split(",") if K.opt("types") else None
-    res = tm.run(types=types_, count=int(K.opt("count", "4")), quiet=K.YES, log_dir=K.CFG_DIR)
+    res = tm.run(types=types_, count=int(K.opt("count", "4")), quiet=K.YES, log_dir=K.CFG_DIR,
+                 require_zscaler="--anyway" not in K.ARGS)
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} zia-traffic profile={K.PROFILE} {res['summary']}")
     if res["total"] and res["errors"] == res["total"]:
         raise SystemExit(1)
@@ -1117,9 +1163,9 @@ def cli(args):
     sub = next((a for a in args if not a.startswith("-") and a not in _values(args)), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "status": cmd_status, "teardown": cmd_teardown,
             "dashboards": cmd_dashboards, "check": cmd_check, "traffic": cmd_traffic,
-            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password}
+            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password, "aws": cmd_aws}
     if sub not in cmds:
-        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|check|traffic|schedule  (see ZIA.md)")
+        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|aws|check|traffic|schedule  (see ZIA.md)")
         return
     try:
         cmds[sub]()

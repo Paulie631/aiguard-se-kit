@@ -28,6 +28,7 @@ Internet Access (ZIA), see ZIA.md:
   ./aiguard-kit zia preflight  read-only ZIA checks (--write-probe, --json)
   ./aiguard-kit zia status     list the kit's ZIA objects;  zia teardown removes them and activates
   ./aiguard-kit zia password   show the test user's sign-in for Client Connector (this computer only)
+  ./aiguard-kit zia aws        write a CloudFormation template for a generator instance on AWS (--zcc-url URL)
   ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
   ./aiguard-kit zia check      on the traffic generator machine: is traffic reaching the demo tenant? (no keys needed)
   ./aiguard-kit zia traffic    on the generator: one round of demo traffic (--types web,saas,genai,threats,dlp,files,dns,ports
@@ -86,7 +87,7 @@ YES = "--yes" in ARGS or "-y" in ARGS
 FORCE = "--force" in ARGS
 VERBOSE = "--verbose" in ARGS or "-v" in ARGS
 VALUE_OPTS = ("--prefix", "--preset", "--mode", "--rounds", "--tests", "--port", "--profile", "--count", "--every",
-              "--user", "--types", "--domain", "--via")
+              "--user", "--types", "--domain", "--via", "--zcc-url", "--out")
 
 
 def opt(name, default=None):
@@ -1229,7 +1230,7 @@ APP_NAME = "AI Guard Demo Console"
 INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "packs", "policy_template.json",
                  "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
                  "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command",
-                 "zia_module.py", "zia_traffic.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"]
+                 "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"]
 
 
 def _install_files():
@@ -2623,6 +2624,11 @@ def cmd_gui():
                 return self._send(200, {"id": jid})
             if path == "/api/zia/password":   # answered directly, never through a job log
                 return self._send(200, product("zia").api_password(c))
+            if path == "/api/zia/aws":
+                try:
+                    return self._send(200, product("zia").api_aws(c, body, lambda: zia_tenant(c)))
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": product("zia").zhint(e)})
             if path.startswith("/api/zia/"):
                 if path.endswith("teardown") and body.get("confirm") != "DELETE":
                     return self._send(400, {"error": "Type DELETE to confirm."})
