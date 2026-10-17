@@ -2,6 +2,17 @@
 setlocal
 title AI Guard SE Demo Kit - installer
 cd /d "%~dp0"
+if not exist "%~dp0aiguard_kit.py" (
+  echo.
+  echo   This installer is running from inside the zip, so it can't see the rest of the kit.
+  echo.
+  echo   1. Close this window.
+  echo   2. Right-click the aiguard-se-kit zip file and choose "Extract All...", then click Extract.
+  echo   3. Open the extracted aiguard-se-kit folder and double-click "Install AI Guard Kit.cmd" there.
+  echo.
+  pause
+  exit /b 1
+)
 echo.
 echo   AI Guard SE Demo Kit - installer
 echo   ================================

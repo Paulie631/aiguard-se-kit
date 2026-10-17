@@ -2,7 +2,7 @@
 
 ## Double-click install (recommended)
 
-1. Unzip `aiguard-se-kit-<version>.zip` anywhere, for example in Downloads.
+1. Unzip `aiguard-se-kit-<version>.zip` anywhere, for example in Downloads. **On Windows, right-click the zip → Extract All.** Double-clicking a file inside the zip without extracting won't work.
 2. Open the `aiguard-se-kit` folder and double-click the installer for your computer:
    - **Windows:** `Install AI Guard Kit.cmd`
    - **Mac:** `Install AI Guard Kit.command`

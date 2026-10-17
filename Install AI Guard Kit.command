@@ -1,6 +1,11 @@
 #!/bin/bash
 # AI Guard SE Demo Kit - double-click installer for macOS.
 cd "$(dirname "$0")" || exit 1
+if [ ! -f aiguard_kit.py ]; then
+  echo; echo "  The rest of the kit isn't next to this installer. Double-click the zip to unzip it,"
+  echo "  then run 'Install AI Guard Kit.command' from the unzipped aiguard-se-kit folder."; echo
+  read -r -p "  Press Return to close. "; exit 1
+fi
 clear
 cat <<'EOF'
 

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.1
+- The installers detect being run from inside the zip (Windows opens only that one file) and explain how to extract first.
+
 ## 1.6.0
 - Double-click installers: `Install AI Guard Kit.cmd` (Windows) and `Install AI Guard Kit.command` (Mac). They install
   uv if needed (official installer, then winget or Homebrew), prepare Python 3.12, copy the kit to

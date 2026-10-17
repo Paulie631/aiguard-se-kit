@@ -583,3 +583,8 @@ def test_double_click_installers_are_well_formed():
     assert "--python 3.12 --script ./aiguard_kit.py install" in mac.read_text()
     for f in ("Install AI Guard Kit.command", "Uninstall AI Guard Kit.command", "aiguard-kit"):
         assert (ROOT / f).stat().st_mode & 0o111, f
+
+
+def test_installers_stop_when_run_from_inside_the_zip():
+    assert b'if not exist "%~dp0aiguard_kit.py" (' in (ROOT / "Install AI Guard Kit.cmd").read_bytes()
+    assert "[ ! -f aiguard_kit.py ]" in (ROOT / "Install AI Guard Kit.command").read_text()
