@@ -532,7 +532,7 @@ def plan(t, cfg, facts=None):
         out.append(("url_filtering", None, zname(r["name"]),
                     dict(scope, action="ISOLATE", url_categories=r["url_categories"], protocols=["HTTPS_RULE", "HTTP_RULE"],
                          request_methods=["CONNECT", "GET", "HEAD"],
-                         user_agent_types=["CHROME", "FIREFOX", "MSEDGE", "MSCHREDGE", "SAFARI", "OTHER"],
+                         user_agent_types=["CHROME", "FIREFOX", "MSEDGE", "MSCHREDGE", "SAFARI", "OPERA"],   # ZIA: known browsers only,
                          cbi_profile={"id": g(cbi, "id"), "name": g(cbi, "name"), "url": g(cbi, "url")},
                          description="SE demo kit: isolates this category for the test user")))
     for r in tpl["cloud_app_control"]:

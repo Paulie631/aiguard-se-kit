@@ -550,6 +550,7 @@ def test_caution_and_isolate_rules_use_what_zia_allows(zenv):
     by = {n: b for k, rt, n, b in z.plan(fake, cfg)[0] if k == "url_filtering"}
     assert by["SE-Demo: Caution social"]["request_methods"] == ["CONNECT", "GET", "HEAD"]
     assert by["SE-Demo: Isolate games"]["protocols"] == ["HTTPS_RULE", "HTTP_RULE"]
+    assert "OTHER" not in by["SE-Demo: Isolate games"]["user_agent_types"]   # ZIA isolates known browsers only
     assert "POST" in by["SE-Demo: Block gambling"]["request_methods"]
 
 
