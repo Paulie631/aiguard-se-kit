@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.2
+- Windows: creating the desktop and Start menu shortcuts could fail with an empty error message. The installer
+  now runs PowerShell non-interactively with errors caught, checks the shortcut was written, and reports why if not.
+- Tests now run on real Windows in CI (shortcut creation and PATH changes included).
+
 ## 1.6.1
 - The installers detect being run from inside the zip (Windows opens only that one file) and explain how to extract first.
 

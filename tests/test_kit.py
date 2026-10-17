@@ -109,7 +109,7 @@ def test_library_is_consistent():
 
 def test_no_scannable_secrets_in_repo_files():
     import re
-    text = (ROOT / "tests.json").read_text() + "".join(p.read_text() for p in (ROOT / "packs").glob("*.json"))
+    text = (ROOT / "tests.json").read_text(encoding="utf-8") + "".join(p.read_text(encoding="utf-8") for p in (ROOT / "packs").glob("*.json"))
     for pat in (r"sk_live_[A-Za-z0-9]{20,}", r"xoxb-\d+-\d+-\w+", r"AIza[0-9A-Za-z_-]{35}", r"sq0atp-[\w-]{22}",
                 r"ghp_[A-Za-z0-9]{36}"):
         assert not re.search(pat, text), f"secret-scanner pattern in repo: {pat}"
@@ -466,7 +466,8 @@ def test_windows_messages_use_cmd_launcher(env, monkeypatch, tmp_path):
     windows(kit, monkeypatch, tmp_path)
     assert kit.L("Run ./aiguard-kit setup") == "Run .\\aiguard-kit.cmd setup"
     assert ".\\aiguard-kit.cmd" in kit.hint(kit.KitError("CERTIFICATE_VERIFY_FAILED"))
-    assert "Keychain" in kit.hint(kit.KitError("Couldn't read 'x' from Windows Credential Manager"))  # Windows text is chosen at import
+    fix = kit.hint(kit.KitError("Couldn't read 'x' from Windows Credential Manager"))  # wording is chosen at import
+    assert ("Credential Manager" if sys.platform == "win32" else "Keychain") in fix
     # the console's JSON stays valid after swapping in a path with a backslash
     body = json.dumps({"fix": "Run ./aiguard-kit setup"}).replace("./aiguard-kit", json.dumps(kit.LAUNCHER)[1:-1])
     assert json.loads(body)["fix"] == "Run .\\aiguard-kit.cmd setup"
@@ -514,6 +515,7 @@ def test_launchers_pin_a_python_with_prebuilt_libraries():
     assert "--python 3.12 --script" in (ROOT / "WINDOWS.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Mac/Linux install path")
 def test_install_and_uninstall_mac_linux(env, monkeypatch, tmp_path, capsys):
     import subprocess
     kit, _ = env("install", "--yes")
@@ -579,12 +581,28 @@ def test_double_click_installers_are_well_formed():
     assert win.startswith(b"@echo off\r\n") and b"\n" not in win.replace(b"\r\n", b"")
     assert b'uv run --quiet --python 3.12 --script "%~dp0aiguard_kit.py" install' in win
     mac = ROOT / "Install AI Guard Kit.command"
-    assert mac.stat().st_mode & 0o111 and b"\r" not in mac.read_bytes()
-    assert "--python 3.12 --script ./aiguard_kit.py install" in mac.read_text()
-    for f in ("Install AI Guard Kit.command", "Uninstall AI Guard Kit.command", "aiguard-kit"):
-        assert (ROOT / f).stat().st_mode & 0o111, f
+    assert b"\r" not in mac.read_bytes()
+    assert "--python 3.12 --script ./aiguard_kit.py install" in mac.read_text(encoding="utf-8")
+    if sys.platform != "win32":  # Windows has no execute bit
+        for f in ("Install AI Guard Kit.command", "Uninstall AI Guard Kit.command", "aiguard-kit"):
+            assert (ROOT / f).stat().st_mode & 0o111, f
 
 
 def test_installers_stop_when_run_from_inside_the_zip():
     assert b'if not exist "%~dp0aiguard_kit.py" (' in (ROOT / "Install AI Guard Kit.cmd").read_bytes()
     assert "[ ! -f aiguard_kit.py ]" in (ROOT / "Install AI Guard Kit.command").read_text()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="needs real Windows")
+def test_real_windows_shortcut_and_user_path(env, tmp_path):
+    """Runs on the Windows CI runner: creates a real .lnk and adds/removes a PATH entry, restoring PATH after."""
+    kit, _ = env("status")
+    lnk = tmp_path / "AI Guard Demo Console.lnk"
+    kit._win_shortcut(lnk, ROOT / "aiguard-kit.cmd", "gui", ROOT, "test")
+    assert lnk.exists() and lnk.stat().st_size > 0
+    probe = str(tmp_path / "aiguard-path-probe")
+    try:
+        assert probe in kit._win_user_path(add=probe)
+        assert kit._win_user_path(add=probe).count(probe) == 1  # adding twice doesn't duplicate
+    finally:
+        assert probe not in kit._win_user_path(remove=probe)

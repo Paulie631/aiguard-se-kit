@@ -36,7 +36,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -869,12 +869,21 @@ def _desktop_dir():
 
 def _win_shortcut(path, target, args, workdir, description):
     import subprocess
-    ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK);$s.TargetPath=$env:TGT;"
-          "$s.Arguments=$env:ARGS_;$s.WorkingDirectory=$env:WD;$s.Description=$env:DESC;$s.Save()")
-    env = {**os.environ, "LNK": str(path), "TGT": str(target), "ARGS_": args, "WD": str(workdir), "DESC": description}
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, env=env)
+    ps = ("$ErrorActionPreference='Stop'; try { "
+          "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:AIGK_LNK); $s.TargetPath=$env:AIGK_TGT; "
+          "$s.Arguments=$env:AIGK_ARGS; $s.WorkingDirectory=$env:AIGK_WD; $s.Description=$env:AIGK_DESC; $s.Save(); "
+          "if (-not (Test-Path -LiteralPath $env:AIGK_LNK)) { throw 'the shortcut file was not written' } "
+          "} catch { [Console]::Out.WriteLine('ERR: ' + $_.Exception.Message); exit 1 }")
+    env = {**os.environ, "AIGK_LNK": str(path), "AIGK_TGT": str(target), "AIGK_ARGS": args, "AIGK_WD": str(workdir),
+           "AIGK_DESC": description}
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                           capture_output=True, text=True, env=env, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise KitError(f"Couldn't create the shortcut {path.name}: {e}") from e
     if r.returncode:
-        raise KitError(f"Couldn't create the shortcut {path.name}: {(r.stderr or r.stdout).strip()[:200]}")
+        why = (r.stdout + r.stderr).strip().replace("ERR: ", "")[:300] or f"PowerShell exit code {r.returncode}"
+        raise KitError(f"Couldn't create the shortcut {path.name}: {why}")
 
 
 def shortcut_paths():
