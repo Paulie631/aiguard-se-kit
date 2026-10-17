@@ -143,7 +143,7 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 - **Offline tests:** `uv run --with pytest --with requests --with keyring --with truststore pytest -q tests`. CI runs them on every push (`.github/workflows/ci.yml`).
 - **Claude plugin:** `python tools/build_plugin.py` writes `dist/aiguard-se-demo.plugin`, bundling the kit with a skill so SEs can say "set up the AI Guard demo".
 - **Updates:** SEs who cloned with git see "Update available" in the console and in `status`.
-- **Publishing a release:** bump `VERSION` in `aiguard_kit.py` and `plugin/.../plugin.json`, add a `## <version>` section at the top of CHANGELOG.md, commit, then `git tag v<version> && git push origin main --tags`. The release workflow runs the tests on Windows, macOS and Linux, then publishes the zips, plugins and SHA256SUMS.txt to GitHub Releases. `python tools/package.py` builds the same files locally into `dist/`.
+- **Publishing a release:** bump `VERSION` in `aiguard_kit.py` and `plugin/.../plugin.json`, add a `## <version>` section at the top of CHANGELOG.md, commit and push to main. The release workflow sees the new version, runs the tests on Windows, macOS and Linux, then publishes the zips, plugins and SHA256SUMS.txt to GitHub Releases. `python tools/package.py` builds the same files locally into `dist/`.
 
 ## Files
 

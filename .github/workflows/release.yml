@@ -1,35 +1,57 @@
 name: release
-# Push a tag like v1.6.1 (matching VERSION in aiguard_kit.py) to test and publish a release with the zips.
+# Publishes a GitHub Release whenever main has a VERSION (in aiguard_kit.py) that hasn't been released yet.
+# So releasing is: bump VERSION, add a CHANGELOG section, push to main. Pushing a tag v<version> also works.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          v=$(python3 -c "import re;print(re.search(r'^VERSION = \"([^\"]+)\"', open('aiguard_kit.py', encoding='utf-8').read(), re.M).group(1))")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$v" ]]; then echo "Tag $GITHUB_REF_NAME doesn't match VERSION $v"; exit 1; fi
+          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"; echo "v$v is already released."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"; echo "Will release v$v."
+          fi
   test:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
     uses: ./.github/workflows/ci.yml
   publish:
-    needs: test
+    needs: [check, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - name: Tag matches the kit version
-        run: |
-          v=$(python -c "import re;print(re.search(r'^VERSION = \"([^\"]+)\"', open('aiguard_kit.py', encoding='utf-8').read(), re.M).group(1))")
-          test "v$v" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME doesn't match VERSION $v"; exit 1; }
       - run: python tools/package.py
       - name: Publish
-        env: {GH_TOKEN: "${{ github.token }}"}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: v${{ needs.check.outputs.version }}
         run: |
-          notes=$(python - <<'PY'
+          python - <<'PY'
           import re
           text = open("CHANGELOG.md", encoding="utf-8").read()
           m = re.search(r"^## .*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
-          print((m.group(1) if m else "").strip())
+          notes = (m.group(1) if m else "").strip()
+          notes += ("\n\n**Download** `aiguard-se-kit-*.zip`, extract it, and double-click the installer inside "
+                    "(see INSTALL.md). The `-email` files leave out the installers so mail filters accept them.\n")
+          open("notes.md", "w", encoding="utf-8").write(notes)
           PY
-          )
-          printf '%s\n\n**Download:** `aiguard-se-kit-*.zip` (double-click installers inside; see INSTALL.md). The `-email` files leave out the installers so mail filters accept them.\n' "$notes" > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/aiguard-se-kit-*.zip dist/aiguard-se-demo-*.plugin dist/SHA256SUMS.txt \
-            --title "AI Guard SE Demo Kit $GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$V" dist/aiguard-se-kit-*.zip dist/aiguard-se-demo-*.plugin dist/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" --title "AI Guard SE Demo Kit $V" --notes-file notes.md
