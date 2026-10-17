@@ -53,6 +53,7 @@ In the console: Setup → step 2 → **Copy report** puts the same report on the
 **Fix:**
 
 - Mac: unlock the login keychain (Keychain Access → File → Unlock Keychain "login"). If macOS asks whether Python may access the keychain, choose Always Allow.
+- Windows: keys go to Credential Manager for the signed-in user. Run the kit as yourself, not from an admin or shared account, and don't use "Run as administrator".
 - Linux: install and start gnome-keyring, or run the kit from a desktop session.
 - Managed laptops: if policy blocks keychain access for command-line apps, ask IT for an exception for uv's Python.
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.2 (Windows)
+- Fixed: on Windows, the kit could crash with `UnicodeEncodeError` when printing ✓ or ✗ (redirected output,
+  `preflight --json > file`, scheduled runs, older consoles). Output is now always UTF-8.
+- Fixed: scheduled traffic on Windows printed into the void and could exceed Task Scheduler's command length.
+  It now runs a small wrapper in `~/.aiguard-se-kit` that logs to `trickle.log`.
+- The kit writes `aiguard-kit.cmd` itself on first run if it's missing (the emailed copy can't include it).
+- `aiguard-kit.cmd` now has Windows line endings and sets `PYTHONUTF8`.
+- Messages, hints and the console show `.\aiguard-kit.cmd` on Windows instead of `./aiguard-kit`.
+- Colors work in the classic Windows console; keychain and certificate hints name the Windows equivalents.
+- Reads the Claude Desktop config from `%APPDATA%` on Windows.
+- Two consoles can no longer silently share the same port on Windows.
+- New WINDOWS.md; CI now runs the tests on Windows and macOS too.
+
 ## 1.5.1
 - Fixed: setup failed with 409 "already exists" when the tenant already had the kit's detection keys but their
   secrets weren't on this machine. The AI Guard list API doesn't return DETECTIONS-mode keys, so the kit now

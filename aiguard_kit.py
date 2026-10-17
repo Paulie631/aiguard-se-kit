@@ -34,8 +34,33 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 HERE = Path(__file__).resolve().parent
+WINDOWS = os.name == "nt"
+LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
+for _stream in (sys.stdout, sys.stderr):  # Windows consoles and redirected output default to cp1252, which can't print ✓ ✗
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def L(text: str) -> str:
+    """Messages are written with the Mac/Linux launcher; show the Windows one on Windows."""
+    return text.replace("./aiguard-kit", LAUNCHER) if WINDOWS else text
+
+
+if WINDOWS:
+    class _LauncherNames:
+        def __init__(self, stream):
+            self._s = stream
+
+        def write(self, text):
+            return self._s.write(L(text))
+
+        def __getattr__(self, name):
+            return getattr(self._s, name)
+    sys.stdout = _LauncherNames(sys.stdout)
 HOME = Path.home()
 BASE_DIR = HOME / ".aiguard-se-kit"
 KC = "aiguard-se-kit"
@@ -90,6 +115,8 @@ PANELS = {
 C = {"g": "\033[32m", "y": "\033[33m", "r": "\033[31m", "b": "\033[1m", "d": "\033[2m", "x": "\033[0m"}
 if not sys.stdout.isatty() or os.getenv("NO_COLOR"):
     C = {k: "" for k in C}
+elif WINDOWS:
+    os.system("")  # turns on ANSI colour handling in the classic Windows console
 
 
 def ok(msg):
@@ -126,7 +153,7 @@ HINTS = [
      "Couldn't reach Zscaler. Check the vanity domain (just the subdomain, e.g. `acme` for acme.zslogin.net) and your network."),
     (r"CERTIFICATE_VERIFY_FAILED|UnknownIssuer|self.signed certificate|SSLError",
      "TLS inspection is breaking certificate checks. Launch through ./aiguard-kit (it sets UV_SYSTEM_CERTS), and make sure "
-     "your Zscaler root CA is in the system keychain. As a last resort set SSL_CERT_FILE to a bundle that includes it."),
+     "your Zscaler root CA is in the system keychain (on Windows, the Trusted Root Certification Authorities store). As a last resort set SSL_CERT_FILE to a bundle that includes it."),
     (r"\b401\b|NOT_AUTHORIZED|Unauthorized",
      "Authenticated but not allowed. In ZIdentity, the API client needs the AI Guard scope (and for ZIA, an API role - "
      "not an admin role - created in ZIA > Role Management)."),
@@ -136,7 +163,9 @@ HINTS = [
      "The LLM provider account has no credit. Top it up, or use detection mode (free) instead of proxy mode."),
     (r"\b429\b|rate.?limit",
      "Rate limited. Wait a minute, or lower --rounds."),
-    (r"keychain",
+    (r"keychain|Credential Manager",
+     "Open Credential Manager > Windows Credentials and check you're signed in to Windows as yourself, then retry."
+     if WINDOWS else
      "Unlock the login keychain (Keychain Access > File > Unlock) and choose 'Always Allow' when macOS asks whether "
      "Python may use it. Then retry."),
     (r"not one of the values accepted",
@@ -148,7 +177,7 @@ def hint(err) -> str:
     text = str(err)
     for pat, fix in HINTS:
         if re.search(pat, text, re.I):
-            return fix
+            return L(fix)
     return "Run again with --verbose and send the output to the kit owner."
 
 
@@ -171,7 +200,9 @@ def kc_get(name):
         return keyring.get_password(KC, KC_NS + name)
     except Exception as e:
         raise KitError(f"Couldn't read the keychain entry '{name}': {e}. Unlock your keychain or choose "
-                       f"'Always Allow' when macOS asks, then try again.") from e
+                       f"'Always Allow' when macOS asks, then try again." if not WINDOWS else
+                       f"Couldn't read '{name}' from Windows Credential Manager: {e}. Sign in to Windows as yourself "
+                       f"(not a different account) and try again.") from e
 
 
 def kc_has(name):
@@ -202,13 +233,13 @@ def mask(s):
 # ---------------------------------------------------------------- config
 def load_cfg():
     if CFG_FILE.exists():
-        return json.loads(CFG_FILE.read_text())
+        return json.loads(CFG_FILE.read_text(encoding="utf-8"))
     return {}
 
 
 def save_cfg(cfg):
     CFG_DIR.mkdir(exist_ok=True)
-    CFG_FILE.write_text(json.dumps(cfg, indent=2))
+    CFG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     try:
         os.chmod(CFG_FILE, 0o600)
     except Exception:
@@ -665,8 +696,35 @@ def update_check(fetch=True):
 
 
 # ---------------------------------------------------------------- scheduler
+def ensure_windows_launcher():
+    """The email-safe package leaves out aiguard-kit.cmd (mail filters block .cmd), so write it on first run."""
+    p = HERE / "aiguard-kit.cmd"
+    if WINDOWS and not p.exists():
+        try:
+            p.write_bytes(WINDOWS_LAUNCHER.replace("\n", "\r\n").encode("ascii"))
+            print(f"  Created {p.name}. From now on start the kit with {LAUNCHER} gui")
+        except OSError:
+            pass
+
+
+WINDOWS_LAUNCHER = """@echo off
+rem Launcher for the AI Guard SE demo kit (Windows). Usage: .\\aiguard-kit.cmd setup|gui|run|status|teardown
+where uv >nul 2>nul
+if errorlevel 1 (
+  echo uv is not installed. In PowerShell run:
+  echo   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  echo then open a new terminal and run this command again.
+  exit /b 1
+)
+set UV_SYSTEM_CERTS=1
+set UV_NATIVE_TLS=1
+set PYTHONUTF8=1
+uv run --quiet --script "%~dp0aiguard_kit.py" %*
+"""
+
+
 def schedule_cmdline(count):
-    exe = HERE / ("aiguard-kit.cmd" if os.name == "nt" else "aiguard-kit")
+    exe = HERE / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
     return [str(exe), "run", "--trickle", "--count", str(count), "--profile", PROFILE, "--yes"]
 
 
@@ -707,14 +765,23 @@ def cmd_schedule():
     elif system == "Windows":
         name = f"AIGuardSEKit-{PROFILE}"
         if action == "install":
-            tr = " ".join(f'"{x}"' if " " in x else x for x in schedule_cmdline(count))
+            ensure_windows_launcher()
+            CFG_DIR.mkdir(parents=True, exist_ok=True)
+            # schtasks limits /TR to 261 characters and doesn't capture output, so run a small wrapper that logs
+            wrapper = CFG_DIR / "trickle.cmd"
+            cmdline = " ".join(f'"{x}"' for x in schedule_cmdline(count))
+            wrapper.write_bytes((f'@echo off\r\nset NO_COLOR=1\r\ncd /d "{HERE}"\r\n'
+                                 f'call {cmdline} >> "{CFG_DIR / "trickle.log"}" 2>&1\r\n').encode("utf-8"))
+            tr = f'"{wrapper}"'
             r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(every), "/TN", name, "/TR", tr],
                                capture_output=True, text=True)
             if r.returncode:
                 raise KitError(f"schtasks failed: {r.stderr.strip() or r.stdout.strip()}")
-            ok(f"Installed task '{name}': {count} tests every {every} minutes")
+            ok(f"Installed task '{name}': {count} tests every {every} minutes. Log: {CFG_DIR / 'trickle.log'}")
+            info("It runs only while you're signed in to Windows.")
         elif action == "remove":
             subprocess.run(["schtasks", "/Delete", "/F", "/TN", name], capture_output=True)
+            (CFG_DIR / "trickle.cmd").unlink(missing_ok=True)
             ok("Removed")
         else:
             r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True)
@@ -736,9 +803,10 @@ def cmd_schedule():
 
 # ---------------------------------------------------------------- setup
 def import_claude_desktop():
-    p = HOME / "Library/Application Support/Claude/claude_desktop_config.json"
+    p = (Path(os.getenv("APPDATA", HOME)) / "Claude/claude_desktop_config.json" if WINDOWS
+         else HOME / "Library/Application Support/Claude/claude_desktop_config.json")
     try:
-        servers = json.loads(p.read_text())["mcpServers"]
+        servers = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]
         for s in servers.values():
             env = s.get("env", {})
             if env.get("ZSCALER_CLIENT_ID") and env.get("ZSCALER_CLIENT_SECRET"):
@@ -754,7 +822,7 @@ TEMPLATE_DETECTORS = None
 def template_detectors():
     global TEMPLATE_DETECTORS
     if TEMPLATE_DETECTORS is None:
-        body = json.loads((HERE / "policy_template.json").read_text())
+        body = json.loads((HERE / "policy_template.json").read_text(encoding="utf-8"))
         TEMPLATE_DETECTORS = {side: [d["detector"] for d in body[side]] for side in ("inputDetectorPolicies",
                                                                                     "outputDetectorPolicies")}
     return TEMPLATE_DETECTORS
@@ -1075,7 +1143,7 @@ def setup_apply(t, cfg, ans, log):
                 policy_mode(t, cfg, mode)
                 log("ok", f"Policy set to {PROFILES[mode].split(':')[0]}")
         else:
-            body = json.loads((HERE / "policy_template.json").read_text().replace("{COMPETITOR}", cfg["competitor"]))
+            body = json.loads((HERE / "policy_template.json").read_text(encoding="utf-8").replace("{COMPETITOR}", cfg["competitor"]))
             apply_mode(body, ans.get("mode", "detect"))
             body["name"] = pname
             p = t.call("policies", "add_policy", **body)
@@ -1524,13 +1592,16 @@ def cmd_gui():
         return tenant_cache[key]
     port = int(opt("port", "8765"))
 
+    if WINDOWS:  # on Windows SO_REUSEADDR lets a second console silently share the port
+        ThreadingHTTPServer.allow_reuse_address = False
+
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             if VERBOSE:
                 super().log_message(*a)
 
         def _send(self, code, obj=None, ctype="application/json", raw=None):
-            data = raw if raw is not None else json.dumps(obj).encode()
+            data = raw if raw is not None else json.dumps(obj).replace("./aiguard-kit", json.dumps(LAUNCHER)[1:-1]).encode()
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Cache-Control", "no-store")
@@ -1735,6 +1806,7 @@ def cmd_gui():
 # ---------------------------------------------------------------- main
 def main():
     tls_setup()
+    ensure_windows_launcher()
     vals = {ARGS[i + 1] for i, a in enumerate(ARGS[:-1]) if a in VALUE_OPTS}
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,

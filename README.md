@@ -17,7 +17,7 @@ Fill every Zscaler AI Guard dashboard in **your own** tenant in about ten minute
 5. **Optional: keep dashboards fresh** with a small batch every hour: `./aiguard-kit schedule install`
 6. **Check AI Guard → Insights** after 10–15 minutes.
 
-Windows: install uv with `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`, then use `aiguard-kit.cmd` in place of `./aiguard-kit`.
+**Windows:** see [WINDOWS.md](WINDOWS.md). In short: install uv, open a new PowerShell window, and use `.\aiguard-kit.cmd` wherever this README says `./aiguard-kit` (for example `.\aiguard-kit.cmd gui`).
 
 ## The console
 
@@ -139,4 +139,4 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 
 ## Files
 
-`aiguard-kit`, `aiguard-kit.cmd`: launchers · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.
+`aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.

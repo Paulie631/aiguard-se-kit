@@ -435,3 +435,71 @@ def test_reinstall_with_hidden_detection_keys(env):
     kit.FORCE = True
     kit.teardown(t, kit.load_cfg(), log=lambda *a: None)
     assert t.db["llm_application_credentials"] == [] and t.db["llm_applications"] == []
+
+
+def windows(kit, monkeypatch, tmp_path):
+    """Make the loaded kit behave as it does on Windows, with its folder in tmp_path."""
+    import platform
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(kit, "WINDOWS", True)
+    monkeypatch.setattr(kit, "LAUNCHER", ".\\aiguard-kit.cmd")
+    here = tmp_path / "kit folder"
+    here.mkdir()
+    monkeypatch.setattr(kit, "HERE", here)
+    return here
+
+
+def test_windows_launcher_written_when_missing(env, monkeypatch, tmp_path, capsys):
+    kit, _ = env("status")
+    here = windows(kit, monkeypatch, tmp_path)
+    kit.ensure_windows_launcher()
+    data = (here / "aiguard-kit.cmd").read_bytes()
+    assert data.startswith(b"@echo off\r\n") and b"\n" not in data.replace(b"\r\n", b"")
+    assert b'uv run --quiet --script "%~dp0aiguard_kit.py" %*' in data
+    assert ".\\aiguard-kit.cmd gui" in capsys.readouterr().out
+    # the shipped launcher matches the one the kit writes, with Windows line endings
+    assert (ROOT / "aiguard-kit.cmd").read_bytes() == data
+
+
+def test_windows_messages_use_cmd_launcher(env, monkeypatch, tmp_path):
+    kit, _ = env("status")
+    windows(kit, monkeypatch, tmp_path)
+    assert kit.L("Run ./aiguard-kit setup") == "Run .\\aiguard-kit.cmd setup"
+    assert ".\\aiguard-kit.cmd" in kit.hint(kit.KitError("CERTIFICATE_VERIFY_FAILED"))
+    assert "Keychain" in kit.hint(kit.KitError("Couldn't read 'x' from Windows Credential Manager"))  # Windows text is chosen at import
+    # the console's JSON stays valid after swapping in a path with a backslash
+    body = json.dumps({"fix": "Run ./aiguard-kit setup"}).replace("./aiguard-kit", json.dumps(kit.LAUNCHER)[1:-1])
+    assert json.loads(body)["fix"] == "Run .\\aiguard-kit.cmd setup"
+
+
+def test_schedule_windows_task_logs_through_wrapper(env, monkeypatch, tmp_path):
+    import subprocess
+    kit, _ = env("schedule", "install", "--every", "30", "--count", "6")
+    here = windows(kit, monkeypatch, tmp_path)
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: ran.append(cmd) or types.SimpleNamespace(returncode=0, stderr="", stdout=""))
+    kit.cmd_schedule()
+    cmd = ran[-1]
+    assert cmd[:2] == ["schtasks", "/Create"] and cmd[cmd.index("/MO") + 1] == "30"
+    tr = cmd[cmd.index("/TR") + 1]
+    assert tr == f'"{kit.CFG_DIR / "trickle.cmd"}"' and len(tr) < 261
+    wrapper = (kit.CFG_DIR / "trickle.cmd").read_bytes().decode()
+    assert "\r\n" in wrapper and "NO_COLOR=1" in wrapper and "trickle.log" in wrapper
+    assert f'"{here / "aiguard-kit.cmd"}" "run" "--trickle" "--count" "6"' in wrapper
+    assert (here / "aiguard-kit.cmd").exists()
+    kit.ARGS[:] = ["schedule", "remove"]
+    kit.cmd_schedule()
+    assert not (kit.CFG_DIR / "trickle.cmd").exists()
+
+
+def test_output_survives_a_cp1252_console(tmp_path):
+    """Windows consoles and redirected output default to cp1252, which can't encode ✓ or ✗."""
+    import subprocess
+    import os
+    env_ = {**os.environ, "PYTHONIOENCODING": "cp1252", "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
+    code = ("import sys; sys.argv=['k','help']; import runpy; "
+            f"g = runpy.run_path({str(ROOT / 'aiguard_kit.py')!r}, run_name='kit'); g['ok']('done'); g['fail']('bad') "
+            "if 'fail' in g else print('\\u2717 bad')")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env_)
+    assert r.returncode == 0, r.stderr.decode(errors="replace")
+    assert "✓ done".encode() in r.stdout

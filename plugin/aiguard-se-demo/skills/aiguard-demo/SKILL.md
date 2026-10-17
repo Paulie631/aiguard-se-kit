@@ -16,7 +16,7 @@ Run the kit on the user's own computer, never in a cloud sandbox: keys live in t
 3. Check that `uv` exists (`command -v uv` or `~/.local/bin/uv`). If not, tell the user to run `brew install uv` (Mac) or the PowerShell installer in the kit README (Windows). Do not install it silently.
 4. If no shell on the user's computer is available, give the user the exact commands to run themselves.
 
-Use `./aiguard-kit` on Mac/Linux and `aiguard-kit.cmd` on Windows, from the kit folder.
+Use `./aiguard-kit` on Mac/Linux and `.\aiguard-kit.cmd` on Windows (PowerShell needs the leading `.\`), from the kit folder. On Windows, see `WINDOWS.md` in the kit for setup and fixes.
 
 ## Commands
 
