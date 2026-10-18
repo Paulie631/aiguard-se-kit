@@ -102,10 +102,12 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ./aiguard-kit status                     login, policy, keys, Detection API, kit updates
 ./aiguard-kit repair                     check this computer's setup in the tenant and fix anything missing
 ./aiguard-kit logs [--errors] [--follow]   recent activity; files in ~/.aiguard-se-kit/logs
+./aiguard-kit ready                      demo readiness: Monitor mode, keys, ZIA drift, dashboards, generator, AWS
 ./aiguard-kit teardown                   deletes every SE-Demo object and the local keys (--force: no prompt)
 ./aiguard-kit install | uninstall        desktop shortcut + `aiguard-kit` on PATH (what the double-click installers run)
 
 ./aiguard-kit zia setup|preflight|status|teardown|dashboards   ZIA demo policy (admin machine; see ZIA.md)
+./aiguard-kit zia status --fix                                 repair drift in the kit's own ZIA objects
 ./aiguard-kit zia check|traffic|schedule                       ZIA traffic generator (the generator VM, no keys)
 
 Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
@@ -118,6 +120,16 @@ Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 ## Internet Access (ZIA)
 
 The kit can also fill ZIA and Insights dashboards in the same demo tenant: `zia setup` creates `SE-Demo:` URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules **for one test user only**, and a separate Windows VM or cloud machine running Client Connector as that user sends real traffic (`zia traffic`, `zia schedule install`). The generator needs no API keys and uses only safe test data (EICAR, Google Safe Browsing test pages, generated fake card numbers and SSNs). Never run it on a corporate laptop. It ships as its own **Zscaler ZIA SE Demo Kit** release (`zscaler-zia-kit-*.zip`, tags `zia-v*`, pre-release) that installs beside this kit with a `zia-kit` command and its own update channel. Steps, what's created and what each check proves: [ZIA.md](ZIA.md). The console's **Internet Access (ZIA)** tab does the same.
+
+## Rolling back
+
+Every release stays on the GitHub Releases page, and nothing is lost by going back.
+
+- **One version back:** `aiguard-kit update --rollback`, or the rollback button in the console's update panel. Each update keeps the previous copy for this.
+- **Any older version:** download that release's zip from the Releases page, extract it, and run its installer. Installing an older release over a newer one is allowed; the newer copy is kept as the rollback copy, and your saved settings and keys stay.
+- **Tenant objects first.** Rolling back the kit doesn't change your tenant. If the newer version created objects the older one doesn't know about, remove them with the **newer** version before you go back: `aiguard-kit teardown` (AI Guard) or `zia teardown` (ZIA), then roll back, then run setup with the older version. Objects you made by hand are never touched.
+- **ZIA kit:** the same applies to `zia-kit`; its releases are tagged `zia-v*`. Skip `zia-v0.1.0`: its zip installs into the wrong folder.
+- **Maintainers:** `main` is tagged at every release (`v1.7.2` and so on), so the code can always be put back to a release with git.
 
 ## Adding tests
 

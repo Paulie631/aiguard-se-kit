@@ -565,6 +565,29 @@ def test_install_and_uninstall_mac_linux(env, monkeypatch, tmp_path, capsys):
     assert not app.with_name("app.previous").exists()
 
 
+def test_installing_an_older_release_over_a_newer_one(env, monkeypatch, tmp_path):
+    """Going back a version is just running the older release's installer: no version check blocks it, the newer
+    copy is kept for rollback, and settings written by the newer kit still load."""
+    import subprocess
+    kit, _ = env("install", "--yes")
+    home = tmp_path / "home"
+    app = home / ".aiguard-se-kit" / "app"
+    monkeypatch.setattr(kit, "HOME", home)
+    monkeypatch.setattr(kit, "BASE_DIR", home / ".aiguard-se-kit")
+    monkeypatch.setattr(kit, "APP_DIR", app)
+    monkeypatch.setattr(kit, "schedule_installed", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    app.mkdir(parents=True)
+    (app / "aiguard_kit.py").write_text('VERSION = "99.0.0"\n', encoding="utf-8")   # a newer kit is installed
+    cfg = kit.load_cfg()
+    cfg["future_setting"] = {"from": "a newer kit"}
+    kit.save_cfg(cfg)
+    kit.cmd_install()   # this (older) kit's installer
+    assert (app / "aiguard_kit.py").read_bytes() == (ROOT / "aiguard_kit.py").read_bytes()
+    assert 'VERSION = "99.0.0"' in (app.with_name("app.previous") / "aiguard_kit.py").read_text(encoding="utf-8")
+    assert kit.load_cfg()["future_setting"] == {"from": "a newer kit"}   # unknown settings are kept, not lost
+
+
 def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path):
     import subprocess
     kit, _ = env("install", "--yes")

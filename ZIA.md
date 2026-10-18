@@ -89,7 +89,10 @@ The rules are defined in `zia_policy_template.json`. Setup checks the template a
 ### Other admin commands
 
 ```
-./aiguard-kit zia status       the kit's ZIA objects and the last traffic round
+./aiguard-kit zia status       the kit's ZIA objects, the last traffic round, and drift: rules missing, disabled or out
+                               of order, Client Connector profiles not on Z-Tunnel 2.0, look-alike objects
+./aiguard-kit zia status --fix repairs drift in the kit's own objects (runs setup again); never touches yours
+./aiguard-kit zia ready        demo readiness, also on the generator: last round, dashboards, AWS schedule
 ./aiguard-kit zia dashboards   which Insights panels are still empty (7 days ending 2 days ago)
 ./aiguard-kit zia teardown     delete every SE-Demo ZIA object and activate
 ```
@@ -187,6 +190,12 @@ GenAI visits fill app usage. Prompt-level GenAI logs need signed-in test account
 - **ZIA logs** (Analytics > Web Insights / Firewall Insights): within minutes.
 - **Insights dashboards and `zia dashboards`:** Insights answers for 7- or 14-day windows that end a day or two ago, so new traffic shows after about two days.
 - **Shadow IT:** fills as rounds rotate through the SaaS list.
+
+**Before a demo:** start the generator at least **3 days** ahead so the Insights dashboards have data, and run `zia ready` (or **Demo readiness** in the console) the morning of.
+
+## Rolling back
+
+See [README > Rolling back](README.md#rolling-back). In short: run `zia teardown` with the version that created the objects, then install the older `zia-v*` release (skip `zia-v0.1.0`), then run `zia setup` again.
 
 ## Later phases
 
