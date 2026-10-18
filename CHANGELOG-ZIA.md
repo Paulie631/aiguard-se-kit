@@ -3,6 +3,11 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.1
+- Fixed: the ZIA kit's console hid the AI Guard **Policy** menu (Monitor, Block attacks, … and **Custom…**, where
+  you choose Detect or Block per detector) and the Insights link, even when AI Guard is set up on that computer.
+  They're hidden now only until AI Guard is set up.
+
 ## 0.2.0
 - **Drift check.** `zia status` compares the tenant with what setup made: rules missing, disabled or out of order,
   rules no longer scoped to the test user, Client Connector profiles not on Tunnel + Z-Tunnel 2.0 or behind another

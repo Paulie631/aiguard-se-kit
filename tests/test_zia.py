@@ -1260,3 +1260,10 @@ def test_each_edition_refuses_the_others_release_zip(zenv, monkeypatch, tmp_path
     ed.write_text(json.dumps({"product": "zia", "version": "0.1.0"}))
     kit.apply_edition(ed)
     assert kit.download_release(info).name == "zscaler-zia-kit"   # the ZIA kit takes a newer ZIA zip
+
+
+def test_zia_kit_console_keeps_the_ai_guard_policy_menu_once_ai_guard_is_set_up():
+    """The ZIA kit carries the full console; SEs who also demo AI Guard need the Policy menu (and Custom…)."""
+    html = (ROOT / "gui.html").read_text(encoding="utf-8")
+    line = next(l for l in html.splitlines() if "querySelector('.pol').style.display='none'" in l)
+    assert "if(!st.policy_id)" in line

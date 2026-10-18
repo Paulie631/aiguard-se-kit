@@ -579,7 +579,7 @@ async function init(){
   $("#presets .preset").click();
   drawCov();drawStories();drawPacks();loadPolicy();
   if(st.edition=="zia"){document.title=st.edition_name||document.title;$('#apptitle').textContent=st.app_name||"Zscaler ZIA Demo Console";
-    document.querySelector('.pol').style.display='none';$('#console').style.display='none';   // AI Guard-only controls
+    if(!st.policy_id){document.querySelector('.pol').style.display='none';$('#console').style.display='none'}   // AI Guard controls: hidden only until AI Guard is set up
     $('#tabs button[data-t="zia"]').click();}
   else if(!st.apps.length){$('#tabs button[data-t="setup"]').click();}
 }
