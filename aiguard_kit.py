@@ -921,6 +921,9 @@ def update_status(force=False):
     return st
 
 
+KIT_FOLDERS = ("aiguard-se-kit/", "zscaler-zia-kit/")   # the top folder of each edition's release zip
+
+
 def download_release(info, log=lambda level, msg: None):
     """Download and verify the release zip, extract it, and return the folder holding the new kit."""
     import hashlib
@@ -961,10 +964,13 @@ def download_release(info, log=lambda level, msg: None):
     with zipfile.ZipFile(zpath) as z:
         for n in z.namelist():
             p = Path(n)
-            if p.is_absolute() or ".." in p.parts or not n.startswith("aiguard-se-kit/"):
+            if p.is_absolute() or ".." in p.parts or not n.startswith(KIT_FOLDERS):
                 raise KitError(f"Unexpected file in the update: {n}")
         z.extractall(out)
-    kit = out / "aiguard-se-kit"
+    tops = {p.name for p in out.iterdir()}
+    if len(tops) != 1:
+        raise KitError("Unexpected layout in the update zip.")
+    kit = out / tops.pop()
     m = re.search(r'^VERSION = "([^"]+)"', (kit / "aiguard_kit.py").read_text(encoding="utf-8"), re.M)
     got = m and m.group(1)
     if (kit / "edition.json").exists():   # an edition (the ZIA kit) carries its own version

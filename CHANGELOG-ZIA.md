@@ -3,6 +3,13 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.1
+- The zip now unpacks to a **zscaler-zia-kit** folder, and the installer's messages name it.
+- Fixed: at the end of installing, the installer opened the console from the AI Guard kit's folder instead of
+  the ZIA kit's (`~/.aiguard-se-kit/app-zia`). On a machine with only the ZIA kit, that last step failed.
+- If you installed 0.1.0, install 0.1.1 from the zip once: 0.1.0's Update button can't read the new folder name.
+  From 0.1.1 on, updates install from the console.
+
 ## 0.1.0
 First preview. Fills ZIA and Insights dashboards in a demo tenant: an SE-Demo policy for one test user, plus a
 traffic generator that runs on a separate Windows machine.

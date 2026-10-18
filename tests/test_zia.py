@@ -956,15 +956,19 @@ def test_zia_kit_package_is_its_own_edition(tmp_path):
     assert info["sha256"] == hashlib.sha256(zpath.read_bytes()).hexdigest()
     z = zipfile.ZipFile(zpath)
     names = z.namelist()
-    assert all(n.startswith("aiguard-se-kit/") for n in names)        # the updater's expected folder name
-    ed = json.loads(z.read("aiguard-se-kit/edition.json"))
+    assert all(n.startswith("zscaler-zia-kit/") for n in names)       # it unpacks to a ZIA-named folder
+    ed = json.loads(z.read("zscaler-zia-kit/edition.json"))
     assert ed["product"] == "zia" and ed["app_dir"] == "app-zia" and ed["command"] == "zia-kit" and ed["version"] == v
     assert ed["update_url"].endswith("/releases/download/zia-latest/latest.json")
     for f in ("Install ZIA Kit.cmd", "Install ZIA Kit.command", "zia-kit", "zia-kit.cmd", "zia_module.py", "ZIA.md",
               "CHANGELOG-ZIA.md", "aiguard_kit.py"):
-        assert f"aiguard-se-kit/{f}" in names, f
+        assert f"zscaler-zia-kit/{f}" in names, f
     assert not any("plugin" in n for n in names)
-    assert b"Zscaler ZIA SE Demo Kit" in z.read("aiguard-se-kit/Install ZIA Kit.cmd")
+    for f in ("Install ZIA Kit.cmd", "Install ZIA Kit.command"):
+        text = z.read(f"zscaler-zia-kit/{f}").decode()
+        assert "Zscaler ZIA SE Demo Kit" in text and "zscaler-zia-kit folder" in text
+        assert "app-zia" in text and not re.search(r"aiguard-se-kit[\\/]app[\\/\s]", text)   # opens the ZIA console
+        assert "AI Guard" not in text
     assert (ROOT / "dist/zscaler-zia-kit.zip").read_bytes() == zpath.read_bytes()
     # the AI Guard release is unchanged: no edition file, its own installer names
     subprocess.run([sys.executable, str(ROOT / "tools/package.py")], check=True, capture_output=True)
@@ -1003,13 +1007,13 @@ def test_each_edition_refuses_the_others_release_zip(zenv, monkeypatch, tmp_path
     import requests
     kit, z, fake = zenv("update")
     stage = tmp_path / "zip"
-    (stage / "aiguard-se-kit").mkdir(parents=True)
-    (stage / "aiguard-se-kit" / "aiguard_kit.py").write_text('VERSION = "1.7.2"\n')
-    (stage / "aiguard-se-kit" / "edition.json").write_text(json.dumps({"product": "zia", "version": "0.2.0"}))
+    (stage / "zscaler-zia-kit").mkdir(parents=True)
+    (stage / "zscaler-zia-kit" / "aiguard_kit.py").write_text('VERSION = "1.7.2"\n')
+    (stage / "zscaler-zia-kit" / "edition.json").write_text(json.dumps({"product": "zia", "version": "0.2.0"}))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        for f in (stage / "aiguard-se-kit").iterdir():
-            zf.write(f, f"aiguard-se-kit/{f.name}")
+        for f in (stage / "zscaler-zia-kit").iterdir():
+            zf.write(f, f"zscaler-zia-kit/{f.name}")
     data = buf.getvalue()
     sha = hashlib.sha256(data).hexdigest()
 
@@ -1035,4 +1039,4 @@ def test_each_edition_refuses_the_others_release_zip(zenv, monkeypatch, tmp_path
     ed = tmp_path / "edition.json"
     ed.write_text(json.dumps({"product": "zia", "version": "0.1.0"}))
     kit.apply_edition(ed)
-    assert kit.download_release(info).name == "aiguard-se-kit"   # the ZIA kit takes a newer ZIA zip
+    assert kit.download_release(info).name == "zscaler-zia-kit"   # the ZIA kit takes a newer ZIA zip

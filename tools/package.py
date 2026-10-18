@@ -82,13 +82,21 @@ def zia_files(kit):
     for info in kit.infolist():
         data = kit.read(info.filename)
         name = info.filename
+        name = "zscaler-zia-kit/" + name.split("/", 1)[1]   # the zip unpacks to a zscaler-zia-kit folder
         if name.endswith(("Install AI Guard Kit.cmd", "Install AI Guard Kit.command")):
             name = name.replace("Install AI Guard Kit", "Install ZIA Kit")
-            data = data.replace(b"AI Guard SE Demo Kit", b"Zscaler ZIA SE Demo Kit")
-            data = data.replace(b"AI Guard Demo Console", b"Zscaler ZIA Demo Console")
-            data = data.replace(b'aiguard-kit" from any terminal', b'zia-kit" from any terminal')
+            for a, b in ((b"AI Guard SE Demo Kit", b"Zscaler ZIA SE Demo Kit"),
+                         (b"AI Guard Demo Console", b"Zscaler ZIA Demo Console"),
+                         (b"Install AI Guard Kit", b"Install ZIA Kit"),
+                         (b'aiguard-kit" from any terminal', b'zia-kit" from any terminal'),
+                         (b"aiguard-se-kit zip", b"zscaler-zia-kit zip"),
+                         (b"aiguard-se-kit folder", b"zscaler-zia-kit folder"),
+                         # the installed copy lives in app-zia, so open that console at the end, not the AI Guard one
+                         (b"\\.aiguard-se-kit\\app", b"\\.aiguard-se-kit\\app-zia"),
+                         (b"/.aiguard-se-kit/app", b"/.aiguard-se-kit/app-zia")):
+                data = data.replace(a, b)
         files[name] = (info, data)
-    pre = "aiguard-se-kit/"   # the updater expects this folder name in every release zip
+    pre = "zscaler-zia-kit/"
     for src, dst in (("aiguard-kit", "zia-kit"), ("aiguard-kit.cmd", "zia-kit.cmd")):
         info, data = files[pre + src]
         files[pre + dst] = (info, data)
