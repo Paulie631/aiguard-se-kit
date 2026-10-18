@@ -3,6 +3,17 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.3
+- Setup now turns on **SSL inspection for the test user** (`SE-Demo: Inspect test user`), so EICAR over HTTPS, DLP
+  and Cloud App Control show up. A `SE-Demo: AWS SSM bypass` rule above it never decrypts AWS Systems Manager
+  traffic, so inspection can't cut off the AWS traffic generator's remote desktop.
+- Setup now gives the test user's group its own **Client Connector Windows app profile** (`SE-Demo traffic
+  generator`): a copy of your default Windows profile that installs the Zscaler root certificate and uses
+  `SE-Demo Z-Tunnel 2.0`, a copy of its forwarding profile switched to Z-Tunnel 2.0, so firewall and DNS rules
+  apply. Your own profiles aren't changed. If the API client has no Client Connector access, setup says so and
+  the ZIA policy still applies. Teardown removes both profiles.
+- The console's header shows the ZIA kit's name, and AI Guard-only controls are hidden in the ZIA kit.
+
 ## 0.1.2
 - Generator check: a blocked HTTPS site now counts as **blocked** when ZIA answers with its block page on a
   Zscaler-signed certificate the machine doesn't trust. Before, it showed as `error:SSLError`.

@@ -43,7 +43,7 @@ class FakeZia:
             "network_services": [{"id": 8, "name": "HTTPS"}],
             "users": [{"id": 501, "name": "ztest", "email": "ztest@pyite.buzz"},
                       {"id": 502, "name": "SE Traffic", "email": "traffic.tester@pyite.buzz"}],
-            "ssl": [{"id": 9, "name": "Decrypt All Traffic", "state": "ENABLED", "action": {"type": "DECRYPT"}}],
+            "ssl": [{"id": 9, "name": "Decrypt All Traffic", "order": 1, "state": "ENABLED", "action": {"type": "DECRYPT"}}],
         }
         self.engines = [{"id": 61, "predefinedEngineName": "PCI"}, {"id": 17, "name": "PII (US) - Low Volume"},
                         {"id": 2, "name": "5 or more Credit Card Numbers"}, {"id": 19, "name": "Credentials and Secrets"},
@@ -63,8 +63,17 @@ class FakeZia:
         self.passwords = {}
         self.auth = {"orgAuthType": "SAFECHANNEL_DIR", "samlEnabled": False, "passwordStrength": "NONE"}  # as in the demo tenant
         self.zid_allowed = True
+        self.zcc_allowed = True
+        self.fwd = [{"id": 71, "name": "Default", "forwardingProfileActions": [
+            {"networkType": 1, "actionType": 1, "enablePacketTunnel": 0, "primaryTransport": 1},
+            {"networkType": 2, "actionType": 1, "enablePacketTunnel": 0}]}]
+        self.web = [{"id": 81, "name": "Default", "ruleOrder": 1, "groupAll": 1, "active": 1,
+                     "deviceType": "DEVICE_TYPE_WINDOWS", "forwardingProfileId": 71, "pacUrl": "https://pac.example",
+                     "windowsPolicy": {"installSslCerts": 0, "cacheSystemProxy": 0}, "groups": []}]
 
     def _rules(self, resource, rule_type=None):
+        if resource == "ssl_inspection_rules":
+            return self.db["ssl"]
         if resource == "cloudappcontrol":
             return self.db["cac"].setdefault(rule_type, [])
         return self.db[resource]
@@ -102,8 +111,8 @@ class FakeZia:
             return copy.deepcopy(self.engines)
         if resource == "cloud_browser_isolation":
             return copy.deepcopy(self.cbi)
-        if resource == "ssl_inspection_rules":
-            return copy.deepcopy(self.db["ssl"])
+        if resource.startswith("zcc."):
+            return self._zcc(resource, method, a, kw)
         if resource == "file_type_control_rule" and method == "list_file_type_categories":
             if self.file_types is None:
                 raise sys.modules[type(self).kit_module].KitError("file_type_control_rule.list failed: 404")
@@ -164,6 +173,28 @@ class FakeZia:
             return copy.deepcopy(objs[i])
         if method == "delete_rule":
             objs[:] = [o for o in objs if o["id"] != args[0]]
+            return None
+        raise AssertionError(f"unexpected call {resource}.{method}")
+
+    def _zcc(self, resource, method, a, kw):
+        err = sys.modules[type(self).kit_module].KitError
+        if not self.zcc_allowed:
+            raise err(f"{resource}.{method} failed: 401 Unauthorized")
+        objs = self.fwd if resource == "zcc.forwarding_profile" else self.web
+        if method == "list_by_company":
+            return copy.deepcopy(objs)
+        if method in ("update_forwarding_profile", "web_policy_edit"):
+            assert "groups" not in kw and "users" not in kw, "read-only arrays echoed back"
+            o = copy.deepcopy(kw)
+            if o.get("id"):
+                i = next(i for i, x in enumerate(objs) if x["id"] == o["id"])
+                objs[i] = o
+            else:
+                o["id"] = next(self.ids)
+                objs.append(o)
+            return {"success": "true"} if resource == "zcc.web_policy" else copy.deepcopy(o)
+        if method in ("delete_forwarding_profile", "delete_web_policy"):
+            objs[:] = [x for x in objs if x["id"] != a[0]]
             return None
         raise AssertionError(f"unexpected call {resource}.{method}")
 
@@ -229,7 +260,7 @@ class FakeZia:
 
     def all_rules(self):
         out = [r for k in ("url_filtering", "file_type_control_rule", "dlp_web_rules", "cloud_firewall_rules",
-                           "cloud_firewall_dns") for r in self.db[k]]
+                           "cloud_firewall_dns", "ssl") for r in self.db[k]]
         return out + [r for v in self.db["cac"].values() for r in v]
 
 
@@ -310,6 +341,52 @@ def test_setup_creates_scoped_rules_activates_and_is_idempotent(zenv):
     assert fake.activations == 2
     # the tenant's own rules are untouched
     assert {"URL Filtering Rule-1", "DLP PCI Rule-1", "AI_ML_App_Rule_1"} <= {r["name"] for r in fake.all_rules()}
+
+
+def test_setup_adds_ssl_inspection_with_an_aws_bypass_above_it(zenv):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    ssl = sorted(fake.db["ssl"], key=lambda r: r["order"])
+    names = [r["name"] for r in ssl]
+    assert names.index("SE-Demo: AWS SSM bypass") < names.index("SE-Demo: Inspect test user") < names.index("Decrypt All Traffic")
+    inspect = next(r for r in ssl if r["name"] == "SE-Demo: Inspect test user")
+    bypass = next(r for r in ssl if r["name"] == "SE-Demo: AWS SSM bypass")
+    user = next(u for u in fake.db["users"] if u["email"] == "se-demo-traffic@pyite.buzz")
+    assert inspect["users"] == [user["id"]] and bypass["users"] == [user["id"]]
+    assert inspect["action"]["type"] == "DECRYPT" and bypass["action"]["type"] == "DO_NOT_DECRYPT"
+    aws = next(c for c in fake.db["url_categories"] if c["configuredName"] == "SE-Demo - AWS management")
+    assert bypass["urlCategories"] == [aws["id"]] and ".ssmmessages.us-west-2.amazonaws.com" in aws["urls"]
+    kit.cmd_zia()   # again: same rules, same order
+    assert [r["name"] for r in sorted(fake.db["ssl"], key=lambda r: r["order"])] == names
+
+
+def test_setup_gives_the_test_group_a_client_connector_profile(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    grp = next(x for x in fake.db["zia_groups"] if x["name"] == "SE-Demo: traffic generator")
+    fwd = next(f for f in fake.fwd if f["name"] == "SE-Demo Z-Tunnel 2.0")
+    assert all(a["enablePacketTunnel"] == 1 for a in fwd["forwardingProfileActions"])
+    app = next(p for p in fake.web if p["name"] == "SE-Demo traffic generator")
+    assert app["groupIds"] == [grp["id"]] and app["groupAll"] == 0 and app["forwardingProfileId"] == fwd["id"]
+    assert app["windowsPolicy"]["installSslCerts"] == 1 and app["pacUrl"] == "https://pac.example"   # copied
+    default = next(p for p in fake.web if p["name"] == "Default")   # yours: untouched
+    assert default["forwardingProfileId"] == 71 and default["windowsPolicy"]["installSslCerts"] == 0
+    assert fake.fwd[0]["forwardingProfileActions"][0]["enablePacketTunnel"] == 0
+    kit.cmd_zia()   # again: updated in place
+    assert len(fake.fwd) == 2 and len(fake.web) == 2
+    kit.ARGS[:] = ["zia", "teardown", "--force"]
+    kit.FORCE = True
+    kit.cmd_zia()
+    assert [f["name"] for f in fake.fwd] == ["Default"] and [p["name"] for p in fake.web] == ["Default"]
+
+
+def test_client_connector_api_refused_still_applies_the_zia_policy(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    fake.zcc_allowed = False
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    assert "Client Connector profiles skipped" in out and "Z-Tunnel 2.0" in out
+    assert "SE-Demo: Block gambling" in mine(fake) and fake.activations == 1
 
 
 def test_setup_creates_a_zia_test_user_with_a_password(zenv, capsys):

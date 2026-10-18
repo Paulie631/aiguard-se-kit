@@ -2464,7 +2464,8 @@ def cmd_gui():
                                         "competitor": c.get("competitor", "Palo Alto"), "profile": PROFILE,
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE),
                                         "edition": (EDITION or {}).get("product"),
-                                        "edition_name": (EDITION or {}).get("name")})
+                                        "edition_name": (EDITION or {}).get("name"),
+                                        "app_name": (EDITION or {}).get("app_name")})
             if path == "/api/update":
                 return self._send(200, update_status(force="force=1" in self.path))
             if path == "/api/health":

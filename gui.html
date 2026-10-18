@@ -173,7 +173,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 </head>
 <body>
 <header>
-  <h1>AI Guard Test Console</h1>
+  <h1 id="apptitle">AI Guard Test Console</h1>
   <span class="meta" id="tenant">connecting…</span>
   <button class="upd" id="upd" title="Check for kit updates">Updates</button>
   <span class="sp"></span>
@@ -566,7 +566,9 @@ async function init(){
   seg("ldir");
   $("#presets .preset").click();
   drawCov();drawStories();drawPacks();loadPolicy();
-  if(st.edition=="zia"){document.title=st.edition_name||document.title;$('#tabs button[data-t="zia"]').click();}
+  if(st.edition=="zia"){document.title=st.edition_name||document.title;$('#apptitle').textContent=st.app_name||"Zscaler ZIA Demo Console";
+    document.querySelector('.pol').style.display='none';$('#console').style.display='none';   // AI Guard-only controls
+    $('#tabs button[data-t="zia"]').click();}
   else if(!st.apps.length){$('#tabs button[data-t="setup"]').click();}
 }
 function refreshRunner(){

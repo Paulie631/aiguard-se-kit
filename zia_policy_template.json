@@ -6,6 +6,22 @@
     "description": "Blocked only for the kit's test user. If the generator sees this blocked, it is in the demo tenant.",
     "urls": ["www.example.com", "example.com"]
   },
+  "aws_mgmt": {
+    "name": "AWS management",
+    "description": "AWS Systems Manager endpoints the traffic generator's remote desktop (Fleet Manager) depends on. Never decrypted, so inspecting the test user doesn't cut off remote access.",
+    "urls": [".ssm.us-east-1.amazonaws.com", ".ssmmessages.us-east-1.amazonaws.com", ".ec2messages.us-east-1.amazonaws.com", ".ssm.us-east-2.amazonaws.com", ".ssmmessages.us-east-2.amazonaws.com", ".ec2messages.us-east-2.amazonaws.com", ".ssm.us-west-1.amazonaws.com", ".ssmmessages.us-west-1.amazonaws.com", ".ec2messages.us-west-1.amazonaws.com", ".ssm.us-west-2.amazonaws.com", ".ssmmessages.us-west-2.amazonaws.com", ".ec2messages.us-west-2.amazonaws.com"]
+  },
+  "ssl_inspection": [
+    {"name": "Inspect test user", "action": "DECRYPT",
+     "why": "EICAR over HTTPS, DLP and Cloud App Control only work on decrypted traffic."},
+    {"name": "AWS SSM bypass", "action": "DO_NOT_DECRYPT", "url_categories": ["@aws_mgmt"],
+     "why": "Created after 'Inspect test user' and placed above it."}
+  ],
+  "client_connector": {
+    "app_profile": "SE-Demo traffic generator",
+    "forwarding_profile": "SE-Demo Z-Tunnel 2.0",
+    "why": "A Windows app profile for the kit's test-user group only: a copy of the tenant's default Windows profile that installs the Zscaler root certificate and uses a copy of its forwarding profile switched to Z-Tunnel 2.0, so firewall and DNS rules apply."
+  },
   "url_filtering": [
     {"name": "Block tenant check", "action": "BLOCK", "url_categories": ["@tenant_check"]},
     {"name": "Block gambling", "action": "BLOCK", "url_categories": ["GAMBLING"]},

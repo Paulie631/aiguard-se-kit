@@ -98,12 +98,10 @@ The rules are defined in `zia_policy_template.json`. Setup checks the template a
 
 1. **Machine.** Use a Windows 10/11 or Windows Server 2022 VM, either a lab VM or a cloud instance. Remote desktop is enough. If it's in a cloud account whose traffic already goes through a Cloud Connector into another tenant, put it on a subnet that bypasses that connector.
 2. **Client Connector.** Install it and enroll in the demo tenant as the test user.
-3. **Z-Tunnel 2.0.** Firewall, DNS and unusual-port traffic only reach ZIA through Z-Tunnel 2.0. Z-Tunnel 1.0 carries web traffic only. In the Client Connector portal:
-   1. Under Forwarding Profile, copy your profile as `SE-Demo: Z-Tunnel 2.0`, with Tunnel version set to **Z-Tunnel 2.0** for on-trusted and off-trusted networks.
-   2. Add a Windows app profile `SE-Demo: …` that uses that forwarding profile, assigned only to the group `SE-Demo: traffic generator` (setup creates it), or to the test user.
-   
-   This leaves your other devices as they are.
-4. **SSL inspection.** It must decrypt the test user's traffic, which `zia preflight` checks. EICAR over HTTPS, DLP and Cloud App Control need it.
+3. **Z-Tunnel 2.0 and the Zscaler certificate.** Setup does this for you (kit 0.1.3 and later). It creates the Windows app profile `SE-Demo traffic generator` for the group `SE-Demo: traffic generator` only. The profile is a copy of your default Windows profile that installs the Zscaler root certificate and uses the forwarding profile `SE-Demo Z-Tunnel 2.0`, a copy of yours switched to Z-Tunnel 2.0. Firewall, DNS and unusual-port traffic only reach ZIA through Z-Tunnel 2.0. After setup, on this machine open Client Connector > More > **Update Policy**. Your other devices keep their profiles.
+
+   If setup reports that it couldn't (the API client has no Client Connector access, or you picked your own test user instead of letting setup create one), do it by hand in the Client Connector portal: copy your forwarding profile with the ZIA action set to Tunnel, **Z-Tunnel 2.0**, then add a Windows app profile for the test user's group with **Install Zscaler SSL Certificate** on and that forwarding profile.
+4. **SSL inspection.** Setup adds `SE-Demo: Inspect test user` (decrypt, test user only) and, above it, `SE-Demo: AWS SSM bypass` (never decrypt AWS Systems Manager traffic, so the AWS generator's remote desktop keeps working). EICAR over HTTPS, DLP and Cloud App Control need inspection.
 5. **The kit.** Install it with the double-click installer (no setup or keys needed on this machine), then:
    ```
    aiguard-kit zia check                       is this machine reaching the demo tenant, as the test user?
@@ -154,12 +152,12 @@ The simplest generator is a Windows instance in an AWS account you can use for d
 |---|---|---|
 | Client Connector running | Process list | Install, enroll and sign in |
 | Traffic goes through Zscaler | ip.zscaler.com, and the cloud name | Turn on Internet Security |
-| SSL inspection | Certificate issuer for wikipedia.org is Zscaler | Add a DECRYPT rule for the test user |
+| SSL inspection | Certificate issuer for wikipedia.org is Zscaler | Run `zia setup` again (it adds the inspection rule) |
 | **Demo tenant, as the test user** | `www.example.com` is blocked: only the kit's rule does that, and only for this user | Wrong tenant or user, or changes not activated |
 | URL filtering | Gambling is blocked | Run `zia setup` |
 | Malware protection | The EICAR test string over HTTP and HTTPS is blocked | HTTPS needs SSL inspection |
 | DLP | A post of fake card numbers is blocked | SSL inspection and DLP rules |
-| Z-Tunnel 2.0 | TCP 2222 to portquiz.net is reset by the demo firewall rule | Use the Z-Tunnel 2.0 profile (step 3) |
+| Z-Tunnel 2.0 | TCP 2222 to portquiz.net is reset by the demo firewall rule | Client Connector > Update Policy, after `zia setup` (step 3) |
 
 ### What one round sends
 

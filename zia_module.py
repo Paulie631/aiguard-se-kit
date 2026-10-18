@@ -16,10 +16,10 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.1.2"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.1.3"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
-RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns")
+RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
 CONSOLE = "https://console.zscaler.com"
 
 
@@ -97,9 +97,11 @@ class ZiaTenant:
         self.c = ZscalerClient(conf)
 
     def call(self, resource, method, *a, **kw):
-        """resource is a ZIA SDK area ('url_filtering'), an Insights one ('zins.web_traffic') or ZIdentity ('zid.users')."""
+        """resource is a ZIA SDK area ('url_filtering'), Insights ('zins.web_traffic'), ZIdentity ('zid.users') or
+        Client Connector ('zcc.web_policy')."""
         insights = resource.startswith("zins.")
-        svc = self.c.zins if insights else self.c.zid if resource.startswith("zid.") else self.c.zia
+        svc = (self.c.zins if insights else self.c.zid if resource.startswith("zid.")
+               else self.c.zcc if resource.startswith("zcc.") else self.c.zia)
         api = getattr(svc, resource.split(".", 1)[-1])
         K.vlog(f"zia {resource}.{method} {a} {json.dumps(kw, default=str)[:300] if kw else ''}")
         out = getattr(api, method)(*a, **kw)
@@ -129,9 +131,9 @@ def items(body):
 
 LISTS = {"url_filtering": ("url_filtering", "list_rules"), "file_type_control": ("file_type_control_rule", "list_rules"),
          "dlp": ("dlp_web_rules", "list_rules"), "firewall": ("cloud_firewall_rules", "list_rules"),
-         "dns": ("cloud_firewall_dns", "list_rules")}
+         "dns": ("cloud_firewall_dns", "list_rules"), "ssl": ("ssl_inspection_rules", "list_rules")}
 API = {"url_filtering": "url_filtering", "file_type_control": "file_type_control_rule", "dlp": "dlp_web_rules",
-       "firewall": "cloud_firewall_rules", "dns": "cloud_firewall_dns"}
+       "firewall": "cloud_firewall_rules", "dns": "cloud_firewall_dns", "ssl": "ssl_inspection_rules"}
 
 
 def list_rules(t, kind, rule_type=None):
@@ -578,7 +580,29 @@ def plan(t, cfg, facts=None):
         out.append(("dns", None, zname(r["name"]),
                     dict(scope, action=r["action"], res_categories=r["res_categories"],
                          description="SE demo kit: DNS control demo (needs Z-Tunnel 2.0)")))
+    for r in tpl.get("ssl_inspection", []):   # order matters: each new rule goes on top, so the bypass ends up above
+        body = dict(scope, action=SSL_ACTIONS[r["action"]],
+                    description="SE demo kit: " + ("decrypts the test user's HTTPS" if r["action"] == "DECRYPT"
+                                                   else "never decrypt AWS management traffic (remote desktop)"))
+        if r.get("url_categories"):
+            body["url_categories"] = r["url_categories"]
+        out.append(("ssl", None, zname(r["name"]), body))
     return out, notes
+
+
+SSL_ACTIONS = {
+    "DECRYPT": {"type": "DECRYPT",
+                "decrypt_sub_actions": {"server_certificates": "ALLOW", "ocsp_check": True,
+                                        "block_ssl_traffic_with_no_sni_enabled": False,
+                                        "min_client_tls_version": "CLIENT_TLS_1_0",
+                                        "min_server_tls_version": "SERVER_TLS_1_0",
+                                        "block_undecrypt": False}},
+    "DO_NOT_DECRYPT": {"type": "DO_NOT_DECRYPT",
+                       "do_not_decrypt_sub_actions": {"bypass_other_policies": False, "server_certificates": "ALLOW",
+                                                      "ocsp_check": True,
+                                                      "block_ssl_traffic_with_no_sni_enabled": False,
+                                                      "min_tls_version": "SERVER_TLS_1_0"}},
+}
 
 
 def _resolve_refs(body, refs):
@@ -601,8 +625,8 @@ def ensure_label(t, log):
     return g(lab, "id")
 
 
-def ensure_tenant_category(t, log):
-    tc = template()["tenant_check"]
+def ensure_tenant_category(t, log, key="tenant_check"):
+    tc = template()[key]
     name = zname(tc["name"])
     cats = items(t.call("url_categories", "list_categories", query_params={"custom_only": True}))
     hit = next((c for c in cats if g(c, "configured_name") in names_for(name)), None)
@@ -612,7 +636,8 @@ def ensure_tenant_category(t, log):
                         g(hit, "configured_name"), "configured_name")
         return g(hit, "id")
     c = t.call("url_categories", "add_url_category", configured_name=safe_name(name), **body)   # no ':' allowed
-    log("ok", f"Created URL category '{g(c, 'configured_name') or name}' ({', '.join(tc['urls'])})")
+    shown = ", ".join(tc["urls"][:3]) + (f" and {len(tc['urls']) - 3} more" if len(tc["urls"]) > 3 else "")
+    log("ok", f"Created URL category '{g(c, 'configured_name') or name}' ({shown})")
     return g(c, "id")
 
 
@@ -659,6 +684,8 @@ def setup_apply(t, cfg, log, facts=None):
                          "(the user signed in to Client Connector on the traffic generator).")
     log("head", "Shared objects")
     refs = {"@tenant_check": ensure_tenant_category(t, log), "@demo_ports": ensure_network_service(t, log)}
+    if template().get("aws_mgmt"):
+        refs["@aws_mgmt"] = ensure_tenant_category(t, log, "aws_mgmt")
     label = ensure_label(t, log)
     rules, notes = plan(t, cfg, facts)
     for n in notes:
@@ -691,12 +718,119 @@ def setup_apply(t, cfg, log, facts=None):
         except Exception as e:
             failed.append(name)
             log("warn", f"'{name}' not created: {str(e)[:200]}. Fix: {zhint(e)}")
+    log("head", "Client Connector (test user's group only)")
+    zcc = setup_zcc(t, cfg, log)
     log("head", "Activate")
     activate(t, log)
     z["state"] = {"set_up": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rules": made, "failed": failed,
-                  "tenant_check_category": refs["@tenant_check"]}
+                  "tenant_check_category": refs["@tenant_check"], "client_connector": zcc}
     K.save_cfg(cfg)
-    return {"rules": made, "failed": failed, "notes": notes}
+    return {"rules": made, "failed": failed, "notes": notes, "client_connector": zcc}
+
+
+# ---------------------------------------------------------------- Client Connector
+ZCC_MANUAL = ("In the Client Connector portal: copy your Windows forwarding profile, set its ZIA action to Tunnel with "
+              "Z-Tunnel 2.0, then add a Windows app profile for the test user's group with 'Install Zscaler SSL "
+              "Certificate' on and that forwarding profile (ZIA.md, step 2).")
+ZCC_DROP = {"id", "groups", "users", "deviceGroups", "groupNames", "userNames", "deviceGroupNames", "policyToken",
+            "createdBy", "editedBy", "lastModification", "lastModifiedBy", "lastModifiedTime"}
+
+
+def _zcc_list(t, resource, **q):
+    return items(t.call(resource, "list_by_company", query_params=q or None))
+
+
+def zcc_names():
+    c = template().get("client_connector") or {}
+    return c.get("app_profile"), c.get("forwarding_profile")
+
+
+def zcc_group_id(cfg):
+    made = zcfg(cfg).get("created_user") or {}
+    return made.get("zia_group_id")
+
+
+def setup_zcc(t, cfg, log):
+    """A Windows app profile for the kit's test-user group: a copy of the default Windows profile that installs the
+    Zscaler root certificate and uses a Z-Tunnel 2.0 copy of its forwarding profile. Other users are untouched.
+    Best effort: anything ZCC's API refuses is reported with the manual steps, and the ZIA policy still applies."""
+    app_name, fwd_name = zcc_names()
+    if not app_name:
+        return None
+    gid = zcc_group_id(cfg)
+    if not gid:
+        log("warn", "Client Connector profiles skipped: the test user wasn't created by the kit, so there's no kit "
+                    "group to scope them to. " + ZCC_MANUAL)
+        return None
+    try:
+        policies = _zcc_list(t, "zcc.web_policy", device_type="windows")
+        fwds = _zcc_list(t, "zcc.forwarding_profile")
+    except Exception as e:
+        log("warn", f"Client Connector profiles skipped: couldn't read them ({str(e)[:140]}). Give the API client "
+                    "Client Connector access, or do it by hand. " + ZCC_MANUAL)
+        return None
+    mine_app = next((p for p in policies if g(p, "name") == app_name), None)
+    base = next((p for p in sorted(policies, key=lambda p: -int(g(p, "ruleOrder") or 0))
+                 if g(p, "name") != app_name and int(g(p, "groupAll") or 0) == 1), None) or \
+        next((p for p in policies if g(p, "name") != app_name), None)
+    if not base and not mine_app:
+        log("warn", "Client Connector profiles skipped: no Windows app profile to copy. " + ZCC_MANUAL)
+        return None
+    try:
+        src_fwd_id = g(base or mine_app, "forwardingProfileId")
+        src_fwd = next((f for f in fwds if str(g(f, "id")) == str(src_fwd_id)), None) or \
+            next((f for f in fwds if g(f, "name") != fwd_name), None)
+        hit_fwd = next((f for f in fwds if g(f, "name") == fwd_name), None)
+        fwd = {k: v for k, v in dict(hit_fwd or src_fwd or {}).items() if k not in ZCC_DROP}
+        acts = [dict(a) for a in fwd.get("forwardingProfileActions") or []]
+        tunnel = [a for a in acts if int(a.get("actionType") or 0) == 1]   # 1 = Tunnel
+        for a in tunnel or acts:
+            a["enablePacketTunnel"] = 1                                     # Z-Tunnel 2.0
+        fwd.update(name=fwd_name, forwardingProfileActions=acts)
+        if hit_fwd:
+            fwd["id"] = g(hit_fwd, "id")
+        res = t.call("zcc.forwarding_profile", "update_forwarding_profile", **fwd)
+        fwd_id = g(res, "id") if isinstance(res, dict) and g(res, "id") else g(hit_fwd, "id")
+        if not fwd_id:
+            fwd_id = next((g(f, "id") for f in _zcc_list(t, "zcc.forwarding_profile") if g(f, "name") == fwd_name), None)
+        log("ok", f"{'Updated' if hit_fwd else 'Created'} forwarding profile '{fwd_name}' (Z-Tunnel 2.0)")
+    except Exception as e:
+        log("warn", f"Forwarding profile '{fwd_name}' not created: {str(e)[:180]}. " + ZCC_MANUAL)
+        return None
+    try:
+        app = {k: v for k, v in dict(mine_app or base).items() if k not in ZCC_DROP}
+        win = dict(app.get("windowsPolicy") or {})
+        win["installSslCerts"] = 1
+        app.update(name=app_name, description="SE demo kit: the traffic generator's test user only", active=1,
+                   groupAll=0, groupIds=[int(gid)], userIds=[], forwardingProfileId=fwd_id, windowsPolicy=win,
+                   deviceType=app.get("deviceType") or "DEVICE_TYPE_WINDOWS")
+        if mine_app:
+            app["id"] = g(mine_app, "id")
+        else:
+            app["ruleOrder"] = 1
+        t.call("zcc.web_policy", "web_policy_edit", **app)
+        log("ok", f"{'Updated' if mine_app else 'Created'} Windows app profile '{app_name}' (installs the Zscaler "
+                  "root certificate, uses Z-Tunnel 2.0). On the traffic generator, open Client Connector > More > "
+                  "Update Policy, or sign out and back in.")
+        return {"app_profile": app_name, "forwarding_profile": fwd_name}
+    except Exception as e:
+        log("warn", f"App profile '{app_name}' not created: {str(e)[:180]}. " + ZCC_MANUAL)
+        return {"forwarding_profile": fwd_name}
+
+
+def zcc_objects(t):
+    app_name, fwd_name = zcc_names()
+    found = []
+    if not app_name:
+        return found
+    try:
+        found += [("zcc_app_profile", None, p) for p in _zcc_list(t, "zcc.web_policy", device_type="windows")
+                  if g(p, "name") == app_name]
+        found += [("zcc_forwarding_profile", None, f) for f in _zcc_list(t, "zcc.forwarding_profile")
+                  if g(f, "name") == fwd_name]
+    except Exception as e:
+        K.vlog(f"list zcc: {e}")
+    return found
 
 
 def activate(t, log):
@@ -710,7 +844,7 @@ def activate(t, log):
 # ---------------------------------------------------------------- teardown
 def kit_objects(t, cfg=None):
     tpl = template()
-    found = []
+    found = zcc_objects(t)
     for kind in RULE_KINDS:
         types_ = sorted({r["rule_type"] for r in tpl["cloud_app_control"]}) if kind == "cloud_app_control" else [None]
         for rt in types_:
@@ -757,7 +891,9 @@ def teardown(t, cfg, log, confirm=True):
                     "label": ("rule_labels", "delete_label"),
                     "zidentity_user": ("zid.users", "delete_user"), "zidentity_group": ("zid.groups", "delete_group"),
                     "zia_user": ("user_management", "delete_user"), "zia_group": ("user_management", "delete_group"),
-                    "zia_department": ("user_management", "delete_department")}
+                    "zia_department": ("user_management", "delete_department"),
+                    "zcc_app_profile": ("zcc.web_policy", "delete_web_policy"),
+                    "zcc_forwarding_profile": ("zcc.forwarding_profile", "delete_forwarding_profile")}
         for kind, rt, o in objs:   # rules first, then the objects they reference
             label = g(o, "name") or g(o, "configured_name")
             try:
@@ -968,8 +1104,8 @@ def choose_users(t, cfg):
 def cmd_setup():
     cfg = K.load_cfg()
     K.head(f"ZIA demo policy - setup (kit {K.VERSION})")
-    print("  Creates SE-Demo URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules for one")
-    print("  test user, then activates. Demo/eval tenants only. Teardown: ./aiguard-kit zia teardown")
+    print("  Creates SE-Demo URL filtering, Cloud App Control, File Type Control, DLP, firewall, DNS and SSL inspection")
+    print("  rules for one test user, plus a Client Connector profile for its group, then activates. Demo/eval tenants only. Teardown: ./aiguard-kit zia teardown")
     K.head("Step 1 of 4 · Preflight (no changes yet)")
     probe = K.yesno("Also test create permission with a temporary rule label?", True)
     PROGRESS["on"] = True
@@ -992,8 +1128,13 @@ def cmd_setup():
         print(f"  • {kind.replace('_', ' '):18} {name}  ({what})")
     for n in notes:
         K.warn(n)
-    print(f"  • plus: URL category '{safe_name(zname(template()['tenant_check']['name']))}', network service "
+    print(f"  • plus: URL categories '{safe_name(zname(template()['tenant_check']['name']))}' and "
+          f"'{safe_name(zname(template()['aws_mgmt']['name']))}', network service "
           f"'{zname(template()['network_service']['name'])}', rule label '{label_name()}'")
+    app_name, fwd_name = zcc_names()
+    if app_name:
+        print(f"  • Client Connector: Windows app profile '{app_name}' and forwarding profile '{fwd_name}' "
+              "(test user's group only)")
     if not K.yesno("Create or update these and activate?", True):
         print("  Cancelled. Nothing was changed.")
         return
