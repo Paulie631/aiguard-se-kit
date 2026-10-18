@@ -3,6 +3,11 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.6
+- Setup reads the Client Connector profiles back after saving them and prints what ZCC stored: Z-Tunnel 2.0 per
+  network type, and the app profile's order, groups, forwarding profile and certificate setting.
+- The runbook walks through installing Client Connector by hand on the AWS generator.
+
 ## 0.1.5
 - AWS template: the instance can install Client Connector from **your own S3 bucket**. Give
   `zia-kit aws --zcc-url s3://bucket/key` (or paste `s3://bucket/key` into the console's installer field). The stack

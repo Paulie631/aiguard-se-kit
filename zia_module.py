@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.1.5"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.1.6"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -819,12 +819,42 @@ def setup_zcc(t, cfg, log):
             app["ruleOrder"] = 1
         t.call("zcc.web_policy", "web_policy_edit", **app)
         log("ok", f"{'Updated' if mine_app else 'Created'} Windows app profile '{app_name}' (installs the Zscaler "
-                  "root certificate, uses Z-Tunnel 2.0). On the traffic generator, open Client Connector > More > "
-                  "Update Policy, or sign out and back in.")
+                  "root certificate, uses Z-Tunnel 2.0). On the traffic generator, open Client Connector, turn "
+                  "Internet Security off and on (or log out and back in) so the new tunnel is used.")
+        zcc_verify(t, log, app_name, fwd_name, gid)
         return {"app_profile": app_name, "forwarding_profile": fwd_name}
     except Exception as e:
         log("warn", f"App profile '{app_name}' not created: {str(e)[:180]}. " + ZCC_MANUAL)
         return {"forwarding_profile": fwd_name}
+
+
+def zcc_verify(t, log, app_name, fwd_name, gid):
+    """Reads both profiles back, so what ZCC actually stored is visible (its API can accept fields it ignores)."""
+    try:
+        f = next((x for x in _zcc_list(t, "zcc.forwarding_profile") if g(x, "name") == fwd_name), None)
+        pols = _zcc_list(t, "zcc.web_policy", device_type="windows")
+        a = next((x for x in pols if g(x, "name") == app_name), None)
+    except Exception as e:
+        log("warn", f"Couldn't read the Client Connector profiles back: {str(e)[:140]}")
+        return
+    acts = (f or {}).get("forwardingProfileActions") or []
+    z2 = [x for x in acts if int(x.get("enablePacketTunnel") or 0) == 1]
+    log("ok" if f and z2 else "warn",
+        f"Forwarding profile '{fwd_name}': " + ("not found" if not f else
+        f"Z-Tunnel 2.0 on {len(z2)} of {len(acts)} network types "
+        f"({', '.join(str(x.get('networkType')) + ':' + str(x.get('actionType')) + '/' + str(x.get('enablePacketTunnel')) for x in acts)})"))
+    if not a:
+        log("warn", f"App profile '{app_name}': not found after saving")
+        return
+    groups = [g(x, "id") for x in (a.get("groups") or [])] or a.get("groupIds") or []
+    ahead = [g(x, "name") for x in pols if int(g(x, "ruleOrder") or 0) < int(g(a, "ruleOrder") or 0)
+             and int(g(x, "active") or 0) == 1]
+    ok_ = str(g(a, "forwardingProfileId")) == str(g(f or {}, "id")) and int(gid) in [int(x) for x in groups if x]
+    log("ok" if ok_ and not ahead else "warn",
+        f"App profile '{app_name}': order {g(a, 'ruleOrder')}, active {g(a, 'active')}, groups {groups}, forwarding "
+        f"profile {g(a, 'forwardingProfileId')}, install certificate "
+        f"{(a.get('windowsPolicy') or {}).get('installSslCerts')}"
+        + (f"; profiles ahead of it: {', '.join(map(str, ahead))}" if ahead else ""))
 
 
 def zcc_objects(t):
