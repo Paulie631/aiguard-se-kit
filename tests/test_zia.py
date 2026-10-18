@@ -985,7 +985,12 @@ def test_edition_file_gives_the_zia_kit_its_own_install_and_updates(zenv, tmp_pa
     kit.apply_edition(ed)
     assert kit.VERSION == "0.1.0" and kit.APP_DIR.name == "app-zia" and kit.APP_NAME == "Zscaler ZIA Demo Console"
     assert kit.UPDATE_URL.endswith("/zia-latest/latest.json") and kit.kit_name() == "Zscaler ZIA SE Demo Kit"
-    assert kit.shortcut_paths()["wrapper"].name == "zia-kit" or kit.WINDOWS
+    sp = kit.shortcut_paths()
+    if kit.WINDOWS:
+        assert sp["start_uninstall"].name == "Uninstall Zscaler ZIA Demo Kit.lnk"
+        assert sp["desktop"].name == "Zscaler ZIA Demo Console.lnk"
+    else:
+        assert sp["wrapper"].name == "zia-kit" and sp["desktop"].name == "Zscaler ZIA Demo Console.command"
     called = []
     kit.cmd_zia = lambda: called.append(list(kit.ARGS))
     kit.cmds_seen = None
