@@ -1016,6 +1016,20 @@ def test_aws_template_is_consistent_and_has_no_secrets(aws):
     assert "\r\n" not in ud   # CloudFormation JSON carries plain newlines; the script writes CRLF itself
 
 
+def test_aws_template_can_read_the_installer_from_your_own_s3_bucket(aws):
+    tpl = aws.build(cloud="zscalertwo", domain="pyite.buzz", test_user="t@pyite.buzz", zcc_s3="my-bucket/zcc/ZCC-x64.msi")
+    assert tpl["Parameters"]["ZccS3Object"]["Default"] == "my-bucket/zcc/ZCC-x64.msi"
+    pol = tpl["Resources"]["ZccInstallerRead"]
+    assert pol["Condition"] == "ReadZccFromS3"
+    stmt = pol["Properties"]["PolicyDocument"]["Statement"][0]
+    assert stmt["Action"] == "s3:GetObject" and stmt["Resource"]["Fn::Sub"].endswith(":s3:::${ZccS3Object}")
+    ud = tpl["Resources"]["Generator"]["Properties"]["UserData"]["Fn::Base64"]["Fn::Sub"]
+    assert "Read-S3Object" in ud and "${ZccS3Object}" in ud
+    import re as _re
+    pat = tpl["Parameters"]["ZccS3Object"]["AllowedPattern"]
+    assert _re.match(pat, "") and _re.match(pat, "my-bucket/zcc/ZCC-x64.msi") and not _re.match(pat, "my-bucket/readme.txt")
+
+
 def test_zia_aws_command_writes_a_template_for_this_tenant(zenv, tmp_path):
     out = tmp_path / "gen.json"
     kit, z, fake = zenv("zia", "aws", "--out", str(out), "--zcc-url", "https://bucket.s3.amazonaws.com/zcc.msi")

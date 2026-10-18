@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.1.4"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.1.5"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -1237,8 +1237,11 @@ def aws_settings(t, cfg, zcc_url=""):
     user = ((z.get("users") or [{}])[0].get("email")) or (z.get("created_user") or {}).get("email")
     if not user:
         raise K.KitError("Run ./aiguard-kit zia setup first: the template needs the test user.")
+    zcc_url, zcc_s3 = (zcc_url or "").strip(), ""
+    if zcc_url.lower().startswith("s3://"):   # your own bucket: s3://bucket/key
+        zcc_url, zcc_s3 = "", zcc_url[5:]
     return {"cloud": cloud_name(t) or cfg.get("cloud") or "zscalertwo", "domain": user.split("@", 1)[1],
-            "test_user": user, "zcc_url": zcc_url or ""}
+            "test_user": user, "zcc_url": zcc_url, "zcc_s3": zcc_s3}
 
 
 def cmd_aws():
@@ -1250,7 +1253,8 @@ def cmd_aws():
     aws_module().write(out, **st)
     K.ok(f"Wrote {out}")
     K.info(f"Test user {st['test_user']} · cloud {st['cloud']} · domain {st['domain']}"
-           + ("" if st["zcc_url"] else " · no Client Connector URL: install it by hand on the instance"))
+           + (f" · Client Connector from s3://{st['zcc_s3']}" if st["zcc_s3"] else "" if st["zcc_url"]
+              else " · no Client Connector installer: install it by hand on the instance"))
     print("  Next: AWS console > CloudFormation > Create stack > With new resources > Upload a template file,")
     print("        choose that file, review the parameters, tick the IAM acknowledgement, Submit. See ZIA.md (AWS).")
 

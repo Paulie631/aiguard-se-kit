@@ -3,6 +3,11 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.5
+- AWS template: the instance can install Client Connector from **your own S3 bucket**. Give
+  `zia-kit aws --zcc-url s3://bucket/key` (or paste `s3://bucket/key` into the console's installer field). The stack
+  lets the instance read only that object, so there's no presigned link to expire.
+
 ## 0.1.4
 - Fixed: setup created the demo rules of each kind in reverse order, so `SE-Demo: Monitor PII and PCI` (allow) sat
   above `SE-Demo: Block card numbers` and DLP never blocked. Setup now keeps each kind in the template's order and

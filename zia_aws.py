@@ -31,13 +31,20 @@ Start-Transcript -Path "$root\setup.log" -Append
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 "SE-Demo ZIA traffic generator: first-boot setup for test user ${TestUser}"
 
-# 1. Zscaler Client Connector (optional: without a URL, install it by hand)
+# 1. Zscaler Client Connector (optional: without an installer, install it by hand)
 $zcc = "${ZccInstallerUrl}"
-if ($zcc) {
+$s3o = "${ZccS3Object}"
+if ($zcc -or $s3o) {
   $ext = "msi"
-  if ($zcc -match "\.exe(\?|$)") { $ext = "exe" }
+  if (($zcc + $s3o) -match "\.exe(\?|$)") { $ext = "exe" }
   $f = "$root\zcc-installer.$ext"
-  Invoke-WebRequest -Uri $zcc -OutFile $f -UseBasicParsing
+  if ($s3o) {
+    # Your own bucket: the instance role may read only this one object, so there's no link to expire or leak.
+    $b, $k = $s3o.Split("/", 2)
+    Read-S3Object -BucketName $b -Key $k -File $f -Region "${AWS::Region}" | Out-Null
+  } else {
+    Invoke-WebRequest -Uri $zcc -OutFile $f -UseBasicParsing
+  }
   if ($ext -eq "msi") {
     Start-Process msiexec.exe -Wait -ArgumentList "/i `"$f`" /quiet /norestart CLOUDNAME=${ZccCloudName} USERDOMAIN=${ZccUserDomain}"
   } else {
@@ -101,7 +108,7 @@ def param(type_, default, desc, **kw):
 
 
 def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@example.com", kit_zip=KIT_ZIP,
-          zcc_url="", every=30, per_type=4, schedule=True):
+          zcc_url="", zcc_s3="", every=30, per_type=4, schedule=True):
     tags = [{"Key": "Name", "Value": NAME}, {"Key": "se-demo", "Value": "zia-traffic-generator"}]
     params = {
         "TestUser": param("String", test_user, "The ZIA test user (from aiguard-kit zia setup). Sign in to Client "
@@ -110,6 +117,11 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
         "ZccUserDomain": param("String", domain, "Your tenant's user domain."),
         "ZccInstallerUrl": param("String", zcc_url, "Optional HTTPS URL of the Client Connector Windows installer "
                                                     "(.msi or .exe), e.g. an S3 presigned URL. Empty: install it by hand."),
+        "ZccS3Object": param("String", zcc_s3, "Optional, instead of a URL: the Client Connector installer in your own S3 "
+                                               "bucket, as bucket/key (for example my-bucket/Zscaler-windows-x64.msi), "
+                                               "in this region. The instance may read only that object.",
+                             AllowedPattern=r"^$|^[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]/.+\.(msi|exe)$",
+                             ConstraintDescription="bucket/key of an .msi or .exe, or empty"),
         "KitZipUrl": param("String", kit_zip, "Where the instance downloads the kit (a GitHub zip)."),
         "TrafficEveryMinutes": param("Number", every, "Minutes between traffic rounds.", MinValue=15, MaxValue=1440),
         "RequestsPerType": param("Number", per_type, "Requests per traffic type per round.", MinValue=1, MaxValue=20),
@@ -131,6 +143,7 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
         "CreateVpc": {"Fn::Equals": [{"Ref": "NetworkMode"}, "CreateVpc"]},
         "CreateRole": {"Fn::Equals": [{"Ref": "ExistingInstanceProfile"}, ""]},
         "HasKey": {"Fn::Not": [{"Fn::Equals": [{"Ref": "KeyPairName"}, ""]}]},
+        "ReadZccFromS3": {"Fn::And": [{"Fn::Not": [{"Fn::Equals": [{"Ref": "ZccS3Object"}, ""]}]}, {"Condition": "CreateRole"}]},
         "Schedule": {"Fn::And": [{"Fn::Equals": [{"Ref": "WeekdaySchedule"}, "true"]}, {"Condition": "CreateRole"}]},
     }
     res = {
@@ -160,6 +173,11 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
                         {"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]},
                         "ManagedPolicyArns": [{"Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"}],
                         "Tags": tags}},
+        "ZccInstallerRead": {"Type": "AWS::IAM::RolePolicy", "Condition": "ReadZccFromS3",
+                             "Properties": {"RoleName": {"Ref": "SsmRole"}, "PolicyName": "read-client-connector-installer",
+                                            "PolicyDocument": {"Version": "2012-10-17", "Statement": [{
+                                                "Effect": "Allow", "Action": "s3:GetObject",
+                                                "Resource": {"Fn::Sub": "arn:${AWS::Partition}:s3:::${ZccS3Object}"}}]}}},
         "SsmProfile": {"Type": "AWS::IAM::InstanceProfile", "Condition": "CreateRole",
                        "Properties": {"Roles": [{"Ref": "SsmRole"}]}},
         "Generator": {"Type": "AWS::EC2::Instance", "DependsOn": [],
@@ -213,7 +231,7 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
     return {"AWSTemplateFormatVersion": "2010-09-09",
             "Description": f"{NAME} for {test_user} (aiguard-kit zia aws). Delete the stack to remove everything.",
             "Metadata": {"AWS::CloudFormation::Interface": {"ParameterGroups": [
-                {"Label": {"default": "Zscaler"}, "Parameters": ["TestUser", "ZccCloudName", "ZccUserDomain", "ZccInstallerUrl"]},
+                {"Label": {"default": "Zscaler"}, "Parameters": ["TestUser", "ZccCloudName", "ZccUserDomain", "ZccS3Object", "ZccInstallerUrl"]},
                 {"Label": {"default": "Traffic"}, "Parameters": ["TrafficEveryMinutes", "RequestsPerType", "KitZipUrl"]},
                 {"Label": {"default": "AWS"}, "Parameters": ["InstanceType", "WeekdaySchedule", "NetworkMode", "ExistingVpcId",
                                                               "ExistingSubnetId", "ExistingInstanceProfile", "KeyPairName", "WindowsAmi"]}]}},

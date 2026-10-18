@@ -28,7 +28,7 @@ Internet Access (ZIA), see ZIA.md:
   ./aiguard-kit zia preflight  read-only ZIA checks (--write-probe, --json)
   ./aiguard-kit zia status     list the kit's ZIA objects;  zia teardown removes them and activates
   ./aiguard-kit zia password   show the test user's sign-in for Client Connector (this computer only)
-  ./aiguard-kit zia aws        write a CloudFormation template for a generator instance on AWS (--zcc-url URL)
+  ./aiguard-kit zia aws        write a CloudFormation template for a generator instance on AWS (--zcc-url s3://bucket/key or URL)
   ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
   ./aiguard-kit zia check      on the traffic generator machine: is traffic reaching the demo tenant? (no keys needed)
   ./aiguard-kit zia traffic    on the generator: one round of demo traffic (--types web,saas,genai,threats,dlp,files,dns,ports
