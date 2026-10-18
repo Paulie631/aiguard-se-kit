@@ -2514,6 +2514,7 @@ def cmd_gui():
                                         "competitor": c.get("competitor", "Palo Alto"), "profile": PROFILE,
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE),
                                         "edition": (EDITION or {}).get("product"),
+                                        "zia_set_up": bool((c.get("zia") or {}).get("users")),
                                         "edition_name": (EDITION or {}).get("name"),
                                         "app_name": (EDITION or {}).get("app_name")})
             if path == "/api/update":

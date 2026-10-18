@@ -111,10 +111,13 @@ def test_library_is_consistent():
     assert len(ids) == len(set(ids))
     assert all(t["group"] in lib["groups"] for t in lib["tests"])
     assert all(t["direction"] in ("IN", "OUT") for t in lib["tests"])
-    assert all(s["test"] in ids for st in lib["stories"] for s in st["steps"])
-    assert all(s.get("proxy_test", s["test"]) in ids for st in lib["stories"] for s in st["steps"])
-    by_id = {t["id"]: t for t in lib["tests"]}
-    assert all(by_id[s["proxy_test"]]["direction"] == "IN" for st in lib["stories"] for s in st["steps"] if s.get("proxy_test"))
+    pack_tests = [t for p in (ROOT / "packs").glob("*.json") for t in json.loads(p.read_text(encoding="utf-8"))["tests"]]
+    known = set(ids) | {t["id"] for t in pack_tests}   # storylines may use the industry packs' prompts
+    run_steps = [s for st in lib["stories"] for s in st["steps"] if s.get("kind") != "show"]   # show: no prompt
+    assert all(s["test"] in known for s in run_steps)
+    assert all(s.get("proxy_test", s["test"]) in known for s in run_steps)
+    by_id = {t["id"]: t for t in lib["tests"] + pack_tests}
+    assert all(by_id[s["proxy_test"]]["direction"] == "IN" for s in run_steps if s.get("proxy_test"))
     for p in (ROOT / "packs").glob("*.json"):
         pack = json.loads(p.read_text(encoding="utf-8"))
         assert pack["name"] and pack["tests"]
@@ -159,6 +162,32 @@ def test_demo_readiness_wants_monitor_and_keys(env, capsys):
     assert not any(c["id"].startswith("ready-zia") for c in by.values())   # no ZIA set up: no ZIA items
     kit.cmd_ready()
     assert "to sort out first" in capsys.readouterr().out
+
+
+def test_storylines_talk_tracks_news_and_owasp_are_well_formed():
+    lib = json.loads((ROOT / "tests.json").read_text(encoding="utf-8"))
+    owasp = {f"LLM{n:02d}" for n in range(1, 11)}
+    story_ids = [st["id"] for st in lib["stories"]]
+    assert len(story_ids) == len(set(story_ids))
+    assert {"core", "leakage", "blocking"} <= set(story_ids)            # the original three are still there
+    for st in lib["stories"]:
+        assert st["steps"] and st.get("requires") in (None, "zia")
+        changes = [s["policy"] for s in st["steps"] if s.get("policy")]
+        if any(p != "monitor" for p in changes):
+            assert changes[-1] == "monitor", f"{st['id']} must end back in Monitor"
+        for s in st["steps"]:
+            assert s["title"] and (s.get("say") or s.get("talk")), s["title"]
+            assert set(s.get("owasp", [])) <= owasp, s["title"]
+            for o in s.get("objections", []):
+                assert o["q"].endswith("?") and o["a"]
+            for n in s.get("news", []):
+                assert n["url"].startswith("https://") and n["headline"] and n["source"] and n["year"].isdigit()
+            if s.get("kind") == "show":
+                assert s.get("where") and not s.get("policy")
+            if s.get("filler"):
+                assert s.get("policy"), f"'{s['title']}': a filler line only shows while a policy change applies"
+    core = next(st for st in lib["stories"] if st["id"] == "core")
+    assert [s["title"] for s in core["steps"]][0] == "Everyday work flows through" and len(core["steps"]) == 8
 
 
 def test_policy_profiles_and_custom(env):

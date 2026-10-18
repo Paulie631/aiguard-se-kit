@@ -125,6 +125,15 @@ pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--mono);margin:
 .stage .kicker{font:600 12px var(--mono);color:var(--muted);letter-spacing:.04em}
 .stage h3{font-size:26px;margin:6px 0 14px;letter-spacing:-.02em}
 .talk{font-size:16px;line-height:1.55;border-left:3px solid var(--accent);padding:4px 0 4px 14px;margin:0 0 18px;color:var(--ink)}
+.showline{font-size:13.5px;color:var(--muted);margin:-8px 0 16px 17px}.showline b{color:var(--ink)}
+.news{display:flex;gap:10px;align-items:flex-start;background:var(--soft);border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px}
+.news .tag{font:600 10.5px var(--mono);letter-spacing:.06em;color:var(--muted);flex:0 0 auto;padding-top:2px}
+.news a{color:var(--ink);font-weight:600;text-decoration:none}.news a:hover{text-decoration:underline}.news .src{color:var(--muted)}
+.owasp{display:inline-block;font:600 10.5px var(--mono);padding:2px 7px;border-radius:99px;background:var(--chip);color:var(--chip-ink);margin-left:6px;vertical-align:2px;cursor:help}
+.notes{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:13.5px;line-height:1.5}
+.notes h4{margin:10px 0 4px;font:600 11px var(--mono);letter-spacing:.05em;color:var(--muted)}.notes h4:first-child{margin-top:0}
+.notes ul{margin:0;padding-left:18px}.notes li{margin:3px 0}
+.recap table{width:100%;border-collapse:collapse;font-size:13px}.recap td,.recap th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
 .prompt{background:var(--soft);border-radius:10px;padding:14px 16px;font:13.5px/1.55 var(--mono);white-space:pre-wrap;word-break:break-word}
 .verdict{margin-top:18px;padding:18px;border-radius:12px;border:1px solid var(--line);display:none}
 .verdict .big{font:700 22px var(--mono);padding:4px 12px;border-radius:8px;display:inline-block}
@@ -342,6 +351,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
       <label class="chk" title="Also runs a Detection API scan so detector tags show. Logs a second event per step."><input type="checkbox" id="dtags" checked>Detector tags</label>
       <button id="readybtn" title="Policy in Monitor, keys, ZIA drift, dashboards, generator, AWS schedule">Demo readiness</button>
       <label class="chk"><input type="checkbox" id="showtalk" checked>Show talk track</label>
+      <label class="chk" title="So what, discovery question, objections, and a line for the policy wait"><input type="checkbox" id="shownotes">Presenter notes</label>
       <span class="muted" style="font-size:12px"><span class="kbd">←</span> <span class="kbd">→</span> steps · <span class="kbd">Enter</span> run</span>
     </div>
   </div>
@@ -439,7 +449,7 @@ $$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.cla
 /* ---------- state ---------- */
 async function loadState(){
   const st=await api("/api/state");
-  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;
+  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;S.ziaSetUp=!!st.zia_set_up;
   $("#tenant").textContent=`${st.tenant||"not set up"}${st.profile!="default"?" · profile "+st.profile:""} · kit ${st.version}`;
   $("#console").href=st.console;
   if(st.update_behind){const u=$("#upd");u.classList.add("new");u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
@@ -757,7 +767,7 @@ function drawStories(){
   demoControls();
   const st=S.lib.stories||[];
   $("#stories").innerHTML=st.map(s=>`<button data-s="${esc(s.id)}">${esc(s.name)}</button>`).join("");
-  $$("#stories button").forEach(b=>b.onclick=()=>{S.story=st.find(x=>x.id==b.dataset.s);S.step=0;S.done=new Set();$$("#stories button").forEach(x=>x.classList.toggle("preset",true));$$("#stories button").forEach(x=>x.classList.toggle("on",x===b));drawStage()});
+  $$("#stories button").forEach(b=>b.onclick=()=>{S.story=st.find(x=>x.id==b.dataset.s);S.step=0;S.done=new Set();S.ran={};$$("#stories button").forEach(x=>x.classList.toggle("preset",true));$$("#stories button").forEach(x=>x.classList.toggle("on",x===b));drawStage()});
   if(st.length)$("#stories button").click();
 }
 function drawStage(){
@@ -765,22 +775,54 @@ function drawStage(){
   const steps=S.story.steps;
   $("#steps").innerHTML=steps.map((s,i)=>`<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${s.policy?`<span class="polchip ${normPol(s.policy)=="monitor"?"detect":"block"}">${PLABEL[normPol(s.policy)]}</span>`:""}</span></li>`).join("");
   $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()});
-  const s=steps[S.step], t=stepTest(s)||{text:"(test not found: "+s.test+")",direction:"IN"};
-  const viaProxy=demoProxy()&&t.direction=="IN";
-  $("#stage").innerHTML=`<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${PLABEL[normPol(s.policy)].toUpperCase()}`:""}</div>
-    <h3>${esc(s.title)}</h3>
-    ${$("#showtalk").checked?`<p class="talk">${esc(s.talk)}</p>`:""}
+  const s=steps[S.step], show=s.kind=="show", t=show?null:(stepTest(s)||{text:"(test not found: "+s.test+")",direction:"IN"});
+  const viaProxy=!show&&demoProxy()&&t.direction=="IN", last=S.step==steps.length-1;
+  const owasp=(s.owasp||[]).map(o=>`<span class="owasp" title="OWASP Top 10 for LLM Applications 2025: ${esc(OWASP[o]||o)}">${esc(o)}</span>`).join("");
+  const needs=S.story.requires=="zia"&&!S.ziaSetUp?`<div class="notice" style="display:block;margin-bottom:14px">This storyline uses the ZIA demo. Set it up first: <code>zia setup</code> on this machine and a traffic generator running for a few days (Internet Access tab, ZIA.md).</div>`:"";
+  $("#stage").innerHTML=`${S.step==0?needs:""}<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${PLABEL[normPol(s.policy)].toUpperCase()}`:""}${show?" · SHOW IN THE CONSOLE":""}</div>
+    <h3>${esc(s.title)}${owasp}</h3>
+    ${newsHTML(s)}${talkHTML(s)}${notesHTML(s)}
+    ${show?`<div class="prompt" style="font-family:inherit">${esc(s.where||"")}</div>`:`
     <div class="lbl" style="margin-bottom:6px">${t.direction=="OUT"?"Model response being checked":"Prompt"}<span class="muted"> · ${viaProxy?`sent to ${esc(demoAppLabel())} through the AI Guard proxy`:t.direction=="OUT"?"sample reply scanned by the Detection API":"scanned by the Detection API (no model call)"}</span></div>
-    <div class="prompt">${esc(clean(t.text))}</div>
+    <div class="prompt">${esc(clean(t.text))}</div>`}
     <div class="row" style="margin-top:18px;gap:10px">
       <button id="sback" ${S.step==0?"disabled":""}>‹ Back</button>
-      <button class="primary" id="srun">Run step</button>
-      <button id="snext" ${S.step==steps.length-1?"disabled":""}>Next ›</button>
-      ${S.step==steps.length-1?`<a href="${esc(S.console)}" target="_blank">Show it in Insights ↗</a>`:""}
+      ${show?`${s.link?`<button class="primary" id="slink">${esc(s.link_label||"Open the console")} ↗</button>`:""}<button id="srun">Mark as shown</button>`:`<button class="primary" id="srun">Run step</button>`}
+      <button id="snext" ${last?"disabled":""}>Next ›</button>
+      ${last?`<button id="srecap">Recap</button><a href="${esc(S.console)}" target="_blank">Show it in Insights ↗</a>`:""}
     </div>
     <div class="verdict" id="sverdict"></div>`;
-  $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=runStep;
+  if(last)$("#srecap").onclick=drawRecap;
+  if(show&&s.link)$("#slink").onclick=()=>window.open(s.link,"_blank","noopener");
+  $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=show?markShown:runStep;
 }
+const OWASP={LLM01:"Prompt Injection",LLM02:"Sensitive Information Disclosure",LLM03:"Supply Chain",LLM04:"Data and Model Poisoning",
+  LLM05:"Improper Output Handling",LLM06:"Excessive Agency",LLM07:"System Prompt Leakage",LLM08:"Vector and Embedding Weaknesses",
+  LLM09:"Misinformation",LLM10:"Unbounded Consumption"};
+function newsHTML(s){return (s.news||[]).map(n=>`<div class="news"><span class="tag">IN THE NEWS</span><div><a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.headline)}</a> <span class="src">· ${esc(n.source)}${n.year?", "+esc(n.year):""}</span></div></div>`).join("")}
+function talkHTML(s){
+  if(!$("#showtalk").checked)return"";
+  if(!s.say)return `<p class="talk">${esc(s.talk||"")}</p>`;   // older steps: one paragraph, shown as before
+  return `<p class="talk">${esc(s.say)}</p>${s.show?`<div class="showline"><b>Show:</b> ${esc(s.show)}</div>`:""}`}
+function notesHTML(s){
+  if(!$("#shownotes").checked||!(s.sowhat||s.ask||s.objections||s.filler))return"";
+  return `<div class="notes">${s.sowhat?`<h4>SO WHAT</h4><div>${esc(s.sowhat)}</div>`:""}${s.ask?`<h4>ASK</h4><div>${esc(s.ask)}</div>`:""}${(s.objections||[]).length?`<h4>IF THEY ASK</h4><ul>${s.objections.map(o=>`<li><b>${esc(o.q)}</b> ${esc(o.a)}</li>`).join("")}</ul>`:""}${s.filler&&s.policy?`<h4>WHILE THE POLICY APPLIES (30 s)</h4><div>${esc(s.filler)}</div>`:""}</div>`}
+function stepDone(i,entry){S.ran=S.ran||{};S.ran[i]=entry;S.done.add(i);const li=$$("#steps li")[i];if(li){li.classList.add("done");li.querySelector(".num").textContent="✓"}}
+function markShown(){const s=S.story.steps[S.step];stepDone(S.step,{title:s.title,verdict:"SHOWN",dets:[],owasp:s.owasp||[]});
+  const v=$("#sverdict");v.style.display="block";v.innerHTML='<span class="muted">Marked as shown.</span>'}
+function recapText(){const st=S.story, ran=S.ran||{}, rows=st.steps.map((s,i)=>[s,ran[i]]).filter(x=>x[1]);
+  const ow=[...new Set(rows.flatMap(([s,r])=>r.owasp))].sort(), blocks=rows.filter(([,r])=>r.verdict=="BLOCK").length;
+  const dets=[...new Set(rows.flatMap(([,r])=>r.dets))];
+  return {rows,ow,blocks,dets,text:`What we covered: ${st.name}\n\n`+rows.map(([s,r])=>`- ${s.title}: ${r.verdict}${r.dets.length?" ("+r.dets.join(", ")+")":""}`).join("\n")+
+    (ow.length?`\n\nOWASP Top 10 for LLM Applications covered: ${ow.map(o=>o+" "+(OWASP[o]||"")).join("; ")}`:"")+
+    `\n\nEvery step is logged in AI Guard Insights with the user, the detectors that fired and the action taken.`}}
+function drawRecap(){const r=recapText(), v=$("#sverdict");v.style.display="block";
+  if(!r.rows.length){v.innerHTML='<span class="muted">Run some steps first; the recap lists what each one caught.</span>';return}
+  v.innerHTML=`<div class="recap"><div class="lbl" style="margin-bottom:8px">Recap · ${r.rows.length} steps, ${r.blocks} blocked${r.ow.length?` · you just saw ${r.ow.length} of the OWASP Top 10 for LLM Applications`:""}</div>
+    <table><tr><th>Step</th><th>Result</th><th>Detectors</th></tr>${r.rows.map(([s,x])=>`<tr><td>${esc(s.title)}</td><td>${esc(x.verdict)}</td><td>${x.dets.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</td></tr>`).join("")}</table>
+    ${r.ow.length?`<div style="margin-top:10px">${r.ow.map(o=>`<span class="owasp" style="margin:0 6px 0 0">${esc(o)} ${esc(OWASP[o]||"")}</span>`).join("")}</div>`:""}
+    <div class="row" style="margin-top:12px;gap:10px"><button id="recapcopy">Copy for the follow-up email</button><span class="muted" style="font-size:12px" id="recapok"></span></div></div>`;
+  $("#recapcopy").onclick=async()=>{try{await navigator.clipboard.writeText(r.text);$("#recapok").textContent="Copied."}catch(e){$("#recapok").textContent="Couldn't copy: select the table instead."}}}
 async function runStep(){
   const s=S.story.steps[S.step], t=S.lib.tests.find(x=>x.id==s.test), v=$("#sverdict");
   if(!t)return;
@@ -819,11 +861,11 @@ async function runStep(){
       scanOne({text:p.reply,direction:"OUT",app:proxyApp,user,mode:"detect"}).then(o=>{const el=$("#sresp");if(!el)return;
         el.innerHTML=o.status=="OK"?`<span class="lbl">Response check:</span> ${o.action=="BLOCK"?'<span class="badge BLOCK">BLOCK</span> ':""}${chips(o,false)||'<span class="muted">no detectors triggered</span>'}`:`<span class="muted">${esc(o.error)}</span>`}).catch(()=>{});
     }
-    S.done.add(S.step);$$("#steps li")[S.step].classList.add("done");$$("#steps li")[S.step].querySelector(".num").textContent="✓";
+    stepDone(S.step,{title:s.title,verdict:big,dets:(d&&d.status=="OK"?d.detectors:[])||[],owasp:s.owasp||[]});
   }catch(e){v.innerHTML=esc(e.message)}
   $("#srun").disabled=false;
 }
-$("#showtalk").onchange=drawStage;
+$("#showtalk").onchange=drawStage;$("#shownotes").onchange=drawStage;
 function blockMsg(raw){   // "HTTP 403: {...json...}" -> the message inside, else the raw text
   const m=String(raw||"").match(/^HTTP (\d+):\s*([\s\S]*)$/);if(!m)return raw||"Blocked by policy.";
   try{const j=JSON.parse(m[2]);const msg=j.error?.message||j.message||j.error||j.detail;if(msg)return `${typeof msg=="string"?msg:JSON.stringify(msg)} (HTTP ${m[1]})`}catch(e){}
@@ -843,7 +885,7 @@ document.addEventListener("keydown",e=>{
   if(!$("#v-demo").classList.contains("on")||!S.story||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;
   if(e.key=="ArrowRight"&&S.step<S.story.steps.length-1){S.step++;drawStage()}
   else if(e.key=="ArrowLeft"&&S.step>0){S.step--;drawStage()}
-  else if(e.key=="Enter"&&!$("#srun").disabled)runStep();
+  else if(e.key=="Enter"&&!$("#srun").disabled)$("#srun").click();
 });
 
 /* ---------- packs ---------- */
