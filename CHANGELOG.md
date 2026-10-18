@@ -1,16 +1,27 @@
 # Changelog
 
-## Unreleased
-- Guided demo: each step can carry a **Say** line, what to **Show**, **presenter notes** (so what, a discovery
-  question, objection answers, a line for the policy wait), sourced **In the news** cards and **OWASP Top 10 for LLM
-  Applications (2025)** tags. Older steps with one talk paragraph show as before. **Recap** on the last step lists what
-  each step caught, with a copy button for the follow-up email.
-- New storylines: Healthcare, Financial services, Legal, and *AI security end to end* (ZIA + AI Guard). The original
-  three keep their order and steps; their talk tracks gained the new fields.
-- `aiguard-kit ready` and **Demo readiness** in the console: policy in Monitor, app keys, and the ZIA checks when the
-  ZIA demo is set up.
-- README: **Rolling back**. Installing an older release over a newer one is tested.
-- ZIA demo (separate `zia-v*` pre-releases, see CHANGELOG-ZIA.md): drift check with `zia status --fix`.
+## 1.8.0
+- **Internet Access (ZIA) demo.** A new console tab and `aiguard-kit zia` commands fill ZIA and Insights dashboards
+  in the same demo tenant: `zia setup` creates `SE-Demo` rules for one test user only (URL filtering, Cloud App Control,
+  File Type Control, DLP, firewall, DNS, SSL inspection) and a Client Connector profile for its group, and creates the
+  test user with a generated password. A separate Windows machine running Client Connector as that user sends safe test
+  traffic (`zia traffic`, `zia schedule install`); **Download CloudFormation template** builds one on AWS. Never run the
+  generator on a corporate laptop. Runbook: ZIA.md.
+- **Drift check.** `zia status` (and **Check for drift** in the console) compares the tenant with what setup made:
+  missing, disabled or out-of-order rules, Client Connector profiles not on Z-Tunnel 2.0, and look-alike objects
+  (reported, never touched). `zia status --fix` repairs the kit's own objects.
+- **Demo readiness.** `aiguard-kit ready` and **Demo readiness** in the console: AI Guard policy in Monitor, app keys,
+  and the ZIA checks when the ZIA demo is set up (drift, dashboards, the generator's last round, the AWS schedule).
+  Start ZIA traffic at least 3 days before a demo: Insights trails by about two days.
+- **Guided demo refresh.** Each step can carry a **Say** line, what to **Show**, **presenter notes** (so what, a
+  discovery question, objection answers, a line for the policy wait), sourced **In the news** cards and **OWASP Top 10
+  for LLM Applications (2025)** tags. Older steps with one talk paragraph show as before. **Recap** on the last step
+  lists what each step caught, with a copy button for the follow-up email.
+- **New storylines:** Healthcare, Financial services, Legal, and *AI security end to end* (ZIA + AI Guard). The
+  original three keep their order and steps; their talk tracks gained the new fields.
+- **Rolling back** is documented in the README, and installing an older release over a newer one is tested.
+- The separate **Zscaler ZIA SE Demo Kit** (`zia-v*` pre-releases) continues on its own update channel; see
+  CHANGELOG-ZIA.md.
 
 ## 1.7.2
 - **Setup health check and Repair.** When the console opens (and after setup or an update) it checks, read-only, that
