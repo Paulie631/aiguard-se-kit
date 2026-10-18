@@ -134,8 +134,9 @@ The simplest generator is a Windows instance in an AWS account you can use for d
    Rounds only send traffic once ip.zscaler.com confirms it goes through Zscaler, so nothing is sent before you sign in.
 3. **Sign in once.**
    1. After about 10 minutes, open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Sign in with your AWS single sign-on if offered, or with the Administrator password if you set `KeyPairName`.
-   2. Install Client Connector if step 1 didn't.
-   3. Sign in to Client Connector as the test user. `./aiguard-kit zia password` on your admin machine shows the password.
+   2. **Install Client Connector** (the usual way; skip it if step 1 gave an installer). On the instance, open Edge, sign in to your **demo tenant's** admin console, and download the latest Windows 64-bit .msi from the Client Connector App Store (in the Client Connector admin area; the menu name varies by console version). Never use an installer from your corporate tenant. Run it with the defaults.
+   3. **Sign in to Client Connector** as the test user (for example `se-demo-traffic@<your domain>`). The domain sends it to your tenant; then the sign-in page asks for the password, which `./aiguard-kit zia password` shows on your admin machine.
+   4. **Pick up the kit's profile.** Client Connector > **More > Update Policy**. That applies the `SE-Demo traffic generator` app profile from `zia setup` (Zscaler root certificate and Z-Tunnel 2.0). If the remote desktop window drops, reconnect after a minute.
 4. **Check it.** On the instance's desktop, open **SE-Demo ZIA console > Internet Access (ZIA) > Check this machine**, or open **SE-Demo traffic log**. The next scheduled round starts within 30 minutes.
 
 **If the account restricts what stacks can create:**
