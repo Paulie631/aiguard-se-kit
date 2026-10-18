@@ -316,18 +316,9 @@ def tls_setup():
         vlog(f"truststore not used: {e}")
 
 
-# Unattended runs (the nightly tenant test in GitHub Actions) have no keychain. SE_KIT_KEYCHAIN=memory keeps entries in
-# memory for that one run, and SE_KIT_ONEAPI_CLIENT_SECRET supplies the OneAPI secret from the CI secret store.
-MEM_KC = {} if os.environ.get("SE_KIT_KEYCHAIN") == "memory" else None
-if MEM_KC is not None and os.environ.get("SE_KIT_ONEAPI_CLIENT_SECRET"):
-    MEM_KC["oneapi-client-secret"] = os.environ["SE_KIT_ONEAPI_CLIENT_SECRET"]
-
-
 def kc_get(name):
     """None when the entry doesn't exist. Access problems raise, so the kit never mistakes a locked or denied
     keychain for a missing key (which would create duplicate keys in AI Guard)."""
-    if MEM_KC is not None:
-        return remember_secret(MEM_KC.get(KC_NS + name))
     import keyring
     try:
         return remember_secret(keyring.get_password(KC, KC_NS + name))
@@ -347,17 +338,11 @@ def kc_has(name):
 
 
 def kc_set(name, value):
-    if MEM_KC is not None:
-        MEM_KC[KC_NS + name] = remember_secret(value)
-        return
     import keyring
     keyring.set_password(KC, KC_NS + name, remember_secret(value))
 
 
 def kc_del(name):
-    if MEM_KC is not None:
-        MEM_KC.pop(KC_NS + name, None)
-        return
     import keyring
     try:
         keyring.delete_password(KC, KC_NS + name)
