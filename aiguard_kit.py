@@ -966,9 +966,16 @@ def download_release(info, log=lambda level, msg: None):
         z.extractall(out)
     kit = out / "aiguard-se-kit"
     m = re.search(r'^VERSION = "([^"]+)"', (kit / "aiguard_kit.py").read_text(encoding="utf-8"), re.M)
-    if not m or m.group(1) != info["version"]:
+    got = m and m.group(1)
+    if (kit / "edition.json").exists():   # an edition (the ZIA kit) carries its own version
+        try:
+            got = json.loads((kit / "edition.json").read_text(encoding="utf-8")).get("version")
+        except ValueError:
+            got = None
+    if got != info["version"] or (bool(EDITION) != (kit / "edition.json").exists()):
         raise KitError("The downloaded kit's version doesn't match the release, so it wasn't installed.")
-    for f in ("aiguard-kit", "Install AI Guard Kit.command", "Uninstall AI Guard Kit.command"):
+    for f in ("aiguard-kit", "zia-kit", "Install AI Guard Kit.command", "Install ZIA Kit.command",
+              "Uninstall AI Guard Kit.command"):
         if (kit / f).exists():
             os.chmod(kit / f, 0o755)
     return kit
@@ -1227,14 +1234,18 @@ def cmd_schedule(job="trickle"):
 
 # ---------------------------------------------------------------- install (double-click installers)
 APP_NAME = "AI Guard Demo Console"
+CLI_NAME = "aiguard-kit"                        # the command install puts on PATH (Mac/Linux wrapper name)
+UNINSTALL_LNK = "Uninstall AI Guard Demo Kit.lnk"
 INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "packs", "policy_template.json",
                  "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
                  "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command",
-                 "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"]
+                 "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md",
+                 "CHANGELOG-ZIA.md", "edition.json", "zia-kit", "zia-kit.cmd"]
 
 
 def _install_files():
-    skip = {"aiguard-kit", "Uninstall AI Guard Kit.command"} if WINDOWS else {"aiguard-kit.cmd", "Uninstall AI Guard Kit.cmd"}
+    skip = ({"aiguard-kit", "zia-kit", "Uninstall AI Guard Kit.command"} if WINDOWS else
+            {"aiguard-kit.cmd", "zia-kit.cmd", "Uninstall AI Guard Kit.cmd"})
     return [f for f in INSTALL_FILES if f not in skip and (HERE / f).exists()]
 
 
@@ -1250,7 +1261,7 @@ def copy_kit(dest):
             shutil.copytree(src, stage / f, ignore=shutil.ignore_patterns("__pycache__"))
         else:
             shutil.copy2(src, stage / f)
-    for f in ("aiguard-kit", "Uninstall AI Guard Kit.command"):
+    for f in ("aiguard-kit", "zia-kit", "Uninstall AI Guard Kit.command"):
         if (stage / f).exists():
             os.chmod(stage / f, 0o755)
     if dest.exists():
@@ -1298,8 +1309,8 @@ def shortcut_paths():
     if WINDOWS:
         menu_dir = Path(os.getenv("APPDATA", HOME)) / "Microsoft/Windows/Start Menu/Programs"
         return {"desktop": _desktop_dir() / f"{APP_NAME}.lnk", "start": menu_dir / f"{APP_NAME}.lnk",
-                "start_uninstall": menu_dir / "Uninstall AI Guard Demo Kit.lnk"}
-    return {"desktop": HOME / "Desktop" / f"{APP_NAME}.command", "wrapper": HOME / ".local/bin/aiguard-kit"}
+                "start_uninstall": menu_dir / UNINSTALL_LNK}
+    return {"desktop": HOME / "Desktop" / f"{APP_NAME}.command", "wrapper": HOME / ".local/bin" / CLI_NAME}
 
 
 def _win_user_path(add=None, remove=None):
@@ -1350,7 +1361,7 @@ def job_installed(job):
 
 def cmd_install():
     global SCHEDULE_BASE
-    head(f"Installing the AI Guard SE demo kit {VERSION}")
+    head(f"Installing the {kit_name()} {VERSION}")
     here_is_app = HERE.resolve() == APP_DIR.resolve() if APP_DIR.exists() else False
     if not here_is_app:
         copy_kit(APP_DIR)
@@ -1374,7 +1385,7 @@ def cmd_install():
             vlog(str(e))
         try:
             _win_user_path(add=str(APP_DIR))
-            ok("Added to your PATH: in a new terminal, run  aiguard-kit gui  from any folder")
+            ok(f"Added to your PATH: in a new terminal, run  {CLI_NAME} gui  from any folder")
         except Exception as e:
             warn(f"Couldn't add the kit to your PATH ({e}). Use the desktop shortcut, or {APP_DIR / 'aiguard-kit.cmd'}")
     else:
@@ -1387,7 +1398,7 @@ def cmd_install():
         sp["wrapper"].write_text(f'#!/bin/bash\nexec "{APP_DIR / "aiguard-kit"}" "$@"\n', encoding="utf-8")
         os.chmod(sp["wrapper"], 0o755)
         on_path = str(sp["wrapper"].parent) in os.getenv("PATH", "").split(os.pathsep)
-        ok("Command: aiguard-kit (from any folder" + (")" if on_path else "; open a new terminal first)"))
+        ok(f"Command: {CLI_NAME} (from any folder" + (")" if on_path else "; open a new terminal first)"))
     global ARGS
     for job in sorted(SCHEDULE_JOBS, key=lambda j: j == "trickle"):   # the AI Guard job last
         if schedule_installed() if job == "trickle" else job_installed(job):
@@ -1400,12 +1411,12 @@ def cmd_install():
             except Exception as e:
                 warn(f"Couldn't re-point scheduled traffic ({e}). Run: {again}")
     info(f"Settings and keys stay in {BASE_DIR} and the system keychain (unchanged).")
-    ok(f"Installed. Open '{APP_NAME}' on your desktop, or run: aiguard-kit gui")
+    ok(f"Installed. Open '{APP_NAME}' on your desktop, or run: {CLI_NAME} gui")
 
 
 def cmd_uninstall():
     import shutil
-    head("Uninstall the AI Guard SE demo kit")
+    head(f"Uninstall the {kit_name()}")
     print("  Removes the installed kit, its shortcuts and its PATH entry, and stops scheduled traffic.")
     print("  Keeps your settings, keys and the demo objects in your tenant.")
     print(f"  {C['d']}To remove the tenant objects too, run  aiguard-kit teardown  first.{C['x']}")
@@ -2445,7 +2456,9 @@ def cmd_gui():
                                         "policy_id": c.get("state", {}).get("policy_id"), "console": CONSOLE,
                                         "lib": lib, "panels": PANELS, "prefix": PREFIX,
                                         "competitor": c.get("competitor", "Palo Alto"), "profile": PROFILE,
-                                        "update_behind": _UPDATE["behind"], "kit_dir": str(HERE)})
+                                        "update_behind": _UPDATE["behind"], "kit_dir": str(HERE),
+                                        "edition": (EDITION or {}).get("product"),
+                                        "edition_name": (EDITION or {}).get("name")})
             if path == "/api/update":
                 return self._send(200, update_status(force="force=1" in self.path))
             if path == "/api/health":
@@ -2721,6 +2734,39 @@ def cmd_gui():
         print("\n  Stopped.")
 
 
+# ---------------------------------------------------------------- editions
+# A release zip may carry edition.json (the ZIA kit does; the AI Guard kit doesn't). It gives that edition its own
+# version, install folder, shortcut, command name and update channel, so editions never replace each other.
+# Credentials, keychain and settings stay shared in ~/.aiguard-se-kit.
+EDITION = None
+EDITION_COMMANDS = {"zia": {"setup", "preflight", "status", "teardown", "dashboards", "password", "aws", "check",
+                            "traffic", "schedule"}}
+
+
+def kit_name():
+    return (EDITION or {}).get("name") or "AI Guard SE demo kit"
+
+
+def apply_edition(path):
+    global EDITION, VERSION, APP_DIR, APP_NAME, CLI_NAME, UNINSTALL_LNK, UPDATE_URL
+    try:
+        e = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    EDITION = e
+    VERSION = e.get("version", VERSION)
+    APP_DIR = BASE_DIR / e.get("app_dir", "app")
+    APP_NAME = e.get("app_name", APP_NAME)
+    CLI_NAME = e.get("command", CLI_NAME)
+    UNINSTALL_LNK = e.get("uninstall_link", UNINSTALL_LNK)
+    if not os.getenv("AIGUARD_KIT_UPDATE_URL") and e.get("update_url"):
+        UPDATE_URL = e["update_url"]
+    return e
+
+
+apply_edition(HERE / "edition.json")
+
+
 # ---------------------------------------------------------------- products
 # AI Guard is built into this file. Other products are separate modules beside it that share the kit's
 # credentials, keychain, config, console, installer and updater. Each module defines bind(kit) and cli(args).
@@ -2773,6 +2819,10 @@ def main():
     ensure_windows_launcher()
     vals = {ARGS[i + 1] for i, a in enumerate(ARGS[:-1]) if a in VALUE_OPTS}
     cmd = next((a for a in ARGS if not a.startswith("-") and a not in vals), "help")
+    product_ = (EDITION or {}).get("product")
+    if product_ and cmd in EDITION_COMMANDS.get(product_, ()) and product_ not in ARGS:
+        ARGS.insert(ARGS.index(cmd), product_)   # the ZIA kit: `zia-kit check` means `zia check`
+        cmd = product_
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
             "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia}

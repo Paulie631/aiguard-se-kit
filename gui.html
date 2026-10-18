@@ -566,7 +566,8 @@ async function init(){
   seg("ldir");
   $("#presets .preset").click();
   drawCov();drawStories();drawPacks();loadPolicy();
-  if(!st.apps.length){$('#tabs button[data-t="setup"]').click();}
+  if(st.edition=="zia"){document.title=st.edition_name||document.title;$('#tabs button[data-t="zia"]').click();}
+  else if(!st.apps.length){$('#tabs button[data-t="setup"]').click();}
 }
 function refreshRunner(){
   $("#apps").innerHTML=S.apps.map(a=>`<label class="chk" data-a="${esc(a.name)}"><input type="checkbox" checked value="${esc(a.name)}">${esc(a.label)}<span class="muted" style="font-size:11px">${a.proxy?"detect + proxy":"detect"}</span></label>`).join("");

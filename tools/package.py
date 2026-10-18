@@ -8,6 +8,11 @@
   latest.json                         what the kit's update check reads (version, notes, zip link, SHA-256)
 
 Run: python tools/package.py   (uses the committed files at HEAD)
+
+The ZIA kit (a separate edition with its own version, install folder and update channel):
+  python tools/package.py --edition zia
+  zscaler-zia-kit-<v>.zip, zscaler-zia-kit-<v>-email.zip, zscaler-zia-kit.zip (unversioned copy for the rolling
+  zia-latest release), SHA256SUMS-zia.txt and zia/latest.json, all in dist/
 """
 import hashlib
 import io
@@ -52,7 +57,83 @@ def changelog_notes(v):
     return (m.group(1) if m else "").strip()
 
 
+ZIA_EDITION = {"product": "zia", "name": "Zscaler ZIA SE Demo Kit", "app_name": "Zscaler ZIA Demo Console",
+               "app_dir": "app-zia", "command": "zia-kit", "uninstall_link": "Uninstall Zscaler ZIA Demo Kit.lnk"}
+ZIA_EXTRA = ["CHANGELOG-ZIA.md"]
+
+
+def zia_version():
+    return re.search(r'^ZIA_VERSION = "([^"]+)"', (ROOT / "zia_module.py").read_text(encoding="utf-8"), re.M).group(1)
+
+
+def changelog_notes_zia(v):
+    text = (ROOT / "CHANGELOG-ZIA.md").read_text(encoding="utf-8")
+    m = re.search(rf"^## {re.escape(v)}\b.*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return (m.group(1) if m else "").strip()
+
+
+def zia_files(kit):
+    """The ZIA kit's files: the whole kit (ZIA needs its core), plus edition.json and ZIA-named launchers."""
+    repo = os.getenv("GITHUB_REPOSITORY", "Paulie631/aiguard-se-kit")
+    v = zia_version()
+    edition = dict(ZIA_EDITION, version=v,
+                   update_url=f"https://github.com/{repo}/releases/download/zia-latest/latest.json")
+    files = {}
+    for info in kit.infolist():
+        data = kit.read(info.filename)
+        name = info.filename
+        if name.endswith(("Install AI Guard Kit.cmd", "Install AI Guard Kit.command")):
+            name = name.replace("Install AI Guard Kit", "Install ZIA Kit")
+            data = data.replace(b"AI Guard SE Demo Kit", b"Zscaler ZIA SE Demo Kit")
+            data = data.replace(b"AI Guard Demo Console", b"Zscaler ZIA Demo Console")
+            data = data.replace(b'aiguard-kit" from any terminal', b'zia-kit" from any terminal')
+        files[name] = (info, data)
+    pre = "aiguard-se-kit/"   # the updater expects this folder name in every release zip
+    for src, dst in (("aiguard-kit", "zia-kit"), ("aiguard-kit.cmd", "zia-kit.cmd")):
+        info, data = files[pre + src]
+        files[pre + dst] = (info, data)
+    files[pre + "edition.json"] = (None, json.dumps(edition, indent=2).encode())
+    return v, edition, files
+
+
+def write_zip(dest, files, keep=lambda name: True):
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as out:
+        for name, (info, data) in files.items():
+            if not keep(name):
+                continue
+            zi = zipfile.ZipInfo(name, date_time=info.date_time if info else (2026, 1, 1, 0, 0, 0))
+            zi.external_attr = info.external_attr if info else 0o644 << 16
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            out.writestr(zi, data)
+
+
+def main_zia():
+    data = subprocess.run(["git", "-C", str(ROOT), "archive", "--format=zip", "--prefix=aiguard-se-kit/", "HEAD",
+                           *SHIP, *ZIA_EXTRA], capture_output=True, check=True).stdout
+    v, edition, files = zia_files(zipfile.ZipFile(io.BytesIO(data)))
+    (DIST / "zia").mkdir(parents=True, exist_ok=True)
+    out = [DIST / f"zscaler-zia-kit-{v}.zip", DIST / f"zscaler-zia-kit-{v}-email.zip", DIST / "zscaler-zia-kit.zip"]
+    write_zip(out[0], files)
+    write_zip(out[1], files, lambda n: not EMAIL_BLOCKED.search(n))
+    out[2].write_bytes(out[0].read_bytes())
+    sums = "".join(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}\n" for f in out[:2])
+    (DIST / "SHA256SUMS-zia.txt").write_text(sums)
+    repo = os.getenv("GITHUB_REPOSITORY", "Paulie631/aiguard-se-kit")
+    (DIST / "zia" / "latest.json").write_text(json.dumps({
+        "version": v, "tag": f"zia-v{v}", "edition": "zia", "notes": changelog_notes_zia(v),
+        "zip_url": f"https://github.com/{repo}/releases/download/zia-v{v}/{out[0].name}",
+        "sha256": hashlib.sha256(out[0].read_bytes()).hexdigest()}, indent=2))
+    for f in out + [DIST / "SHA256SUMS-zia.txt", DIST / "zia" / "latest.json"]:
+        print(f.relative_to(ROOT))
+
+
 def main():
+    if "--edition" in sys.argv:
+        edition = sys.argv[sys.argv.index("--edition") + 1]
+        if edition != "zia":
+            raise SystemExit(f"Unknown edition {edition}")
+        DIST.mkdir(exist_ok=True)
+        return main_zia()
     v = version()
     DIST.mkdir(exist_ok=True)
     kit = archive()

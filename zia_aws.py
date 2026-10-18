@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 
-KIT_ZIP = "https://github.com/Paulie631/aiguard-se-kit/archive/refs/heads/zia-traffic.zip"
+# The newest ZIA kit release (a rolling copy on the zia-latest release). Override with the KitZipUrl parameter.
+KIT_ZIP = "https://github.com/Paulie631/aiguard-se-kit/releases/download/zia-latest/zscaler-zia-kit.zip"
 AMI_PARAM = "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
 NAME = "SE-Demo ZIA traffic generator"
 
