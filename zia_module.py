@@ -210,6 +210,14 @@ def find_users(t, wanted):
 
 # ---------------------------------------------------------------- the test user
 TEST_USER = {"login": "se-demo-traffic", "display": "SE-Demo Traffic", "first": "SE-Demo", "last": "Traffic"}
+
+
+def test_user_names():
+    """The test user's login and names follow the prefix, so another prefix (the nightly test's SE-CI) gets its own
+    user and never touches the demo's."""
+    if K.PREFIX == "SE-Demo":
+        return TEST_USER
+    return {"login": f"{K.slug(K.PREFIX)}-traffic", "display": f"{K.PREFIX} Traffic", "first": K.PREFIX, "last": "Traffic"}
 NOT_TENANT_DOMAINS = re.compile(r"zscaler|zslogin|zscloud", re.I)
 PW_KEY = "zia-test-user-password"   # keychain entry for the password of a test user the kit created
 CONSOLE_USERS = "Administration > Internet & SaaS Authentication > Internet & SaaS Users"
@@ -300,7 +308,7 @@ def test_email(t, email=None, domain=None):
     if not domain:
         raise K.KitError("Couldn't tell which email domain this tenant's users use. Pass it: "
                          "./aiguard-kit zia setup --domain yourdomain.com")
-    return f"{TEST_USER['login']}@{domain}"
+    return f"{test_user_names()['login']}@{domain}"
 
 
 def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, poll=10):
@@ -367,7 +375,7 @@ def create_zia_user(t, cfg, log, email=None, domain=None):
         grp = ensure_zia_ref(t, "group", name, log)
         dept = ensure_zia_ref(t, "department", name, log)
         pw = gen_password()
-        user = t.call("user_management", "add_user", name=TEST_USER["display"], email=email, password=pw,
+        user = t.call("user_management", "add_user", name=test_user_names()["display"], email=email, password=pw,
                       groups=[{"id": g(grp, "id")}], department={"id": g(dept, "id")},
                       comments="Test user for the SE demo kit's ZIA traffic generator")
     except K.KitError as e:
@@ -382,7 +390,7 @@ def create_zia_user(t, cfg, log, email=None, domain=None):
     K.kc_set(PW_KEY, pw)
     z["created_user"] = {"via": "zia", "email": email, "zia_id": g(user, "id"), "group": name,
                          "zia_group_id": g(grp, "id"), "zia_dept_id": g(dept, "id")}
-    z["users"] = [{"id": g(user, "id"), "name": g(user, "name") or TEST_USER["display"], "email": email}]
+    z["users"] = [{"id": g(user, "id"), "name": g(user, "name") or test_user_names()["display"], "email": email}]
     K.save_cfg(cfg)
     log("ok", f"Created ZIA user {email} in group and department '{name}'")
     log("ok", "Its password is saved in this computer's keychain. Show it with ./aiguard-kit zia password "
@@ -404,8 +412,8 @@ def create_zid_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
         if user:
             log("ok", f"{email} already exists in ZIdentity")
         else:
-            user = t.call("zid.users", "add_user", login_name=email, primary_email=email, display_name=TEST_USER["display"],
-                          first_name=TEST_USER["first"], last_name=TEST_USER["last"], status=True, source="API")
+            user = t.call("zid.users", "add_user", login_name=email, primary_email=email, display_name=test_user_names()["display"],
+                          first_name=test_user_names()["first"], last_name=test_user_names()["last"], status=True, source="API")
             log("ok", f"Created ZIdentity user {email}")
         grp = zid_group(t, log)
         try:
@@ -750,8 +758,10 @@ def _zcc_list(t, resource, **q):
 
 
 def zcc_names():
+    """Client Connector profile names follow the prefix too ('SE-Demo traffic generator' -> 'SE-CI traffic generator')."""
     c = template().get("client_connector") or {}
-    return c.get("app_profile"), c.get("forwarding_profile")
+    fix = lambda n: n.replace("SE-Demo", K.PREFIX, 1) if n else n   # noqa: E731
+    return fix(c.get("app_profile")), fix(c.get("forwarding_profile"))
 
 
 def zcc_group_id(cfg):
@@ -1264,7 +1274,7 @@ def preflight(cfg, write_probe=False):
              "directory": "Create the test user in your directory (AD/LDAP) and pass --user."}.get(mode,
              "Setup assumes Hosted DB. Check Administration > Internet & SaaS Authentication > Internet Authentication Settings."))
         dom = tenant_domain(t)
-        email = f"{TEST_USER['login']}@{dom}" if dom else "the test user"
+        email = f"{test_user_names()['login']}@{dom}" if dom else "the test user"
         try:
             items(t.call("user_management", "list_groups", query_params={"search": K.PREFIX}))
             detail = f"would create {email}" if dom else "couldn't tell the tenant's email domain"
@@ -1378,7 +1388,7 @@ def choose_users(t, cfg):
         return
     K.info("The demo rules apply only to one test user: the one signed in to Client Connector on the traffic generator.")
     domain = K.opt("domain") or tenant_domain(t) or "yourdomain"
-    i = K.menu("Which test user?", [f"Create one for me: {TEST_USER['login']}@{domain} (recommended)",
+    i = K.menu("Which test user?", [f"Create one for me: {test_user_names()['login']}@{domain} (recommended)",
                                     "Use a user I already have (never your own account)"])
     if i == 0:
         create_test_user(t, cfg, K.cli_log, domain=None if domain == "yourdomain" else domain, via=K.opt("via"))

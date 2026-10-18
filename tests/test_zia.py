@@ -1267,3 +1267,68 @@ def test_zia_kit_console_keeps_the_ai_guard_policy_menu_once_ai_guard_is_set_up(
     html = (ROOT / "gui.html").read_text(encoding="utf-8")
     line = next(l for l in html.splitlines() if "querySelector('.pol').style.display='none'" in l)
     assert "if(!st.policy_id)" in line
+
+
+def test_another_prefix_gets_its_own_test_user_and_client_connector_profiles(zenv):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.PREFIX = "SE-CI"
+    assert z.test_user_names()["login"] == "se-ci-traffic"
+    assert z.zcc_names() == ("SE-CI traffic generator", "SE-CI Z-Tunnel 2.0")
+    kit.PREFIX = "SE-Demo"
+    assert z.test_user_names()["login"] == "se-demo-traffic"
+    assert z.zcc_names() == ("SE-Demo traffic generator", "SE-Demo Z-Tunnel 2.0")
+
+
+def test_memory_keychain_for_unattended_runs(monkeypatch, tmp_path):
+    monkeypatch.setenv("SE_KIT_KEYCHAIN", "memory")
+    monkeypatch.setenv("SE_KIT_ONEAPI_CLIENT_SECRET", "ci-secret")
+    monkeypatch.setattr(sys, "argv", ["aiguard_kit.py"])
+    spec = importlib.util.spec_from_file_location("aiguard_kit_memkc", ROOT / "aiguard_kit.py")
+    kit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kit)
+    assert kit.kc_get("oneapi-client-secret") == "ci-secret"
+    kit.kc_set("zia-test-user-password", "pw")
+    assert kit.kc_get("zia-test-user-password") == "pw" and kit.kc_has("zia-test-user-password")
+    kit.kc_del("zia-test-user-password")
+    assert kit.kc_get("zia-test-user-password") is None
+
+
+def _nightly():
+    spec = importlib.util.spec_from_file_location("nightly_under_test", ROOT / "tools" / "nightly.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_nightly_skips_without_secrets_and_never_uses_the_demo_prefix(monkeypatch, capsys):
+    n = _nightly()
+    for v in ("SE_KIT_CLIENT_ID", "SE_KIT_VANITY_DOMAIN", "SE_KIT_ONEAPI_CLIENT_SECRET"):
+        monkeypatch.delenv(v, raising=False)
+    assert n.main() == 0 and "Skipped" in capsys.readouterr().out
+    for v in ("SE_KIT_CLIENT_ID", "SE_KIT_VANITY_DOMAIN", "SE_KIT_ONEAPI_CLIENT_SECRET"):
+        monkeypatch.setenv(v, "x")
+    monkeypatch.setattr(n, "PREFIX", "SE-Demo")
+    assert n.main() == 1
+
+
+def test_nightly_full_run_creates_checks_and_cleans_up(zenv, monkeypatch, tmp_path, capsys):
+    kit, z, fake = zenv("--prefix", "SE-CI", "--yes", "--force")
+    kit.PREFIX = "SE-CI"
+    kit.FORCE = True
+    monkeypatch.setattr(kit, "preflight", lambda cfg, write_probe=False: ([{"id": "x", "label": "AI Guard", "status": "ok", "detail": "", "fix": ""}], None))
+    n = _nightly()
+    monkeypatch.setattr(n, "load_kit", lambda: kit)
+    for v, val in (("SE_KIT_CLIENT_ID", "abcd1234"), ("SE_KIT_VANITY_DOMAIN", "paulaiuto"), ("SE_KIT_ONEAPI_CLIENT_SECRET", "s3cret")):
+        monkeypatch.setenv(v, val)
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    demo_rule = {"id": 4242, "name": "SE-Demo: Block gambling", "order": 9, "state": "ENABLED"}
+    fake.db["url_filtering"].append(dict(demo_rule))               # an SE's demo object that must survive
+    assert n.main() == 0, capsys.readouterr().out
+    text = summary.read_text(encoding="utf-8")
+    assert "passed" in text and "Teardown" in text and "Drift after update" in text
+    assert any(u["email"].startswith("se-ci-traffic@") for u in fake.db["users"]) is False   # removed again
+    assert not [r for r in fake.all_rules() if r["name"].startswith("SE-CI")]
+    assert [f["name"] for f in fake.fwd] == ["Default"] and [p["name"] for p in fake.web] == ["Default"]
+    assert any(r["id"] == 4242 for r in fake.db["url_filtering"])   # SE-Demo untouched
