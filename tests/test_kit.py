@@ -111,10 +111,13 @@ def test_library_is_consistent():
     assert len(ids) == len(set(ids))
     assert all(t["group"] in lib["groups"] for t in lib["tests"])
     assert all(t["direction"] in ("IN", "OUT") for t in lib["tests"])
-    assert all(s["test"] in ids for st in lib["stories"] for s in st["steps"])
-    assert all(s.get("proxy_test", s["test"]) in ids for st in lib["stories"] for s in st["steps"])
-    by_id = {t["id"]: t for t in lib["tests"]}
-    assert all(by_id[s["proxy_test"]]["direction"] == "IN" for st in lib["stories"] for s in st["steps"] if s.get("proxy_test"))
+    pack_tests = [t for p in (ROOT / "packs").glob("*.json") for t in json.loads(p.read_text(encoding="utf-8"))["tests"]]
+    known = set(ids) | {t["id"] for t in pack_tests}   # storylines may use the industry packs' prompts
+    run_steps = [s for st in lib["stories"] for s in st["steps"] if s.get("kind") != "show"]   # show: no prompt
+    assert all(s["test"] in known for s in run_steps)
+    assert all(s.get("proxy_test", s["test"]) in known for s in run_steps)
+    by_id = {t["id"]: t for t in lib["tests"] + pack_tests}
+    assert all(by_id[s["proxy_test"]]["direction"] == "IN" for s in run_steps if s.get("proxy_test"))
     for p in (ROOT / "packs").glob("*.json"):
         pack = json.loads(p.read_text(encoding="utf-8"))
         assert pack["name"] and pack["tests"]
@@ -146,6 +149,45 @@ def test_setup_is_idempotent_and_teardown_cleans(env):
     assert t.db["llm_applications"] == [] and t.db["llm_application_credentials"] == []
     assert names(t, "policy_match_rules") == ["x"]
     assert "SE-Demo: OpenAI App:detections" not in kit._kc
+
+
+def test_demo_readiness_wants_monitor_and_keys(env, capsys):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-aig-policy"]["status"] == "ok" and by["ready-aig-keys"]["status"] == "ok"
+    kit.policy_mode(t, kit.load_cfg(), "attacks")
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-aig-policy"]["status"] == "warn" and "policy monitor" in by["ready-aig-policy"]["fix"]
+    assert not any(c["id"].startswith("ready-zia") for c in by.values())   # no ZIA set up: no ZIA items
+    kit.cmd_ready()
+    assert "to sort out first" in capsys.readouterr().out
+
+
+def test_storylines_talk_tracks_news_and_owasp_are_well_formed():
+    lib = json.loads((ROOT / "tests.json").read_text(encoding="utf-8"))
+    owasp = {f"LLM{n:02d}" for n in range(1, 11)}
+    story_ids = [st["id"] for st in lib["stories"]]
+    assert len(story_ids) == len(set(story_ids))
+    assert {"core", "leakage", "blocking"} <= set(story_ids)            # the original three are still there
+    for st in lib["stories"]:
+        assert st["steps"] and st.get("requires") in (None, "zia")
+        changes = [s["policy"] for s in st["steps"] if s.get("policy")]
+        if any(p != "monitor" for p in changes):
+            assert changes[-1] == "monitor", f"{st['id']} must end back in Monitor"
+        for s in st["steps"]:
+            assert s["title"] and (s.get("say") or s.get("talk")), s["title"]
+            assert set(s.get("owasp", [])) <= owasp, s["title"]
+            for o in s.get("objections", []):
+                assert o["q"].endswith("?") and o["a"]
+            for n in s.get("news", []):
+                assert n["url"].startswith("https://") and n["headline"] and n["source"] and n["year"].isdigit()
+            if s.get("kind") == "show":
+                assert s.get("where") and not s.get("policy")
+            if s.get("filler"):
+                assert s.get("policy"), f"'{s['title']}': a filler line only shows while a policy change applies"
+    core = next(st for st in lib["stories"] if st["id"] == "core")
+    assert [s["title"] for s in core["steps"]][0] == "Everyday work flows through" and len(core["steps"]) == 8
 
 
 def test_policy_profiles_and_custom(env):
@@ -550,6 +592,29 @@ def test_install_and_uninstall_mac_linux(env, monkeypatch, tmp_path, capsys):
     kit.cmd_uninstall()
     assert not app.exists() and not shortcut.exists() and not (home / ".local/bin/aiguard-kit").exists()
     assert not app.with_name("app.previous").exists()
+
+
+def test_installing_an_older_release_over_a_newer_one(env, monkeypatch, tmp_path):
+    """Going back a version is just running the older release's installer: no version check blocks it, the newer
+    copy is kept for rollback, and settings written by the newer kit still load."""
+    import subprocess
+    kit, _ = env("install", "--yes")
+    home = tmp_path / "home"
+    app = home / ".aiguard-se-kit" / "app"
+    monkeypatch.setattr(kit, "HOME", home)
+    monkeypatch.setattr(kit, "BASE_DIR", home / ".aiguard-se-kit")
+    monkeypatch.setattr(kit, "APP_DIR", app)
+    monkeypatch.setattr(kit, "schedule_installed", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    app.mkdir(parents=True)
+    (app / "aiguard_kit.py").write_text('VERSION = "99.0.0"\n', encoding="utf-8")   # a newer kit is installed
+    cfg = kit.load_cfg()
+    cfg["future_setting"] = {"from": "a newer kit"}
+    kit.save_cfg(cfg)
+    kit.cmd_install()   # this (older) kit's installer
+    assert (app / "aiguard_kit.py").read_bytes() == (ROOT / "aiguard_kit.py").read_bytes()
+    assert 'VERSION = "99.0.0"' in (app.with_name("app.previous") / "aiguard_kit.py").read_text(encoding="utf-8")
+    assert kit.load_cfg()["future_setting"] == {"from": "a newer kit"}   # unknown settings are kept, not lost
 
 
 def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path):

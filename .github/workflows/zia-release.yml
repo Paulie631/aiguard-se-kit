@@ -1,0 +1,68 @@
+name: zia-release
+# Publishes the ZIA kit (a separate edition) whenever its ZIA_VERSION (in zia_module.py) hasn't been released yet.
+# Releasing is: bump ZIA_VERSION, add a "## <version>" section to CHANGELOG-ZIA.md, push.
+# ZIA releases are tagged zia-v<version>, published as pre-releases and NEVER marked Latest, so the AI Guard kit's
+# update check (releases/latest) never sees them. The ZIA kit updates from the rolling "zia-latest" release instead.
+on:
+  push:
+    branches: [main, zia-traffic]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: zia-release
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          [ -f zia_module.py ] || { echo "needed=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          v=$(python3 -c "import re;print(re.search(r'^ZIA_VERSION = \"([^\"]+)\"', open('zia_module.py', encoding='utf-8').read(), re.M).group(1))")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "zia-v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"; echo "zia-v$v is already released."
+          elif ! grep -q "^## $v\b" CHANGELOG-ZIA.md; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"; echo "No '## $v' section in CHANGELOG-ZIA.md, so not releasing."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"; echo "Will release zia-v$v."
+          fi
+  test:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - run: python tools/package.py --edition zia
+      - name: Publish zia-v${{ needs.check.outputs.version }} and refresh the zia-latest update channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: zia-v${{ needs.check.outputs.version }}
+        run: |
+          python - <<'PY'
+          import json
+          notes = json.load(open("dist/zia/latest.json", encoding="utf-8"))["notes"]
+          notes += ("\n\n**Download** `zscaler-zia-kit-*.zip`, extract it, and double-click **Install ZIA Kit** inside. "
+                    "It installs beside the AI Guard kit (its own folder, shortcut and `zia-kit` command) and shares its "
+                    "saved OneAPI login. The `-email` file leaves out the installers so mail filters accept it. "
+                    "Runbook: ZIA.md.\n")
+          open("notes.md", "w", encoding="utf-8").write(notes)
+          PY
+          gh release create "$V" dist/zscaler-zia-kit-*.zip dist/SHA256SUMS-zia.txt dist/zia/latest.json \
+            --target "$GITHUB_SHA" --title "Zscaler ZIA SE Demo Kit ${V#zia-}" --notes-file notes.md \
+            --prerelease --latest=false
+          if ! gh release view zia-latest >/dev/null 2>&1; then
+            gh release create zia-latest --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Zscaler ZIA SE Demo Kit: update channel" \
+              --notes "Always holds the newest ZIA kit. The ZIA kit's Update button reads latest.json here. For release notes, see the zia-v* releases."
+          fi
+          gh release upload zia-latest dist/zia/latest.json dist/zscaler-zia-kit.zip --clobber

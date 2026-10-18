@@ -859,45 +859,198 @@
      "title": "Everyday work flows through",
      "test": "prompt-tag-marketing",
      "policy": "monitor",
-     "talk": "Most prompts are ordinary work. AI Guard lets them through with no friction, but it still classifies the topic, so you can see what your people use AI for."
+     "talk": "Most prompts are ordinary work. AI Guard lets them through with no friction, but it still classifies the topic, so you can see what your people use AI for.",
+     "say": "Most of what people send to AI is ordinary work, like this marketing request. It goes straight through.",
+     "show": "ALLOW, plus the topic tag AI Guard added: you learn what AI is used for without blocking anyone.",
+     "sowhat": "Visibility first: a picture of real AI usage by team and topic, with zero friction for users.",
+     "ask": "Today, could you tell me which teams use AI the most, and for what?",
+     "objections": [
+      {
+       "q": "Does this slow every prompt down?",
+       "a": "Inspection happens inline in milliseconds; the replies you're seeing include the round trip to the model."
+      }
+     ],
+     "filler": "We're starting in Monitor, which is where most customers begin: see everything, block nothing."
     },
     {
      "title": "Sensitive data leaving the company",
      "test": "pii-ssn-dob",
-     "talk": "An employee pastes a patient record into a chatbot. AI Guard finds the SSN and date of birth before the prompt reaches the model. We're in monitor mode, so it's logged, not stopped."
+     "owasp": [
+      "LLM02"
+     ],
+     "talk": "An employee pastes a patient record into a chatbot. AI Guard finds the SSN and date of birth before the prompt reaches the model. We're in monitor mode, so it's logged, not stopped.",
+     "say": "Now someone pastes a patient record to get a quick summary. Well meant, and exactly how data leaves.",
+     "show": "The SSN and date-of-birth detectors. In Monitor it's logged, not stopped, so you learn your baseline.",
+     "sowhat": "You find out how often regulated data goes into AI before it becomes a breach notification.",
+     "ask": "Which data would be a reportable incident for you if it showed up in a public AI tool?",
+     "objections": [
+      {
+       "q": "We already have DLP. Why this?",
+       "a": "Classic DLP sees files and web posts. AI Guard understands prompts and model replies, including attacks on the model itself, which DLP has no concept of."
+      },
+      {
+       "q": "What about false positives?",
+       "a": "Start in Monitor, review what fires in Insights for a couple of weeks, then enforce only the detectors you trust."
+      }
+     ]
     },
     {
      "title": "Secrets in a prompt",
      "test": "secret-github-token",
-     "talk": "Developers paste tokens when they debug. AI Guard recognizes credential formats, so a leaked key becomes an alert instead of an incident."
+     "owasp": [
+      "LLM02"
+     ],
+     "news": [
+      {
+       "headline": "Samsung bans generative AI tools after engineers paste confidential source code into ChatGPT",
+       "source": "Forbes",
+       "year": "2023",
+       "url": "https://www.forbes.com.au/news/innovation/samsung-bans-chatgpt-among-employees-after-sensitive-code-leak/"
+      }
+     ],
+     "talk": "Developers paste tokens when they debug. AI Guard recognizes credential formats, so a leaked key becomes an alert instead of an incident.",
+     "say": "Developers paste code to debug it, and code carries keys. This is the Samsung story: engineers pasted source code into ChatGPT, and the company banned AI tools outright.",
+     "show": "The secrets detector names the credential type. Nothing reached the model's provider unseen.",
+     "sowhat": "Instead of banning AI, like Samsung did, you let developers use it and catch the keys.",
+     "ask": "Have you had to restrict AI tools for developers? What would it take to open them back up?",
+     "objections": [
+      {
+       "q": "Does this work for our own apps and agents, not just ChatGPT?",
+       "a": "Yes. Your apps call AI Guard through the API or proxy, so the same policy covers home-grown apps, copilots and agents."
+      }
+     ]
     },
     {
      "title": "Prompt injection",
      "test": "prompt-injection-ignore-instructions",
-     "talk": "This is the attack on the AI itself: telling the model to ignore its instructions. It's detected and recorded. Now let's enforce."
+     "owasp": [
+      "LLM01"
+     ],
+     "news": [
+      {
+       "headline": "A dealership chatbot is talked into 'agreeing' to sell a Chevy Tahoe for $1",
+       "source": "AI Incident Database",
+       "year": "2023",
+       "url": "https://incidentdatabase.ai/entities/chevrolet-of-watsonville"
+      }
+     ],
+     "talk": "This is the attack on the AI itself: telling the model to ignore its instructions. It's detected and recorded. Now let's enforce.",
+     "say": "This one attacks the AI itself: 'ignore your instructions'. A car dealer's chatbot was talked into 'agreeing' to sell a Tahoe for one dollar this way.",
+     "show": "The prompt-injection detector fired. Still Monitor, so it's recorded. Next we enforce.",
+     "sowhat": "Customer-facing bots can be steered into saying or doing things on your behalf. That's brand and legal exposure.",
+     "ask": "Do you have customer-facing chatbots or agents today, or planned this year?",
+     "objections": [
+      {
+       "q": "What about false positives?",
+       "a": "Start in Monitor, review what fires in Insights for a couple of weeks, then enforce only the detectors you trust."
+      }
+     ]
     },
     {
      "title": "Turn on enforcement, same prompt",
      "test": "prompt-injection-ignore-instructions",
      "policy": "attacks",
-     "talk": "Same prompt, one policy change. AI Guard now blocks it before it reaches the model. Customers usually start in monitor mode, learn their baseline, then enforce the high-risk detectors."
+     "owasp": [
+      "LLM01"
+     ],
+     "talk": "Same prompt, one policy change. AI Guard now blocks it before it reaches the model. Customers usually start in monitor mode, learn their baseline, then enforce the high-risk detectors.",
+     "say": "Same prompt, one policy change: block attacks. Now it never reaches the model.",
+     "show": "BLOCK, and the reply the user sees instead of the model's.",
+     "sowhat": "Enforcement is a policy switch, not a project. Start with attacks, add data protection when you're ready.",
+     "ask": "Who would own this policy for you: security, the AI platform team, or both?",
+     "objections": [
+      {
+       "q": "Does this slow every prompt down?",
+       "a": "Inspection happens inline in milliseconds; the replies you're seeing include the round trip to the model."
+      },
+      {
+       "q": "What about false positives?",
+       "a": "Start in Monitor, review what fires in Insights for a couple of weeks, then enforce only the detectors you trust."
+      }
+     ],
+     "filler": "While this applies: most customers run Monitor for two to four weeks, look at what fires, then turn on blocking for attacks first, because those are never legitimate."
     },
     {
      "title": "Hidden instructions",
      "test": "invisible-text-zero-width-smuggle",
-     "talk": "Attackers hide instructions in invisible Unicode characters, in documents and web pages the AI reads. People can't see them. AI Guard can, and it blocks them."
+     "owasp": [
+      "LLM01"
+     ],
+     "news": [
+      {
+       "headline": "EchoLeak: one crafted email could make Microsoft 365 Copilot leak data, with no click",
+       "source": "The Hacker News",
+       "year": "2025",
+       "url": "https://thehackernews.com/2025/06/zero-click-ai-vulnerability-exposes.html"
+      }
+     ],
+     "talk": "Attackers hide instructions in invisible Unicode characters, in documents and web pages the AI reads. People can't see them. AI Guard can, and it blocks them.",
+     "say": "The newer attacks don't come from the user. They hide in an email or a web page the AI reads. EchoLeak showed one crafted email could make Microsoft 365 Copilot leak data, with no click.",
+     "show": "The prompt looks harmless on screen. AI Guard finds the invisible instructions inside it and blocks.",
+     "sowhat": "Your AI reads content you don't control. This is the attack that scales, and people can't see it.",
+     "ask": "Which of your AI tools read email, documents or the web on a user's behalf?",
+     "objections": [
+      {
+       "q": "Does this work for our own apps and agents, not just ChatGPT?",
+       "a": "Yes. Your apps call AI Guard through the API or proxy, so the same policy covers home-grown apps, copilots and agents."
+      }
+     ]
     },
     {
      "title": "Risky model output",
      "test": "out-output-pii",
+     "proxy_test": "output-pii-generate-fake-record",
+     "owasp": [
+      "LLM02",
+      "LLM05"
+     ],
+     "news": [
+      {
+       "headline": "Researchers show Slack AI can be tricked into leaking data from private channels",
+       "source": "PromptArmor",
+       "year": "2024",
+       "url": "https://promptarmor.com/resources/data-exfiltration-from-slack-ai-via-indirect-prompt-injection"
+      }
+     ],
      "talk": "AI Guard inspects the response too. If a model or an agent returns personal data, it's caught on the way back.",
-     "proxy_test": "output-pii-generate-fake-record"
+     "say": "AI Guard checks answers too. Researchers showed Slack AI could be tricked into handing back data from private channels. Here the model's reply carries personal data.",
+     "show": "The response-side detectors. Same policy, other direction.",
+     "sowhat": "Prompts and responses are both checked, so a model or agent can't become the leak.",
+     "ask": "Are any of your AI apps connected to internal data, like a knowledge base, CRM or ticketing system?",
+     "objections": [
+      {
+       "q": "We already have DLP. Why this?",
+       "a": "Classic DLP sees files and web posts. AI Guard understands prompts and model replies, including attacks on the model itself, which DLP has no concept of."
+      }
+     ]
     },
     {
      "title": "Brand and competitive risk",
      "test": "competition-competitor-compare",
      "policy": "monitor",
-     "talk": "Beyond security: responsible-AI detectors flag competitor talk, brand risk and regulated advice. We're back in monitor mode now, and everything we just did is on the dashboard."
+     "owasp": [
+      "LLM09"
+     ],
+     "news": [
+      {
+       "headline": "Moffatt v. Air Canada: the airline must honor a refund policy its chatbot made up",
+       "source": "Manatt",
+       "year": "2024",
+       "url": "https://manatt.com/insights/newsletters/advertising-law/ai-gone-wild-airline-has-to-honor-a-refund-policy"
+      }
+     ],
+     "talk": "Beyond security: responsible-AI detectors flag competitor talk, brand risk and regulated advice. We're back in monitor mode now, and everything we just did is on the dashboard.",
+     "say": "Beyond security: what your AI says can bind you. A tribunal held Air Canada to a refund policy its chatbot made up. AI Guard flags competitor talk, brand risk and regulated advice.",
+     "show": "The responsible-AI detectors. We're back in Monitor, and every step is now in Insights. Click Recap.",
+     "sowhat": "One control for security and responsible AI, with the evidence trail auditors ask for.",
+     "ask": "Who signs off on what your customer-facing AI is allowed to say?",
+     "objections": [
+      {
+       "q": "Does this work for our own apps and agents, not just ChatGPT?",
+       "a": "Yes. Your apps call AI Guard through the API or proxy, so the same policy covers home-grown apps, copilots and agents."
+      }
+     ],
+     "filler": "While this applies: everything we just did is already logged with the user, the detectors and the action. That's the audit trail for AI usage policies."
     }
    ]
   },
@@ -991,6 +1144,348 @@
      "test": "clean-clean",
      "policy": "monitor",
      "talk": "Back to monitor. In the console you can also pick exactly which detectors block, for prompts and responses separately."
+    }
+   ]
+  },
+  {
+   "id": "healthcare",
+   "name": "Healthcare (6 minutes)",
+   "minutes": 6,
+   "steps": [
+    {
+     "title": "A clinician's shortcut",
+     "test": "hc-discharge",
+     "talk": "Dana, a hospitalist, has twelve discharges today. She pastes a discharge note into a chatbot to write the family summary.",
+     "say": "Dana, a hospitalist, has twelve discharges today. She pastes a discharge note into a chatbot to write the family summary.",
+     "show": "SSN, date of birth and medical-record detectors on a perfectly ordinary request.",
+     "policy": "monitor",
+     "owasp": [
+      "LLM02"
+     ],
+     "sowhat": "This is how PHI leaves: helpful people, not attackers.",
+     "ask": "How do clinicians use AI today, sanctioned or not?",
+     "objections": [
+      {
+       "q": "We already have DLP. Why this?",
+       "a": "Classic DLP sees files and web posts. AI Guard understands prompts and model replies, including attacks on the model itself, which DLP has no concept of."
+      }
+     ]
+    },
+    {
+     "title": "Referral letters",
+     "test": "hc-referral",
+     "talk": "Referral letters carry names, phone numbers and emails. Logged, but contact details alone aren't blocked.",
+     "say": "Referral letters carry names, phone numbers and emails. Logged, but contact details alone aren't blocked.",
+     "show": "Which details were found, and that the prompt still goes through.",
+     "owasp": [
+      "LLM02"
+     ],
+     "sowhat": "Precision matters: block what's regulated, allow what keeps care moving."
+    },
+    {
+     "title": "Turn on data protection",
+     "test": "hc-claims",
+     "talk": "Now we block data leakage. A billing analyst formats an insurance claims export, and it's stopped before it leaves.",
+     "say": "Now we block data leakage. A billing analyst formats an insurance claims export, and it's stopped before it leaves.",
+     "show": "BLOCK on the claims export: SSNs and member IDs.",
+     "policy": "data",
+     "owasp": [
+      "LLM02"
+     ],
+     "ask": "Which teams handle claims or patient exports today?",
+     "filler": "While this applies: in healthcare we usually turn on data protection first, because every PHI incident is reportable."
+    },
+    {
+     "title": "Clinical advice",
+     "test": "hc-dosing-advice",
+     "talk": "Patients and staff ask AI for dosing advice. AI Guard flags medical advice so you decide where AI may answer.",
+     "say": "Patients and staff ask AI for dosing advice. AI Guard flags medical advice so you decide where AI may answer.",
+     "show": "The medical-advice detector.",
+     "owasp": [
+      "LLM09"
+     ],
+     "ask": "Do you have rules for AI giving clinical guidance?"
+    },
+    {
+     "title": "The model gives a record back",
+     "test": "hc-out-record",
+     "talk": "Responses are checked as well. If an assistant connected to the EHR returns a full record, it's caught on the way out.",
+     "say": "Responses are checked as well. If an assistant connected to the EHR returns a full record, it's caught on the way out.",
+     "show": "Response-side detection on the record.",
+     "owasp": [
+      "LLM02",
+      "LLM05"
+     ]
+    },
+    {
+     "title": "Everyday work is untouched",
+     "test": "hc-clean",
+     "talk": "A nurse asks for an SBAR handoff template. No patient data, so it flows. Back to Monitor, and everything is in Insights.",
+     "say": "A nurse asks for an SBAR handoff template. No patient data, so it flows. Back to Monitor, and everything is in Insights.",
+     "show": "ALLOW. Then click Recap.",
+     "policy": "monitor",
+     "sowhat": "Protection without slowing care down."
+    }
+   ]
+  },
+  {
+   "id": "financial-services",
+   "name": "Financial services (6 minutes)",
+   "minutes": 6,
+   "steps": [
+    {
+     "title": "A wire confirmation",
+     "test": "fs-wire",
+     "talk": "Marcus in operations drafts a wire confirmation with the help of AI. The IBAN and SWIFT code go with it.",
+     "say": "Marcus in operations drafts a wire confirmation with the help of AI. The IBAN and SWIFT code go with it.",
+     "show": "Bank-detail detectors in Monitor.",
+     "policy": "monitor",
+     "owasp": [
+      "LLM02"
+     ],
+     "ask": "Which operations teams already use AI for customer correspondence?",
+     "objections": [
+      {
+       "q": "We already have DLP. Why this?",
+       "a": "Classic DLP sees files and web posts. AI Guard understands prompts and model replies, including attacks on the model itself, which DLP has no concept of."
+      }
+     ]
+    },
+    {
+     "title": "KYC file summary",
+     "test": "fs-kyc",
+     "talk": "An analyst summarizes a KYC file: SSN, passport number, date of birth.",
+     "say": "An analyst summarizes a KYC file: SSN, passport number, date of birth.",
+     "show": "Identity detectors, logged in Monitor.",
+     "owasp": [
+      "LLM02"
+     ]
+    },
+    {
+     "title": "Turn on data protection",
+     "test": "fs-card-dispute",
+     "talk": "Now block data leakage. A card number in a dispute letter is stopped before it reaches the model.",
+     "say": "Now block data leakage. A card number in a dispute letter is stopped before it reaches the model.",
+     "show": "BLOCK on the card number.",
+     "policy": "data",
+     "owasp": [
+      "LLM02"
+     ],
+     "sowhat": "PCI data stays out of third-party models, with a log to prove it.",
+     "filler": "While this applies: regulators care where card and account data goes. This gives you the control and the evidence."
+    },
+    {
+     "title": "Insider information",
+     "test": "fs-insider",
+     "talk": "Someone drafts a message about a merger that isn't public yet. AI Guard flags material non-public information.",
+     "say": "Someone drafts a message about a merger that isn't public yet. AI Guard flags material non-public information.",
+     "show": "The detectors on the merger message.",
+     "owasp": [
+      "LLM02"
+     ],
+     "ask": "How do you supervise AI use by deal teams today?"
+    },
+    {
+     "title": "Investment advice",
+     "test": "fs-advice",
+     "talk": "A client-facing assistant is asked which stocks to buy. Flagged as financial advice, so you decide where AI may answer.",
+     "say": "A client-facing assistant is asked which stocks to buy. Flagged as financial advice, so you decide where AI may answer.",
+     "show": "The financial-advice detector.",
+     "owasp": [
+      "LLM09"
+     ]
+    },
+    {
+     "title": "Keys in trading code",
+     "test": "fs-trading-code",
+     "talk": "A developer pastes broker code with a live API key. Back to Monitor afterwards, and it's all in Insights.",
+     "say": "A developer pastes broker code with a live API key. Back to Monitor afterwards, and it's all in Insights.",
+     "show": "The secrets detector. Then click Recap.",
+     "policy": "monitor",
+     "owasp": [
+      "LLM02"
+     ],
+     "news": [
+      {
+       "headline": "Samsung bans generative AI tools after engineers paste confidential source code into ChatGPT",
+       "source": "Forbes",
+       "year": "2023",
+       "url": "https://www.forbes.com.au/news/innovation/samsung-bans-chatgpt-among-employees-after-sensitive-code-leak/"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "legal",
+   "name": "Legal (5 minutes)",
+   "minutes": 5,
+   "steps": [
+    {
+     "title": "A privileged memo",
+     "test": "lg-privileged",
+     "talk": "Priya, an associate, summarizes a privileged litigation memo with a public chatbot.",
+     "say": "Priya, an associate, summarizes a privileged litigation memo with a public chatbot.",
+     "show": "What AI Guard flags on privileged content.",
+     "policy": "monitor",
+     "owasp": [
+      "LLM02"
+     ],
+     "sowhat": "Privilege can be waived by careless disclosure. This is where it happens now.",
+     "ask": "Does your firm or legal team have a policy on AI and privileged material?"
+    },
+    {
+     "title": "An NDA with personal data",
+     "test": "lg-nda",
+     "talk": "Filling in an NDA puts a person's address and phone number into the prompt.",
+     "say": "Filling in an NDA puts a person's address and phone number into the prompt.",
+     "show": "The personal-data detectors.",
+     "owasp": [
+      "LLM02"
+     ]
+    },
+    {
+     "title": "Block data leakage",
+     "test": "lg-privileged",
+     "talk": "Same memo, with data protection on.",
+     "say": "Same memo, with data protection on.",
+     "show": "The result with the stricter policy.",
+     "policy": "data",
+     "owasp": [
+      "LLM02"
+     ],
+     "filler": "While this applies: legal teams usually want this on from day one for privileged and client matters."
+    },
+    {
+     "title": "Legal advice",
+     "test": "lg-advice",
+     "talk": "Employees ask AI what to file in a dispute. Flagged as legal advice.",
+     "say": "Employees ask AI what to file in a dispute. Flagged as legal advice.",
+     "show": "The legal-advice detector.",
+     "owasp": [
+      "LLM09"
+     ],
+     "news": [
+      {
+       "headline": "Moffatt v. Air Canada: the airline must honor a refund policy its chatbot made up",
+       "source": "Manatt",
+       "year": "2024",
+       "url": "https://manatt.com/insights/newsletters/advertising-law/ai-gone-wild-airline-has-to-honor-a-refund-policy"
+      }
+     ]
+    },
+    {
+     "title": "Everyday work is untouched",
+     "test": "lg-clean",
+     "talk": "Definitions and drafting help flow freely. Back to Monitor, and it's all in Insights.",
+     "say": "Definitions and drafting help flow freely. Back to Monitor, and it's all in Insights.",
+     "show": "ALLOW. Then click Recap.",
+     "policy": "monitor"
+    }
+   ]
+  },
+  {
+   "id": "end-to-end",
+   "name": "AI security end to end (ZIA + AI Guard)",
+   "minutes": 10,
+   "requires": "zia",
+   "steps": [
+    {
+     "kind": "show",
+     "title": "Discover: which AI apps are in use",
+     "owasp": [],
+     "say": "First question every CISO asks: which AI tools are people actually using? ZIA sees every AI app on the network, sanctioned or not.",
+     "show": "Shadow IT for the AI/ML category: the apps, users and traffic from the traffic generator.",
+     "where": "ZIA admin console > Analytics > Shadow IT (filter the category to AI/ML). Or Web Insights, filtered on the user se-demo-traffic.",
+     "link": "https://console.zscaler.com",
+     "link_label": "Open the ZIA console",
+     "ask": "If I asked how many AI apps your people used last month, would you know?",
+     "talk": ""
+    },
+    {
+     "kind": "show",
+     "title": "Control: allow the good, block the risky",
+     "owasp": [],
+     "say": "Then you decide: ChatGPT, Copilot and Gemini allowed; DeepSeek and Character.AI blocked. One Cloud App Control policy.",
+     "show": "The SE-Demo Cloud App Control rules and their hits in Web Insights.",
+     "where": "ZIA admin console > Policy > Cloud App Control (AI & ML), then Analytics > Web Insights filtered to Action: Blocked.",
+     "link": "https://console.zscaler.com",
+     "link_label": "Open the ZIA console",
+     "talk": "",
+     "sowhat": "No more all-or-nothing bans: sanction the tools you trust and block the rest."
+    },
+    {
+     "kind": "show",
+     "title": "Protect data going to AI sites",
+     "owasp": [
+      "LLM02"
+     ],
+     "news": [
+      {
+       "headline": "Samsung bans generative AI tools after engineers paste confidential source code into ChatGPT",
+       "source": "Forbes",
+       "year": "2023",
+       "url": "https://www.forbes.com.au/news/innovation/samsung-bans-chatgpt-among-employees-after-sensitive-code-leak/"
+      }
+     ],
+     "say": "Even in allowed AI sites, inline DLP stops card numbers and SSNs from being pasted or uploaded.",
+     "show": "The SE-Demo DLP rule hits for the test user.",
+     "where": "ZIA admin console > Analytics > Web Insights (or DLP incidents), filtered on the user se-demo-traffic and the DLP rule 'SE-Demo: Block card numbers'.",
+     "link": "https://console.zscaler.com",
+     "link_label": "Open the ZIA console",
+     "talk": ""
+    },
+    {
+     "title": "Inside your own AI app: injection",
+     "test": "prompt-injection-ignore-instructions",
+     "talk": "ZIA protects people using AI. AI Guard protects the AI apps you build. Here is an injection against your own assistant.",
+     "say": "ZIA protects people using AI. AI Guard protects the AI apps you build. Here is an injection against your own assistant.",
+     "show": "Prompt injection detected.",
+     "policy": "attacks",
+     "owasp": [
+      "LLM01"
+     ],
+     "news": [
+      {
+       "headline": "A dealership chatbot is talked into 'agreeing' to sell a Chevy Tahoe for $1",
+       "source": "AI Incident Database",
+       "year": "2023",
+       "url": "https://incidentdatabase.ai/entities/chevrolet-of-watsonville"
+      }
+     ],
+     "filler": "While this applies: ZIA and AI Guard share one platform, so the same users and the same policy language cover both."
+    },
+    {
+     "title": "Inside your own AI app: hidden instructions",
+     "test": "invisible-text-zero-width-smuggle",
+     "talk": "Hidden instructions in content the app reads are blocked too.",
+     "say": "Hidden instructions in content the app reads are blocked too.",
+     "show": "BLOCK on invisible text.",
+     "owasp": [
+      "LLM01"
+     ],
+     "news": [
+      {
+       "headline": "EchoLeak: one crafted email could make Microsoft 365 Copilot leak data, with no click",
+       "source": "The Hacker News",
+       "year": "2025",
+       "url": "https://thehackernews.com/2025/06/zero-click-ai-vulnerability-exposes.html"
+      }
+     ]
+    },
+    {
+     "title": "Inside your own AI app: data in the answer",
+     "test": "out-output-pii",
+     "talk": "And the model's answers are checked on the way out. Back to Monitor, then Recap.",
+     "say": "And the model's answers are checked on the way out. Back to Monitor, then Recap.",
+     "show": "Response-side detection. Then click Recap.",
+     "policy": "monitor",
+     "owasp": [
+      "LLM02",
+      "LLM05"
+     ],
+     "sowhat": "Discover, control and protect: one platform from the user's browser to your own models.",
+     "proxy_test": "output-pii-generate-fake-record"
     }
    ]
   }

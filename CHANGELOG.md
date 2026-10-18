@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+- Guided demo: each step can carry a **Say** line, what to **Show**, **presenter notes** (so what, a discovery
+  question, objection answers, a line for the policy wait), sourced **In the news** cards and **OWASP Top 10 for LLM
+  Applications (2025)** tags. Older steps with one talk paragraph show as before. **Recap** on the last step lists what
+  each step caught, with a copy button for the follow-up email.
+- New storylines: Healthcare, Financial services, Legal, and *AI security end to end* (ZIA + AI Guard). The original
+  three keep their order and steps; their talk tracks gained the new fields.
+- `aiguard-kit ready` and **Demo readiness** in the console: policy in Monitor, app keys, and the ZIA checks when the
+  ZIA demo is set up.
+- README: **Rolling back**. Installing an older release over a newer one is tested.
+- ZIA demo (separate `zia-v*` pre-releases, see CHANGELOG-ZIA.md): drift check with `zia status --fix`.
+
 ## 1.7.2
 - **Setup health check and Repair.** When the console opens (and after setup or an update) it checks, read-only, that
   this computer's keys still exist in AI Guard and are in the kit's rules, and that the demo policy and apps are
@@ -16,6 +28,33 @@
   response, with Copy.
 - A Detection API 401 or 403 now explains that this computer's key was deleted or isn't in the rule, and to rerun setup, instead of pointing at ZIdentity permissions.
 - The update check asks proxies and CDNs not to answer from cache, so **Check again** always sees a new release.
+- **Internet Access (ZIA).** New `aiguard-kit zia …` commands and a console tab (see ZIA.md):
+  - `zia setup` creates an `SE-Demo:` ZIA policy through OneAPI and activates it. It covers URL filtering (with a
+    tenant-check category), Browser Isolation where licensed, Cloud App Control, File Type Control, DLP, firewall
+    with a demo-ports service, and DNS. Every rule is scoped to one test user and labeled `SE-Demo`. Anything the
+    tenant lacks is skipped and named. `zia teardown` removes it all and activates.
+  - Setup creates the test user for you: `se-demo-traffic@<tenant domain>` as a ZIA Internet & SaaS user, in a
+    group and department called `SE-Demo: traffic generator`, with a generated password kept in the keychain.
+    `zia password` (or **Show password** in the console) shows it, on this computer only, when you sign in to
+    Client Connector. `--via zidentity` creates a ZIdentity user instead (you set its password by hand). `--user`
+    uses an existing user. Teardown removes the user, group and department only if the kit created them.
+  - `zia preflight` checks ZIA API access, the test user, DLP engines, SSL inspection, Browser Isolation and create
+    permission.
+  - `zia dashboards` lists which Insights panels are still empty.
+  - The traffic generator (`zia check`, `zia traffic`, `zia schedule`) runs on a separate VM with Client Connector
+    signed in as the test user. It needs no keys. It sends web categories, 60 SaaS apps, GenAI apps, EICAR over
+    HTTP/HTTPS, Safe Browsing test pages, fake-data DLP posts, file uploads and downloads, DNS and unusual ports.
+    `zia check` proves it reaches the demo tenant as the test user and that Z-Tunnel 2.0 is on.
+- `zia aws` (or **Download CloudFormation template** in the console) writes a template for a Windows generator on
+  AWS. It has its own VPC with no inbound ports and Fleet Manager remote desktop. The first-boot script installs uv,
+  the kit and, optionally, Client Connector, and registers SYSTEM tasks for traffic every 30 minutes and a check at
+  startup. It also adds a weekday start and nightly stop. No AWS CLI or secrets are needed; deleting the stack
+  removes it all.
+- Traffic rounds only run once ip.zscaler.com confirms the machine goes through Zscaler (`--anyway` overrides).
+- Products are now modules beside `aiguard_kit.py` (`PRODUCTS`), sharing credentials, config, console, installer and
+  updater. AI Guard behavior is unchanged.
+- The scheduler supports more than one job. The AI Guard job keeps its names (`AIGuardSEKit-<profile>`,
+  `trickle.log`), and install/uninstall re-point or remove every job.
 
 ## 1.7.1
 - Fixed: setup failed at "Policy rules" with `applicationCredentialsId … not found` when this computer's saved key

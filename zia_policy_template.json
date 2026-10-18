@@ -1,0 +1,71 @@
+{
+  "about": "The SE-Demo ZIA policy. Every object gets the kit prefix ('SE-Demo: ...'), the SE-Demo rule label, and is scoped to the test user(s) chosen in setup, so other users and locations are never affected. Names must stay within 31 characters including the prefix. Categories, apps, file types and engines were checked against a live tenant; setup re-checks them and skips anything your tenant doesn't have.",
+  "label": "SE-Demo",
+  "tenant_check": {
+    "name": "tenant check",
+    "description": "Blocked only for the kit's test user. If the generator sees this blocked, it is in the demo tenant.",
+    "urls": ["www.example.com", "example.com"]
+  },
+  "aws_mgmt": {
+    "name": "AWS management",
+    "description": "AWS Systems Manager endpoints the traffic generator's remote desktop (Fleet Manager) depends on. Never decrypted, so inspecting the test user doesn't cut off remote access.",
+    "urls": [".ssm.us-east-1.amazonaws.com", ".ssmmessages.us-east-1.amazonaws.com", ".ec2messages.us-east-1.amazonaws.com", ".ssm.us-east-2.amazonaws.com", ".ssmmessages.us-east-2.amazonaws.com", ".ec2messages.us-east-2.amazonaws.com", ".ssm.us-west-1.amazonaws.com", ".ssmmessages.us-west-1.amazonaws.com", ".ec2messages.us-west-1.amazonaws.com", ".ssm.us-west-2.amazonaws.com", ".ssmmessages.us-west-2.amazonaws.com", ".ec2messages.us-west-2.amazonaws.com"]
+  },
+  "ssl_inspection": [
+    {"name": "AWS SSM bypass", "action": "DO_NOT_DECRYPT", "url_categories": ["@aws_mgmt"],
+     "why": "Listed first so it stays above 'Inspect test user' (setup keeps each kind in template order)."},
+    {"name": "Inspect test user", "action": "DECRYPT",
+     "why": "EICAR over HTTPS, DLP and Cloud App Control only work on decrypted traffic."}
+  ],
+  "client_connector": {
+    "app_profile": "SE-Demo traffic generator",
+    "forwarding_profile": "SE-Demo Z-Tunnel 2.0",
+    "why": "A Windows app profile for the kit's test-user group only: a copy of the tenant's default Windows profile that installs the Zscaler root certificate and uses a copy of its forwarding profile switched to Z-Tunnel 2.0, so firewall and DNS rules apply."
+  },
+  "url_filtering": [
+    {"name": "Block tenant check", "action": "BLOCK", "url_categories": ["@tenant_check"]},
+    {"name": "Block gambling", "action": "BLOCK", "url_categories": ["GAMBLING"]},
+    {"name": "Block anonymizers", "action": "BLOCK", "url_categories": ["ANONYMIZER"]},
+    {"name": "Block weapons", "action": "BLOCK", "url_categories": ["WEAPONS_AND_BOMBS"]},
+    {"name": "Caution social", "action": "CAUTION", "url_categories": ["SOCIAL_NETWORKING"]},
+    {"name": "Caution streaming", "action": "CAUTION", "url_categories": ["STREAMING_MEDIA"]}
+  ],
+  "isolation": [
+    {"name": "Isolate games", "url_categories": ["OTHER_GAMES"]}
+  ],
+  "cloud_app_control": [
+    {"name": "Block file uploads", "rule_type": "FILE_SHARE",
+     "applications": ["WETRANSFER", "MEGA", "SENDSPACE", "FILE_IO", "FILEBIN"],
+     "actions": [["BLOCK_FILE_SHARE_UPLOAD"]]},
+    {"name": "Block risky GenAI", "rule_type": "AI_ML",
+     "applications": ["DEEPSEEK", "CHARACTER_AI", "POE_AI"],
+     "actions": [["BLOCK_AI_ML_WEB_USE", "BLOCK_AI_ML_ACCESS"]]},
+    {"name": "Allow GenAI", "rule_type": "AI_ML",
+     "applications": ["CHATGPT_AI", "GOOGLE_GEMINI", "MICROSOFT_COPILOT", "CLAUDE_AI", "PERPLEXITY"],
+     "actions": [["ALLOW_AI_ML_WEB_USE", "ALLOW_AI_ML_ACCESS"]]},
+    {"name": "Block remote access", "rule_type": "ENTERPRISE_COLLABORATION",
+     "applications": ["ANYDESK", "TEAMVIEWER"],
+     "actions": [["BLOCK_ENTERPRISE_COLLABORATION_ACCESS", "BLOCK_ENTERPRISE_COLLABORATION_WEB_USE"]]}
+  ],
+  "file_type_control": [
+    {"name": "Block EXE downloads", "filtering_action": "BLOCK", "operation": "DOWNLOAD",
+     "file_types": ["FTCATEGORY_WINDOWS_EXECUTABLES", "FTCATEGORY_MSI"]},
+    {"name": "Monitor file transfers", "filtering_action": "ALLOW", "operation": "UPLOAD_DOWNLOAD",
+     "file_types": ["FTCATEGORY_PDF_DOCUMENT", "FTCATEGORY_MS_WORD", "FTCATEGORY_MS_EXCEL", "FTCATEGORY_CSV",
+                    "FTCATEGORY_ZIP", "FTCATEGORY_TXT", "FTCATEGORY_JSON"]}
+  ],
+  "dlp": [
+    {"name": "Block card numbers", "action": "BLOCK", "engines": ["5 or more Credit Card Numbers"]},
+    {"name": "Monitor PII and PCI", "action": "ALLOW",
+     "engines": ["PCI", "PII (US) - Low Volume", "Credentials and Secrets", "5 or more PII Identifiers"]}
+  ],
+  "network_service": {"name": "demo ports", "description": "Unusual ports the traffic generator tries.",
+                      "dest_tcp": [23, 2222, 4444, 8888]},
+  "firewall": [
+    {"name": "Block demo ports", "action": "BLOCK_RESET", "nw_services": ["@demo_ports"]}
+  ],
+  "dns": [
+    {"name": "Block marijuana DNS", "action": "BLOCK", "res_categories": ["MARIJUANA"],
+     "why": "A category the web sweep doesn't visit, so DNS blocks never hide the URL-filtering blocks."}
+  ]
+}
