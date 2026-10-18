@@ -418,6 +418,46 @@ def test_z_tunnel_2_copies_a_profile_you_already_made(zenv, capsys):
     assert "your Z-Tunnel 2.0 profile 'ztest'" in capsys.readouterr().out
 
 
+def test_drift_is_clean_right_after_setup(zenv):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    by = {c["id"]: c for c in z.drift(fake, kit.load_cfg())}
+    assert by["drift-missing"]["status"] == "ok" and by["drift-order"]["status"] == "ok"
+    assert by["drift-zcc-fwd"]["status"] == "ok" and by["drift-zcc-app"]["status"] == "ok"
+    assert not [c for c in by.values() if c.get("fixable")]
+
+
+def test_drift_finds_problems_and_fix_repairs_only_kit_objects(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    # break things the way they broke in a real tenant
+    blk = next(r for r in fake.db["dlp_web_rules"] if r["name"] == "SE-Demo: Block card numbers")
+    mon = next(r for r in fake.db["dlp_web_rules"] if r["name"] == "SE-Demo: Monitor PII and PCI")
+    blk["order"], mon["order"] = mon["order"], blk["order"]
+    fake.db["url_filtering"] = [r for r in fake.db["url_filtering"] if r["name"] != "SE-Demo: Block gambling"]
+    next(r for r in fake.db["cloud_firewall_rules"] if r["name"] == "SE-Demo: Block demo ports")["state"] = "DISABLED"
+    fake.db["ssl"].append({"id": 990, "name": "SE-Demo", "order": 9, "state": "ENABLED", "action": {"type": "DO_NOT_DECRYPT"}})
+    fwd = next(f for f in fake.fwd if f["name"] == "SE-Demo Z-Tunnel 2.0")
+    for a in fwd["forwardingProfileActions"]:
+        a["actionType"] = 3
+    fake.web.append({"id": 85, "name": "Everyone first", "ruleOrder": 0, "groupAll": 1, "active": 1})
+    by = {c["id"]: c for c in z.drift(fake, kit.load_cfg())}
+    assert "Block gambling" in by["drift-missing"]["detail"] and by["drift-missing"]["fixable"]
+    assert "Block demo ports" in by["drift-disabled"]["detail"]
+    assert "Monitor PII and PCI > SE-Demo: Block card numbers" in by["drift-order"]["detail"]
+    assert "'SE-Demo' (SSL inspection)" in by["drift-lookalike"]["detail"] and not by["drift-lookalike"].get("fixable")
+    assert by["drift-zcc-fwd"]["status"] == "warn"
+    assert "Everyone first" in by["drift-zcc-app"]["detail"]
+    kit.ARGS[:] = ["zia", "status", "--fix"]
+    kit.cmd_zia()
+    after = {c["id"]: c for c in z.drift(fake, kit.load_cfg())}
+    assert after["drift-missing"]["status"] == "ok" and after["drift-order"]["status"] == "ok"
+    assert "drift-disabled" not in after and after["drift-zcc-fwd"]["status"] == "ok"
+    assert any(r["name"] == "SE-Demo" for r in fake.db["ssl"])                    # yours: reported, never touched
+    assert any(p["name"] == "Everyone first" for p in fake.web)
+    assert "Everyone first" in after["drift-zcc-app"]["detail"]                    # can't fix someone else's profile
+
+
 def test_client_connector_api_refused_still_applies_the_zia_policy(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--yes")
     fake.zcc_allowed = False

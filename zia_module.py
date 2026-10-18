@@ -922,6 +922,140 @@ def activate(t, log):
         log("warn", f"Activation failed: {str(e)[:160]}. Activate pending changes in the ZIA console. {zhint(e)}")
 
 
+# ---------------------------------------------------------------- drift (is the tenant still what setup made?)
+KIND_LABEL = {"url_filtering": "URL filtering", "cloud_app_control": "Cloud App Control", "file_type_control":
+              "File Type Control", "dlp": "DLP", "firewall": "firewall", "dns": "DNS control", "ssl": "SSL inspection"}
+
+
+def _chk(cid, label, status, detail="", fix="", fixable=False):
+    return {"id": cid, "label": label, "status": status, "detail": detail, "fix": fix, "fixable": fixable}
+
+
+def drift(t, cfg):
+    """Compares the tenant with what setup would make. Returns kit-style checks; 'fixable' ones are repaired by
+    running setup again (`zia status --fix`). Objects you made yourself are reported, never changed."""
+    z = zcfg(cfg)
+    out = []
+    if not z.get("users"):
+        return [_chk("drift-user", "Demo policy set up", "fail", "no test user chosen yet",
+                     "Run `zia setup` (or Create or update policy in the console).")]
+    uid = {u["id"] for u in z["users"]}
+    rules, notes = plan(t, cfg)
+    cache, groups = {}, {}
+    for kind, rule_type, name, body in rules:
+        groups.setdefault((kind, rule_type), []).append(name)
+    missing, disabled, unscoped, order_bad, lookalike = [], [], [], [], []
+    for (kind, rule_type), names in groups.items():
+        try:
+            existing = cache.setdefault((kind, rule_type), list_rules(t, kind, rule_type))
+        except Exception as e:
+            out.append(_chk(f"drift-{kind}", f"{KIND_LABEL[kind]} rules", "warn", f"couldn't read them: {str(e)[:120]}"))
+            continue
+        found = []
+        for name in names:
+            hit = next((r for r in existing if g(r, "name") in names_for(name)), None)
+            if not hit:
+                missing.append(name)
+                continue
+            found.append((name, int(g(hit, "order") or 0)))
+            if g(hit, "state") not in (None, "ENABLED"):
+                disabled.append(name)
+            users = {g(u, "id") if isinstance(u, dict) else u for u in (g(hit, "users") or [])}
+            if users and not users & uid:
+                unscoped.append(name)
+        orders = [o for _, o in found]
+        if orders != sorted(orders):
+            order_bad.append(f"{KIND_LABEL[kind]}: " + " > ".join(n for n, _ in sorted(found, key=lambda x: x[1])))
+        planned = {x for n in names for x in names_for(n)}
+        lookalike += [f"'{g(r, 'name')}' ({KIND_LABEL[kind]})" for r in existing
+                      if str(g(r, "name") or "").startswith(K.PREFIX) and g(r, "name") not in planned and not mine(r)]
+    total = len(rules)
+    if missing:
+        out.append(_chk("drift-missing", "Demo rules present", "warn", f"{len(missing)} of {total} missing: " +
+                        ", ".join(missing[:6]) + ("…" if len(missing) > 6 else ""), "Run `zia status --fix`.", True))
+    else:
+        out.append(_chk("drift-missing", "Demo rules present", "ok", f"all {total}"))
+    if disabled:
+        out.append(_chk("drift-disabled", "Demo rules enabled", "warn", ", ".join(disabled), "Run `zia status --fix`.", True))
+    if unscoped:
+        out.append(_chk("drift-scope", "Demo rules apply to the test user", "warn", ", ".join(unscoped),
+                        "Run `zia status --fix`.", True))
+    out.append(_chk("drift-order", "Demo rules in the intended order", "warn" if order_bad else "ok",
+                    "; ".join(order_bad) if order_bad else "first match wins, so blocks sit above monitors",
+                    "Run `zia status --fix`." if order_bad else "", bool(order_bad)))
+    if lookalike:
+        out.append(_chk("drift-lookalike", "Objects named like the kit's, but not the kit's", "info", ", ".join(lookalike),
+                        "Setup and teardown leave these alone. Delete them in the console if you made them for testing."))
+    for n in notes:
+        out.append(_chk("drift-note", "Skipped by design", "info", n))
+    out += zcc_drift(t, cfg)
+    try:
+        st = t.call("activate", "status")
+        state = g(st, "status") if isinstance(st, dict) else st
+        if state and str(state).upper() != "ACTIVE":
+            out.append(_chk("drift-activate", "ZIA changes activated", "warn", f"status {state}",
+                            "Activate pending changes in the ZIA console, or run `zia status --fix`.", True))
+    except Exception as e:
+        K.vlog(f"activation status: {e}")
+    return out
+
+
+def zcc_drift(t, cfg):
+    app_name, fwd_name = zcc_names()
+    gid = zcc_group_id(cfg)
+    if not app_name or not gid:
+        return []
+    try:
+        fwds = _zcc_list(t, "zcc.forwarding_profile")
+        pols = _zcc_list(t, "zcc.web_policy", device_type="windows")
+    except Exception as e:
+        return [_chk("drift-zcc", "Client Connector profiles", "info", f"couldn't read them ({str(e)[:100]})",
+                     "Give the API client Client Connector access to check these.")]
+    out = []
+    f = next((x for x in fwds if g(x, "name") == fwd_name), None)
+    acts = (f or {}).get("forwardingProfileActions") or []
+    if not f:
+        out.append(_chk("drift-zcc-fwd", "Z-Tunnel 2.0 forwarding profile", "warn", f"'{fwd_name}' not found",
+                        "Run `zia status --fix`.", True))
+    elif not acts or not all(is_z2(a) for a in acts):
+        out.append(_chk("drift-zcc-fwd", "Z-Tunnel 2.0 forwarding profile", "warn",
+                        f"'{fwd_name}' isn't Tunnel + Z-Tunnel 2.0 on every network type",
+                        "Run `zia status --fix`, then turn Client Connector off and on on the generator.", True))
+    else:
+        out.append(_chk("drift-zcc-fwd", "Z-Tunnel 2.0 forwarding profile", "ok", f"'{fwd_name}'"))
+    a = next((x for x in pols if g(x, "name") == app_name), None)
+    if not a:
+        out.append(_chk("drift-zcc-app", "Client Connector app profile for the test group", "warn",
+                        f"'{app_name}' not found", "Run `zia status --fix`.", True))
+        return out
+    groups = [int(g(x, "id")) for x in (a.get("groups") or []) if g(x, "id")] or \
+        [int(x) for x in (a.get("groupIds") or []) if x]
+    problems = []
+    if int(gid) not in groups:
+        problems.append("not assigned to the test group")
+    if f and str(g(a, "forwardingProfileId")) != str(g(f, "id")):
+        problems.append(f"uses another forwarding profile ({g(a, 'forwardingProfileId')})")
+    if int((a.get("windowsPolicy") or {}).get("installSslCerts") or 0) != 1:
+        problems.append("doesn't install the Zscaler root certificate")
+    if int(g(a, "active") or 0) != 1:
+        problems.append("inactive")
+    ahead = [g(x, "name") for x in pols if x is not a and int(g(x, "active") or 0) == 1
+             and int(g(x, "ruleOrder") or 0) < int(g(a, "ruleOrder") or 0)
+             and (int(g(x, "groupAll") or 0) == 1 or int(gid) in [int(g(y, "id")) for y in (x.get("groups") or []) if g(y, "id")])]
+    if ahead:
+        problems.append("profiles that also match the test user come first: " + ", ".join(map(str, ahead)))
+    out.append(_chk("drift-zcc-app", "Client Connector app profile for the test group", "warn" if problems else "ok",
+                    "; ".join(problems) if problems else f"'{app_name}'",
+                    "Run `zia status --fix`." if problems else "", bool(problems)))
+    return out
+
+
+def fix_drift(t, cfg, log):
+    """Repairs what the kit owns by running setup again (it creates, updates and re-orders in place)."""
+    res = setup_apply(t, cfg, log)
+    return {"setup": res, "checks": drift(t, cfg)}
+
+
 # ---------------------------------------------------------------- teardown
 def kit_objects(t, cfg=None):
     tpl = template()
@@ -1264,6 +1398,19 @@ def cmd_status():
     last = K.CFG_DIR / "zia-traffic-last.json"
     if last.exists():
         K.info(f"Last traffic round on this machine: {json.loads(last.read_text(encoding='utf-8')).get('summary')}")
+    if not z.get("users"):
+        return
+    K.head("Drift: is the tenant still what setup made?")
+    checks = drift(t, cfg)
+    K.print_checks(checks)
+    if any(c.get("fixable") for c in checks):
+        if "--fix" in K.ARGS or K.yesno("Fix these now? (runs setup again; only kit objects change)", False):
+            K.head("Fixing")
+            res = fix_drift(t, cfg, K.cli_log)
+            K.head("After the fix")
+            K.print_checks(res["checks"])
+        else:
+            print("  Fix later with: ./aiguard-kit zia status --fix")
 
 
 def aws_module():
@@ -1418,6 +1565,8 @@ def api_get(path, cfg, tenant):
                             for k, _, o in kit_objects(tenant(), cfg)]}
     if path == "/api/zia/dashboards":
         return dashboards(tenant())
+    if path == "/api/zia/drift":
+        return {"checks": drift(tenant(), cfg)}
     return None
 
 
@@ -1455,6 +1604,10 @@ def api_job(path, body, cfg, tenant, log, job):
             zcfg(cfg)["users"] = found
             K.save_cfg(cfg)
         job["verify"] = setup_apply(t, cfg, log)
+        return True
+    if path == "/api/zia/fix":
+        res = fix_drift(tenant(), cfg, log)
+        job["verify"] = res["checks"]
         return True
     if path == "/api/zia/teardown":
         teardown(tenant(), cfg, log, confirm=False)

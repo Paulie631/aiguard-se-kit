@@ -1631,7 +1631,10 @@ def print_checks(checks):
         print(f"  {icon[c['status']]} {c['label']}" + (f"  {C['d']}{c['detail']}{C['x']}" if c["detail"] else ""))
         if c["fix"] and c["status"] in ("warn", "fail"):
             print(f"      {C['y']}Fix:{C['x']} {c['fix']}")
-            print(f"      {C['d']}Details: {HERE / 'PREFLIGHT.md'}#{help_id(c['id'])}{C['x']}")
+            if not c["id"].startswith(("drift-", "ready-", "gen-")):   # those explain themselves; no PREFLIGHT.md entry
+                print(f"      {C['d']}Details: {HERE / 'PREFLIGHT.md'}#{help_id(c['id'])}{C['x']}")
+        elif c["fix"] and c["status"] == "info":
+            print(f"      {C['d']}{c['fix']}{C['x']}")
 
 
 def cmd_preflight():
