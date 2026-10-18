@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.1.3"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.1.4"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -580,7 +580,7 @@ def plan(t, cfg, facts=None):
         out.append(("dns", None, zname(r["name"]),
                     dict(scope, action=r["action"], res_categories=r["res_categories"],
                          description="SE demo kit: DNS control demo (needs Z-Tunnel 2.0)")))
-    for r in tpl.get("ssl_inspection", []):   # order matters: each new rule goes on top, so the bypass ends up above
+    for r in tpl.get("ssl_inspection", []):   # template order = rule order (setup keeps it)
         body = dict(scope, action=SSL_ACTIONS[r["action"]],
                     description="SE demo kit: " + ("decrypts the test user's HTTPS" if r["action"] == "DECRYPT"
                                                    else "never decrypt AWS management traffic (remote desktop)"))
@@ -692,7 +692,7 @@ def setup_apply(t, cfg, log, facts=None):
         log("warn", n)
     log("head", "Demo rules (scoped to " + ", ".join(u.get("email") or u["name"] for u in z["users"]) + ")")
     made, failed = 0, []
-    cache = {}
+    cache, placed = {}, {}
     for kind, rule_type, name, body in rules:
         key = (kind, rule_type)
         if key not in cache:
@@ -709,15 +709,24 @@ def setup_apply(t, cfg, log, facts=None):
                     with_valid_name(lambda **n: t.call("cloudappcontrol", "update_rule", rule_type, g(hit, "id"), **n, **b), nm)
                 else:
                     with_valid_name(lambda **n: t.call(API[kind], "update_rule", g(hit, "id"), **n, **b), nm)
+                b["name"] = nm
+                placed.setdefault(key, []).append((g(hit, "id"), b))
                 log("ok", f"Updated '{name}'")
             else:
                 r = _add_at_top(t, kind, rule_type, b, existing)
                 existing.append(r if isinstance(r, dict) else {"name": name})
+                if isinstance(r, dict) and g(r, "id"):
+                    placed.setdefault(key, []).append((g(r, "id"), dict(b, name=g(r, "name") or b["name"])))
                 log("ok", f"Created '{name}'")
             made += 1
         except Exception as e:
             failed.append(name)
             log("warn", f"'{name}' not created: {str(e)[:200]}. Fix: {zhint(e)}")
+    for (kind, rule_type), group in placed.items():
+        try:
+            keep_template_order(t, kind, rule_type, group, log)
+        except Exception as e:
+            log("warn", f"Couldn't put the {kind.replace('_', ' ')} demo rules in order: {str(e)[:160]}")
     log("head", "Client Connector (test user's group only)")
     zcc = setup_zcc(t, cfg, log)
     log("head", "Activate")
@@ -831,6 +840,27 @@ def zcc_objects(t):
     except Exception as e:
         K.vlog(f"list zcc: {e}")
     return found
+
+
+def keep_template_order(t, kind, rule_type, group, log):
+    """ZIA applies the first matching rule, so the kit's rules of one kind must keep the template's order (for
+    example 'Block card numbers' above 'Monitor PII and PCI'). New rules each go on top, which reverses them, and
+    older kit versions left them reversed; this reassigns the slots the kit's rules already hold, in template order."""
+    if len(group) < 2:
+        return
+    current = {g(r, "id"): int(g(r, "order") or 0) for r in list_rules(t, kind, rule_type)}
+    ids = [rid for rid, _ in group if rid in current]
+    slots = sorted(current[rid] for rid in ids)
+    if [current[rid] for rid in ids] == slots:
+        return
+    for (rid, body), order in zip([x for x in group if x[0] in current], slots):
+        b = dict(body, order=order)
+        nm = b.pop("name")
+        if kind == "cloud_app_control":
+            t.call("cloudappcontrol", "update_rule", rule_type, rid, name=nm, **b)
+        else:
+            t.call(API[kind], "update_rule", rid, name=nm, **b)
+    log("ok", f"Put the {kind.replace('_', ' ')} demo rules in order: " + " > ".join(b["name"] for _, b in group))
 
 
 def activate(t, log):

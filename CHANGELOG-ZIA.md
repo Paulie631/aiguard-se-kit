@@ -3,6 +3,11 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.4
+- Fixed: setup created the demo rules of each kind in reverse order, so `SE-Demo: Monitor PII and PCI` (allow) sat
+  above `SE-Demo: Block card numbers` and DLP never blocked. Setup now keeps each kind in the template's order and
+  puts rules from earlier versions back in order. Run `zia setup` again to fix an existing tenant.
+
 ## 0.1.3
 - Setup now turns on **SSL inspection for the test user** (`SE-Demo: Inspect test user`), so EICAR over HTTPS, DLP
   and Cloud App Control show up. A `SE-Demo: AWS SSM bypass` rule above it never decrypts AWS Systems Manager

@@ -360,6 +360,22 @@ def test_setup_adds_ssl_inspection_with_an_aws_bypass_above_it(zenv):
     assert [r["name"] for r in sorted(fake.db["ssl"], key=lambda r: r["order"])] == names
 
 
+def test_demo_rules_keep_template_order_so_blocks_win(zenv):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+
+    def order(name):
+        return next(r["order"] for r in fake.db["dlp_web_rules"] if r["name"] == name)
+    assert order("SE-Demo: Block card numbers") < order("SE-Demo: Monitor PII and PCI")   # first match wins in ZIA
+    # a tenant set up by an older kit has them reversed: setup puts them back
+    blk = next(r for r in fake.db["dlp_web_rules"] if r["name"] == "SE-Demo: Block card numbers")
+    mon = next(r for r in fake.db["dlp_web_rules"] if r["name"] == "SE-Demo: Monitor PII and PCI")
+    blk["order"], mon["order"] = mon["order"], blk["order"]
+    kit.cmd_zia()
+    assert order("SE-Demo: Block card numbers") < order("SE-Demo: Monitor PII and PCI")
+    assert order("DLP PCI Rule-1") > order("SE-Demo: Monitor PII and PCI")   # the tenant's own rule stays below
+
+
 def test_setup_gives_the_test_group_a_client_connector_profile(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--yes")
     kit.cmd_zia()

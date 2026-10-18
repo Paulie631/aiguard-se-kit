@@ -12,10 +12,10 @@
     "urls": [".ssm.us-east-1.amazonaws.com", ".ssmmessages.us-east-1.amazonaws.com", ".ec2messages.us-east-1.amazonaws.com", ".ssm.us-east-2.amazonaws.com", ".ssmmessages.us-east-2.amazonaws.com", ".ec2messages.us-east-2.amazonaws.com", ".ssm.us-west-1.amazonaws.com", ".ssmmessages.us-west-1.amazonaws.com", ".ec2messages.us-west-1.amazonaws.com", ".ssm.us-west-2.amazonaws.com", ".ssmmessages.us-west-2.amazonaws.com", ".ec2messages.us-west-2.amazonaws.com"]
   },
   "ssl_inspection": [
-    {"name": "Inspect test user", "action": "DECRYPT",
-     "why": "EICAR over HTTPS, DLP and Cloud App Control only work on decrypted traffic."},
     {"name": "AWS SSM bypass", "action": "DO_NOT_DECRYPT", "url_categories": ["@aws_mgmt"],
-     "why": "Created after 'Inspect test user' and placed above it."}
+     "why": "Listed first so it stays above 'Inspect test user' (setup keeps each kind in template order)."},
+    {"name": "Inspect test user", "action": "DECRYPT",
+     "why": "EICAR over HTTPS, DLP and Cloud App Control only work on decrypted traffic."}
   ],
   "client_connector": {
     "app_profile": "SE-Demo traffic generator",
