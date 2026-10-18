@@ -117,7 +117,7 @@ Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 
 ## Internet Access (ZIA)
 
-The kit can also fill ZIA and Insights dashboards in the same demo tenant: `zia setup` creates `SE-Demo:` URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules **for one test user only**, and a separate Windows VM or cloud machine running Client Connector as that user sends real traffic (`zia traffic`, `zia schedule install`). The generator needs no API keys and uses only safe test data (EICAR, Google Safe Browsing test pages, generated fake card numbers and SSNs). Never run it on a corporate laptop. Steps, what's created and what each check proves: [ZIA.md](ZIA.md). The console's **Internet Access (ZIA)** tab does the same.
+The kit can also fill ZIA and Insights dashboards in the same demo tenant: `zia setup` creates `SE-Demo:` URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules **for one test user only**, and a separate Windows VM or cloud machine running Client Connector as that user sends real traffic (`zia traffic`, `zia schedule install`). The generator needs no API keys and uses only safe test data (EICAR, Google Safe Browsing test pages, generated fake card numbers and SSNs). Never run it on a corporate laptop. It ships as its own **Zscaler ZIA SE Demo Kit** release (`zscaler-zia-kit-*.zip`, tags `zia-v*`, pre-release) that installs beside this kit with a `zia-kit` command and its own update channel. Steps, what's created and what each check proves: [ZIA.md](ZIA.md). The console's **Internet Access (ZIA)** tab does the same.
 
 ## Adding tests
 
@@ -153,6 +153,7 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 - **Offline tests:** `uv run --with pytest --with requests --with keyring --with truststore pytest -q tests`. CI runs them on every push (`.github/workflows/ci.yml`).
 - **Claude plugin:** `python tools/build_plugin.py` writes `dist/aiguard-se-demo.plugin`, bundling the kit with a skill so SEs can say "set up the AI Guard demo".
 - **Updates:** the console's **Updates** button (top bar) checks the GitHub releases and turns into **Update to x.y.z** when there's a new version; **Install update** downloads it, verifies its SHA-256, installs it and restarts the console, and **Roll back** goes back one version. From a terminal: `aiguard-kit update` (`--check`, `--rollback`). Git clones are told to `git pull` instead. Set `AIGUARD_KIT_UPDATE_URL` to point at a different `latest.json`.
+- **Publishing a ZIA kit release:** bump `ZIA_VERSION` in `zia_module.py`, add a `## <version>` section to CHANGELOG-ZIA.md, and push. `zia-release.yml` runs the tests, then publishes `zia-v<version>` as a pre-release (never Latest, so the AI Guard update check ignores it) and refreshes the rolling `zia-latest` update channel. `python tools/package.py --edition zia` builds the same files locally.
 - **Publishing a release:** bump `VERSION` in `aiguard_kit.py` and `plugin/.../plugin.json`, add a `## <version>` section at the top of CHANGELOG.md, commit and push to main. The release workflow sees the new version, runs the tests on Windows, macOS and Linux, then publishes the zips, plugins and SHA256SUMS.txt to GitHub Releases. `python tools/package.py` builds the same files locally into `dist/`.
 
 ## Files

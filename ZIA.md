@@ -9,6 +9,19 @@ The kit fills ZIA and Insights dashboards in your **demo or eval tenant**. It wo
 
 APIs can create ZIA policy but can't create log entries. Only real traffic through Zscaler does that. **Never run the generator on a corporate laptop**: its Client Connector belongs to a different tenant, and the traffic includes demo blocks, test malware and fake sensitive data.
 
+## Get the ZIA kit
+
+Download the latest **Zscaler ZIA SE Demo Kit** from the repo's Releases page: `zscaler-zia-kit-<version>.zip`, tagged `zia-v<version>` (pre-release).
+1. Extract the zip.
+2. Double-click **Install ZIA Kit**.
+
+What you get:
+- **Installs beside the AI Guard kit,** in its own folder (`~/.aiguard-se-kit/app-zia`), with its own **Zscaler ZIA Demo Console** shortcut and a `zia-kit` command. It never replaces the AI Guard kit.
+- **Shares the AI Guard kit's saved OneAPI login,** so you don't enter it twice.
+- **Updates itself only from ZIA releases,** through its own update channel. AI Guard users never get ZIA releases offered.
+
+With the ZIA kit, `zia-kit setup` is the same as `aiguard-kit zia setup`, and likewise for every command below.
+
 ## 1. Admin machine: the demo policy
 
 The ZIA tab of the console does the same as these commands.
