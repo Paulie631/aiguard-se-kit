@@ -752,6 +752,19 @@ def test_classify_reads_zscaler_pages(tm):
     assert tm.classify(error=TimeoutError("timed out")) == "error:TimeoutError"
 
 
+def test_classify_tls_error_from_zscaler_counts_as_block(tm, monkeypatch):
+    class SSLError(Exception):
+        pass
+    err = SSLError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate")
+    seen = []
+    monkeypatch.setattr(tm, "peer_issuer", lambda host, port=443: seen.append(host) or "Zscaler")
+    assert tm.classify(error=err, url="https://www.bet365.com/") == "block"
+    assert seen == ["www.bet365.com"]
+    monkeypatch.setattr(tm, "peer_issuer", lambda host, port=443: "other")
+    assert tm.classify(error=err, url="https://expired.example/") == "error:SSLError"
+    assert tm.classify(error=err) == "error:SSLError"
+
+
 class FakeWeb:
     """Answers like the demo tenant would for the test user."""
 

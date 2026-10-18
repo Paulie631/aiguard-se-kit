@@ -3,6 +3,12 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.2
+- Generator check: a blocked HTTPS site now counts as **blocked** when ZIA answers with its block page on a
+  Zscaler-signed certificate the machine doesn't trust. Before, it showed as `error:SSLError`.
+- AWS template: the person who signs in over remote desktop can now open the SE-Demo ZIA console. Before, it
+  stopped with "Could not acquire lock ... Access is denied".
+
 ## 0.1.1
 - The zip now unpacks to a **zscaler-zia-kit** folder, and the installer's messages name it.
 - Fixed: at the end of installing, the installer opened the console from the AI Guard kit's folder instead of

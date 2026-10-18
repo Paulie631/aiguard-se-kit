@@ -142,12 +142,34 @@ BLOCK_WORDS = re.compile(r"blocked|not allowed|restricted|acceptable use|policy|
                          r"sorry|prohibited|data loss|sensitive", re.I)
 
 
-def classify(resp=None, error=None):
+def peer_issuer(host, port=443):
+    """Who issued the certificate this host presents, without verifying it ('' if unknown)."""
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=TIMEOUT) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as tls:
+                der = tls.getpeercert(binary_form=True) or b""
+    except Exception:
+        return ""
+    # Unverified certs aren't parsed by getpeercert(); the issuer's O=/CN= text is readable in the DER bytes.
+    return "Zscaler" if b"Zscaler" in der else "other"
+
+
+def classify(resp=None, error=None, url=None):
     """-> block | caution | isolate | allow | error:<why>. A Zscaler page or redirect counts as Zscaler acting."""
     if error is not None:
         e = str(error)
         if re.search(r"reset|refused|aborted|10054|10061", e, re.I):
             return "block"  # a firewall BLOCK_RESET, or HTTPS blocked without inspection
+        if url and re.search(r"ssl|certificate|tls", type(error).__name__ + " " + e, re.I):
+            # Without SSL inspection, ZIA still answers a blocked HTTPS site with its block page on a Zscaler-signed
+            # certificate. If this machine doesn't trust the Zscaler root, that shows up as a TLS error.
+            host = re.sub(r"^https?://", "", url).split("/")[0].split(":")[0]
+            if peer_issuer(host) == "Zscaler":
+                return "block"
         return "error:" + type(error).__name__
     hops = [h.headers.get("Location", "") for h in getattr(resp, "history", [])] + [str(getattr(resp, "url", ""))]
     trail = " ".join(hops).lower()
@@ -192,7 +214,7 @@ def fetch(s, method, url, stream_limit=False, **kw):
         return {"url": url, "method": method, "outcome": classify(r), "status": r.status_code,
                 "ms": int((time.time() - t0) * 1000)}
     except Exception as e:
-        return {"url": url, "method": method, "outcome": classify(error=e), "error": str(e)[:200],
+        return {"url": url, "method": method, "outcome": classify(error=e, url=url), "error": str(e)[:200],
                 "ms": int((time.time() - t0) * 1000)}
 
 
@@ -449,7 +471,7 @@ def check(cloud=None, log=None, sess=None):
             "" if ok_ else "HTTPS isn't decrypted for this user, so EICAR over HTTPS, DLP and app controls won't show. "
                            "Add a DECRYPT SSL inspection rule for the test user.")
     except Exception as e:
-        bad_ca = "CERTIFICATE_VERIFY_FAILED" in str(e)
+        bad_ca = "CERTIFICATE_VERIFY_FAILED" in str(e) or "certificate verify failed" in str(e).lower()
         add("gen-ssl", "SSL inspection", "warn", str(e)[:160],
             "This machine doesn't trust the Zscaler root CA. Client Connector normally installs it; reinstall it or "
             "import the CA into the Windows certificate store." if bad_ca else "Couldn't open a TLS connection.")
