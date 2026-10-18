@@ -1056,6 +1056,82 @@ def fix_drift(t, cfg, log):
     return {"setup": res, "checks": drift(t, cfg)}
 
 
+# ---------------------------------------------------------------- demo readiness
+LEAD_DAYS = 3   # Insights answers for windows ending about 2 days ago, so traffic must start this long before a demo
+
+
+def _age_hours(stamp):
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z")
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    except Exception:
+        return None
+
+
+def _new_york_now():
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York"))
+    except Exception:   # Windows without the tzdata package
+        return None
+
+
+def ready_checks(cfg, tenant=None):
+    """The ZIA half of the demo readiness check. tenant: a callable returning the ZIA tenant (admin machine only)."""
+    z = zcfg(cfg)
+    out = []
+    last = _last_traffic()
+    if last:   # this machine is a traffic generator
+        age = _age_hours(last.get("time", ""))
+        acted = sum(int(v.get("block") or 0) for v in (last.get("by_type") or {}).values())
+        if last.get("skipped"):
+            out.append(_chk("ready-gen", "Traffic generator", "fail", last.get("summary", "last round skipped"),
+                            "Sign in to Client Connector as the test user, then Check this machine."))
+        elif age is not None and age > 2:
+            out.append(_chk("ready-gen", "Traffic generator", "warn", f"last round {age:.0f} hours ago",
+                            "Start the instance or the scheduled task (zia schedule install), then Send one round."))
+        else:
+            out.append(_chk("ready-gen", "Traffic generator", "ok",
+                            f"last round {('%.0f min' % (age * 60)) if age is not None else 'recently'} ago: "
+                            f"{last.get('total', 0)} requests, Zscaler acted on {acted}"))
+    if z.get("users") and tenant:
+        try:
+            t = tenant()
+            d = drift(t, cfg)
+            bad = [c for c in d if c["status"] in ("warn", "fail")]
+            out.append(_chk("ready-zia-policy", "ZIA demo policy", "warn" if bad else "ok",
+                            "; ".join(c["label"] + (": " + c["detail"] if c["detail"] else "") for c in bad)[:300]
+                            if bad else "all demo rules and profiles in place",
+                            "Run `zia status --fix` (or Check for drift > Fix drift in the console)." if bad else "",
+                            any(c.get("fixable") for c in bad)))
+            dash = dashboards(t)
+            panels = dash.get("panels", [])
+            full = [p for p in panels if p["status"] == "ok"]
+            empty = [p["label"] for p in panels if p["status"] in ("empty", "partial")]
+            out.append(_chk("ready-insights", "ZIA dashboards have data", "ok" if full and not empty else
+                            "warn", f"{len(full)} of {len(panels)} panels" + (f"; empty: {', '.join(empty)}" if empty else ""),
+                            "" if full and not empty else f"Insights trails by about 2 days: keep the generator running "
+                            f"and check again. Start it at least {LEAD_DAYS} days before a demo."))
+        except K.KitError as e:
+            out.append(_chk("ready-zia-policy", "ZIA demo policy", "warn", str(e)[:200], zhint(e)))
+    elif not last:
+        out.append(_chk("ready-zia-policy", "ZIA demo policy", "info", "not set up on this machine",
+                        "Run `zia setup` on your admin machine."))
+    if z.get("aws"):
+        now = _new_york_now()
+        line = "The AWS generator stops at 9 PM New York time and starts itself at 7 AM on weekdays only"
+        off = now is not None and (now.hour >= 21 or now.hour < 7 or (now.weekday() >= 5))
+        out.append(_chk("ready-aws", "AWS generator schedule", "warn" if off else "info",
+                        line + (" — it's probably stopped right now." if off else "."),
+                        "EC2 > Instances > select it > Instance state > Start, about 5 minutes before you need it."
+                        if off else "If you turned the schedule off, ignore this."))
+    out.append(_chk("ready-lead", "Lead time", "info", f"Start traffic at least {LEAD_DAYS} days before a demo",
+                    "ZIA logs show traffic within minutes; Insights dashboards trail by about 2 days."))
+    return out
+
+
 # ---------------------------------------------------------------- teardown
 def kit_objects(t, cfg=None):
     tpl = template()
@@ -1449,6 +1525,8 @@ def cmd_aws():
     downloads = K.HOME / "Downloads"
     out = Path(K.opt("out") or (downloads if downloads.is_dir() else K.CFG_DIR) / "se-demo-zia-generator.cfn.json")
     aws_module().write(out, **st)
+    zcfg(cfg)["aws"] = {"written": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    K.save_cfg(cfg)
     K.ok(f"Wrote {out}")
     K.info(f"Test user {st['test_user']} · cloud {st['cloud']} · domain {st['domain']}"
            + (f" · Client Connector from s3://{st['zcc_s3']}" if st["zcc_s3"] else "" if st["zcc_url"]
@@ -1459,6 +1537,8 @@ def cmd_aws():
 
 def api_aws(cfg, body, tenant):
     st = aws_settings(tenant(), cfg, (body.get("zcc_url") or "").strip())
+    zcfg(cfg)["aws"] = {"written": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    K.save_cfg(cfg)
     return {"filename": "se-demo-zia-generator.cfn.json", "template": aws_module().build(**st), "settings": st}
 
 
@@ -1537,9 +1617,10 @@ def cli(args):
     sub = next((a for a in args if not a.startswith("-") and a not in _values(args)), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "status": cmd_status, "teardown": cmd_teardown,
             "dashboards": cmd_dashboards, "check": cmd_check, "traffic": cmd_traffic,
-            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password, "aws": cmd_aws}
+            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password, "aws": cmd_aws,
+            "ready": lambda: K.cmd_ready()}
     if sub not in cmds:
-        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|aws|check|traffic|schedule  (see ZIA.md)")
+        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|aws|check|traffic|schedule|ready  (see ZIA.md)")
         return
     try:
         cmds[sub]()

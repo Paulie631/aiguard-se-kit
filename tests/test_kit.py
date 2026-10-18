@@ -148,6 +148,19 @@ def test_setup_is_idempotent_and_teardown_cleans(env):
     assert "SE-Demo: OpenAI App:detections" not in kit._kc
 
 
+def test_demo_readiness_wants_monitor_and_keys(env, capsys):
+    kit, t = env("setup", "--yes")
+    kit.cmd_setup()
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-aig-policy"]["status"] == "ok" and by["ready-aig-keys"]["status"] == "ok"
+    kit.policy_mode(t, kit.load_cfg(), "attacks")
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-aig-policy"]["status"] == "warn" and "policy monitor" in by["ready-aig-policy"]["fix"]
+    assert not any(c["id"].startswith("ready-zia") for c in by.values())   # no ZIA set up: no ZIA items
+    kit.cmd_ready()
+    assert "to sort out first" in capsys.readouterr().out
+
+
 def test_policy_profiles_and_custom(env):
     kit, t = env("setup", "--yes")
     kit.cmd_setup()

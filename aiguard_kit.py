@@ -18,6 +18,7 @@
   ./aiguard-kit teardown   delete everything this kit created (objects named with the prefix)
   ./aiguard-kit repair     check this computer's demo setup in the tenant and fix anything missing (--force: rerun)
   ./aiguard-kit logs       show recent activity (--errors, --follow); files are in ~/.aiguard-se-kit/logs
+  ./aiguard-kit ready      demo readiness: policy in Monitor, keys, ZIA drift, dashboards, generator, AWS schedule
   ./aiguard-kit update     install the latest release from GitHub (--check: only check, --rollback: previous version)
   ./aiguard-kit install    copy the kit to ~/.aiguard-se-kit/app, add a desktop shortcut and the `aiguard-kit` command
                            (what the double-click installers run); uninstall removes them
@@ -2191,6 +2192,46 @@ def cmd_teardown():
 
 
 # ---------------------------------------------------------------- status
+def readiness(cfg):
+    """Morning-of-a-demo check across products. Each item says what to do; nothing is changed."""
+    out = []
+    if not EDITION and cfg.get("state", {}).get("policy_id"):
+        try:
+            t = connect(cfg)
+            mode, name, _ = policy_mode(t, cfg)
+            out.append({"id": "ready-aig-policy", "label": "AI Guard demo policy", "status": "ok" if mode == "monitor"
+                        else "warn", "detail": f"'{name}': {PROFILES.get(mode, 'custom')}",
+                        "fix": "" if mode == "monitor" else "Demos start in Monitor: ./aiguard-kit policy monitor "
+                                                            "(or the Policy menu at the top of the console)."})
+            apps = cfg["state"].get("apps", {})
+            missing = [n for n in apps if not kc_has(f"{n}:detections")]
+            out.append({"id": "ready-aig-keys", "label": "AI Guard app keys on this computer",
+                        "status": "warn" if missing or not apps else "ok",
+                        "detail": (f"missing for {', '.join(missing)}" if missing else f"{len(apps)} apps") if apps
+                        else "no demo apps", "fix": "Run ./aiguard-kit repair." if missing or not apps else ""})
+        except KitError as e:
+            out.append({"id": "ready-aig-policy", "label": "AI Guard demo policy", "status": "fail",
+                        "detail": str(e)[:200], "fix": "Run ./aiguard-kit preflight."})
+    zcfg = cfg.get("zia") or {}
+    if EDITION or zcfg or (CFG_DIR / "zia-traffic-last.json").exists():
+        zm = product("zia")
+        creds = bool(cfg.get("client_id")) and kc_has("oneapi-client-secret")
+        out += zm.ready_checks(cfg, (lambda: zm.connect(cfg)) if creds else None)
+    if not out:
+        out.append({"id": "ready-setup", "label": "Demo set up", "status": "fail", "detail": "nothing set up yet",
+                    "fix": "Run ./aiguard-kit setup (or the console's Setup tab)."})
+    return out
+
+
+def cmd_ready():
+    cfg = load_cfg()
+    head("Demo readiness")
+    checks = readiness(cfg)
+    print_checks(checks)
+    bad = [c for c in checks if c["status"] in ("warn", "fail")]
+    head("Ready for a demo" if not bad else f"{len(bad)} thing{'s' if len(bad) > 1 else ''} to sort out first")
+
+
 def cmd_status():
     cfg = load_cfg()
     head("Status")
@@ -2448,6 +2489,12 @@ def cmd_gui():
             if path in ("/", "/index.html"):
                 html = (HERE / "gui.html").read_text(encoding="utf-8").replace("__KIT_TOKEN__", token)
                 return self._send(200, raw=html.encode(), ctype="text/html; charset=utf-8")
+            if path == "/api/ready":
+                c = load_cfg()
+                try:
+                    return self._send(200, {"checks": readiness(c)})
+                except Exception as e:
+                    return self._send(200, {"checks": [], "error": str(e), "fix": hint(e)})
             if path == "/api/policy":
                 c = load_cfg()
                 try:
@@ -2750,7 +2797,7 @@ def cmd_gui():
 # Credentials, keychain and settings stay shared in ~/.aiguard-se-kit.
 EDITION = None
 EDITION_COMMANDS = {"zia": {"setup", "preflight", "status", "teardown", "dashboards", "password", "aws", "check",
-                            "traffic", "schedule"}}
+                            "traffic", "schedule", "ready"}}
 
 
 def kit_name():
@@ -2835,7 +2882,7 @@ def main():
         cmd = product_
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
-            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia}
+            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia, "ready": cmd_ready}
     if cmd not in cmds:
         print(__doc__)
         return

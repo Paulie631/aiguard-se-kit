@@ -458,6 +458,44 @@ def test_drift_finds_problems_and_fix_repairs_only_kit_objects(zenv, capsys):
     assert "Everyone first" in after["drift-zcc-app"]["detail"]                    # can't fix someone else's profile
 
 
+def test_readiness_on_the_admin_machine(zenv, monkeypatch):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-zia-policy"]["status"] == "ok"
+    assert by["ready-insights"]["status"] == "warn" and "3 days" in by["ready-insights"]["fix"]   # no data yet
+    assert by["ready-lead"]["status"] == "info" and "ready-gen" not in by and "ready-aws" not in by
+    fake.db["url_filtering"] = [r for r in fake.db["url_filtering"] if r["name"] != "SE-Demo: Block gambling"]
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-zia-policy"]["status"] == "warn" and by["ready-zia-policy"]["fixable"]
+    # after writing an AWS template, the schedule is part of the check
+    import datetime
+    cfg = kit.load_cfg()
+    cfg["zia"]["aws"] = {"written": "2026-10-17T20:00:00-0400"}
+    kit.save_cfg(cfg)
+    monkeypatch.setattr(z, "_new_york_now", lambda: datetime.datetime(2026, 10, 17, 22, 0))   # a Saturday night
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-aws"]["status"] == "warn" and "Instance state > Start" in by["ready-aws"]["fix"]
+    monkeypatch.setattr(z, "_new_york_now", lambda: datetime.datetime(2026, 10, 19, 10, 0))   # Monday morning
+    assert {c["id"]: c for c in kit.readiness(kit.load_cfg())}["ready-aws"]["status"] == "info"
+
+
+def test_readiness_on_the_generator(zenv):
+    kit, z, fake = zenv("zia", "ready")
+    p = kit.CFG_DIR / "zia-traffic-last.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    import time as _t
+    now = _t.strftime("%Y-%m-%dT%H:%M:%S%z")
+    p.write_text(json.dumps({"time": now, "total": 196, "by_type": {"web": {"n": 57, "block": 18}}}), encoding="utf-8")
+    kit._kc.pop("oneapi-client-secret", None)                    # a generator has no API keys
+    by = {c["id"]: c for c in kit.readiness(kit.load_cfg())}
+    assert by["ready-gen"]["status"] == "ok" and "Zscaler acted on 18" in by["ready-gen"]["detail"]
+    p.write_text(json.dumps({"time": "2026-01-01T00:00:00+0000", "total": 5, "by_type": {}}), encoding="utf-8")
+    assert {c["id"]: c for c in kit.readiness(kit.load_cfg())}["ready-gen"]["status"] == "warn"
+    p.write_text(json.dumps({"time": now, "skipped": True, "summary": "not through Zscaler"}), encoding="utf-8")
+    assert {c["id"]: c for c in kit.readiness(kit.load_cfg())}["ready-gen"]["status"] == "fail"
+
+
 def test_client_connector_api_refused_still_applies_the_zia_policy(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--yes")
     fake.zcc_allowed = False
