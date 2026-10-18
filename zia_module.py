@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.1.6"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.1.7"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -791,11 +791,9 @@ def setup_zcc(t, cfg, log):
             next((f for f in fwds if g(f, "name") != fwd_name), None)
         hit_fwd = next((f for f in fwds if g(f, "name") == fwd_name), None)
         fwd = {k: v for k, v in dict(hit_fwd or src_fwd or {}).items() if k not in ZCC_DROP}
-        acts = [dict(a) for a in fwd.get("forwardingProfileActions") or []]
-        tunnel = [a for a in acts if int(a.get("actionType") or 0) == 1]   # 1 = Tunnel
-        for a in tunnel or acts:
-            a["enablePacketTunnel"] = 1                                     # Z-Tunnel 2.0
+        acts, how = z2_actions(fwds, fwd_name, fwd.get("forwardingProfileActions") or [])
         fwd.update(name=fwd_name, forwardingProfileActions=acts)
+        log("info", f"Forwarding profile '{fwd_name}': {how}")
         if hit_fwd:
             fwd["id"] = g(hit_fwd, "id")
         res = t.call("zcc.forwarding_profile", "update_forwarding_profile", **fwd)
@@ -828,6 +826,29 @@ def setup_zcc(t, cfg, log):
         return {"forwarding_profile": fwd_name}
 
 
+ZCC_TUNNEL = 1   # forwardingProfileActions.actionType for "Tunnel" (the console's other choices: Tunnel with Local
+                 # Proxy, Enforce Proxy, None). Z-Tunnel 2.0 is "Tunnel" plus enablePacketTunnel = 1.
+
+
+def is_z2(action):
+    return int(action.get("actionType") or 0) == ZCC_TUNNEL and int(action.get("enablePacketTunnel") or 0) == 1
+
+
+def z2_actions(fwds, fwd_name, base_actions):
+    """The ZIA actions for the kit's Z-Tunnel 2.0 profile, and how they were chosen. Best: copy a forwarding profile
+    you already set to Tunnel + Z-Tunnel 2.0 in the console (its settings are known to work in this tenant).
+    Otherwise switch a copy of the default profile's actions to Tunnel + Z-Tunnel 2.0."""
+    ref = next((f for f in fwds if g(f, "name") != fwd_name and (f.get("forwardingProfileActions") or [])
+                and all(int(a.get("enablePacketTunnel") or 0) == 1 for a in f["forwardingProfileActions"])), None)
+    if ref:
+        return ([dict(a) for a in ref["forwardingProfileActions"]],
+                f"copied the ZIA tunnel settings of your Z-Tunnel 2.0 profile '{g(ref, 'name')}'")
+    acts = [dict(a) for a in base_actions]
+    for a in acts:
+        a.update(actionType=ZCC_TUNNEL, enablePacketTunnel=1)
+    return acts, "set every network type to Tunnel with Z-Tunnel 2.0"
+
+
 def zcc_verify(t, log, app_name, fwd_name, gid):
     """Reads both profiles back, so what ZCC actually stored is visible (its API can accept fields it ignores)."""
     try:
@@ -838,7 +859,7 @@ def zcc_verify(t, log, app_name, fwd_name, gid):
         log("warn", f"Couldn't read the Client Connector profiles back: {str(e)[:140]}")
         return
     acts = (f or {}).get("forwardingProfileActions") or []
-    z2 = [x for x in acts if int(x.get("enablePacketTunnel") or 0) == 1]
+    z2 = [x for x in acts if is_z2(x)]
     log("ok" if f and z2 else "warn",
         f"Forwarding profile '{fwd_name}': " + ("not found" if not f else
         f"Z-Tunnel 2.0 on {len(z2)} of {len(acts)} network types "

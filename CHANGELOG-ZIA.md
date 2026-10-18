@@ -3,6 +3,12 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.1.7
+- Fixed: the kit's `SE-Demo Z-Tunnel 2.0` forwarding profile kept your default profile's "Tunnel with Local Proxy"
+  action, so Client Connector stayed on Z-Tunnel 1.0. Setup now sets the action to **Tunnel** with **Z-Tunnel 2.0**,
+  or, if you already have a forwarding profile set that way in the console, copies its settings. Run `zia setup`
+  again, then turn Client Connector off and on (or log out and back in) on the traffic generator.
+
 ## 0.1.6
 - Setup reads the Client Connector profiles back after saving them and prints what ZCC stored: Z-Tunnel 2.0 per
   network type, and the app profile's order, groups, forwarding profile and certificate setting.

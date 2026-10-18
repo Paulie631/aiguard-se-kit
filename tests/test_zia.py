@@ -396,6 +396,28 @@ def test_setup_gives_the_test_group_a_client_connector_profile(zenv, capsys):
     assert [f["name"] for f in fake.fwd] == ["Default"] and [p["name"] for p in fake.web] == ["Default"]
 
 
+def test_z_tunnel_2_switches_tunnel_with_local_proxy_to_tunnel(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    for a in fake.fwd[0]["forwardingProfileActions"]:
+        a.update(actionType=3, enablePacketTunnel=0, systemProxy=1)    # the default: Tunnel with Local Proxy
+    kit.cmd_zia()
+    fwd = next(f for f in fake.fwd if f["name"] == "SE-Demo Z-Tunnel 2.0")
+    assert all(a["actionType"] == 1 and a["enablePacketTunnel"] == 1 for a in fwd["forwardingProfileActions"])
+    assert fake.fwd[0]["forwardingProfileActions"][0]["actionType"] == 3      # yours: untouched
+    assert "Z-Tunnel 2.0 on 2 of 2" in capsys.readouterr().out
+
+
+def test_z_tunnel_2_copies_a_profile_you_already_made(zenv, capsys):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    fake.fwd.append({"id": 72, "name": "ztest", "forwardingProfileActions": [
+        {"networkType": 0, "actionType": 1, "enablePacketTunnel": 1, "primaryTransport": 0, "allowTLSFallback": 1},
+        {"networkType": 1, "actionType": 1, "enablePacketTunnel": 1, "primaryTransport": 0, "allowTLSFallback": 1}]})
+    kit.cmd_zia()
+    fwd = next(f for f in fake.fwd if f["name"] == "SE-Demo Z-Tunnel 2.0")
+    assert fwd["forwardingProfileActions"] == fake.fwd[1]["forwardingProfileActions"]
+    assert "your Z-Tunnel 2.0 profile 'ztest'" in capsys.readouterr().out
+
+
 def test_client_connector_api_refused_still_applies_the_zia_policy(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--yes")
     fake.zcc_allowed = False
