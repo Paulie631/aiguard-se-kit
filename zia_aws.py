@@ -83,6 +83,10 @@ $sh = New-Object -ComObject WScript.Shell
 foreach ($s in @(@("SE-Demo ZIA console", "$root\console.cmd"), @("SE-Demo traffic log", "$root\traffic.log"), @("SE-Demo setup log", "$root\setup.log"))) {
   $l = $sh.CreateShortcut("C:\Users\Public\Desktop\" + $s[0] + ".lnk"); $l.TargetPath = $s[1]; $l.Save()
 }
+# 6. Let whoever signs in run the console too. Setup ran as SYSTEM, so C:\SE-Demo (uv cache, Python, settings)
+#    is otherwise read-only to a remote desktop user's non-elevated session. This box is single-purpose and only
+#    administrators can sign in to it, so giving local Users modify rights here is acceptable.
+icacls $root /grant "*S-1-5-32-545:(OI)(CI)M" /T /C /Q | Out-Null
 "Setup finished. Traffic starts once Client Connector is signed in as ${TestUser}."
 Stop-Transcript
 </powershell>
