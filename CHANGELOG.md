@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+- Guided demo: each step can carry a **Say** line, what to **Show**, **presenter notes** (so what, a discovery
+  question, objection answers, a line for the policy wait), sourced **In the news** cards and **OWASP Top 10 for LLM
+  Applications (2025)** tags. Older steps with one talk paragraph show as before. **Recap** on the last step lists what
+  each step caught, with a copy button for the follow-up email.
+- New storylines: Healthcare, Financial services, Legal, and *AI security end to end* (ZIA + AI Guard). The original
+  three keep their order and steps; their talk tracks gained the new fields.
+- `aiguard-kit ready` and **Demo readiness** in the console: policy in Monitor, app keys, and the ZIA checks when the
+  ZIA demo is set up.
+- README: **Rolling back**. Installing an older release over a newer one is tested.
+- ZIA demo (separate `zia-v*` pre-releases, see CHANGELOG-ZIA.md): drift check with `zia status --fix`.
+
 ## 1.7.2
 - **Setup health check and Repair.** When the console opens (and after setup or an update) it checks, read-only, that
   this computer's keys still exist in AI Guard and are in the kit's rules, and that the demo policy and apps are

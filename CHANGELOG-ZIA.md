@@ -3,6 +3,19 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.0
+- **Drift check.** `zia status` compares the tenant with what setup made: rules missing, disabled or out of order,
+  rules no longer scoped to the test user, Client Connector profiles not on Tunnel + Z-Tunnel 2.0 or behind another
+  profile, and objects named like the kit's that aren't (reported, never touched). `zia status --fix` repairs the kit's
+  own objects; the console has **Check for drift** and **Fix drift**.
+- **Demo readiness.** `zia-kit ready` (and **Demo readiness** in the console) checks the demo policy, Insights data,
+  the generator's last round (on the generator), the AWS stop schedule, and reminds you to start traffic at least
+  3 days before a demo.
+- **Guided demo refresh** (the ZIA kit carries the full console): structured talk tracks with presenter notes,
+  sourced "In the news" cards, OWASP Top 10 for LLM Applications (2025) tags, a recap with a copy button, industry
+  storylines and *AI security end to end* (ZIA + AI Guard).
+- **Rolling back** is documented, and installing an older release over a newer one is tested.
+
 ## 0.1.7
 - Fixed: the kit's `SE-Demo Z-Tunnel 2.0` forwarding profile kept your default profile's "Tunnel with Local Proxy"
   action, so Client Connector stayed on Z-Tunnel 1.0. Setup now sets the action to **Tunnel** with **Z-Tunnel 2.0**,

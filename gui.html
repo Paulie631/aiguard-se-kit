@@ -818,7 +818,7 @@ function recapText(){const st=S.story, ran=S.ran||{}, rows=st.steps.map((s,i)=>[
     `\n\nEvery step is logged in AI Guard Insights with the user, the detectors that fired and the action taken.`}}
 function drawRecap(){const r=recapText(), v=$("#sverdict");v.style.display="block";
   if(!r.rows.length){v.innerHTML='<span class="muted">Run some steps first; the recap lists what each one caught.</span>';return}
-  v.innerHTML=`<div class="recap"><div class="lbl" style="margin-bottom:8px">Recap · ${r.rows.length} steps, ${r.blocks} blocked${r.ow.length?` · you just saw ${r.ow.length} of the OWASP Top 10 for LLM Applications`:""}</div>
+  v.innerHTML=`<div class="recap"><div class="lbl" style="margin-bottom:8px">Recap · ${r.rows.length} step${r.rows.length==1?"":"s"}, ${r.blocks} blocked${r.ow.length?` · you just saw ${r.ow.length} of the OWASP Top 10 for LLM Applications`:""}</div>
     <table><tr><th>Step</th><th>Result</th><th>Detectors</th></tr>${r.rows.map(([s,x])=>`<tr><td>${esc(s.title)}</td><td>${esc(x.verdict)}</td><td>${x.dets.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</td></tr>`).join("")}</table>
     ${r.ow.length?`<div style="margin-top:10px">${r.ow.map(o=>`<span class="owasp" style="margin:0 6px 0 0">${esc(o)} ${esc(OWASP[o]||"")}</span>`).join("")}</div>`:""}
     <div class="row" style="margin-top:12px;gap:10px"><button id="recapcopy">Copy for the follow-up email</button><span class="muted" style="font-size:12px" id="recapok"></span></div></div>`;
@@ -1109,7 +1109,8 @@ $("#ziaapply").onclick=()=>{const users=zusers();
 async function showReady(el){el.style.display="";el.innerHTML='<div class="muted">Checking…</div>';
   try{const r=await api("/api/ready");if(r.error){el.innerHTML=`<div class="fail">${esc(r.error)}</div>`;return}
     const bad=r.checks.filter(c=>c.status=="warn"||c.status=="fail").length;
-    el.innerHTML=`<h2 style="margin:0 0 8px">${bad?`Demo readiness · ${bad} to sort out`:"Ready for a demo"}</h2>`+checksHTML(r.checks)}catch(e){el.innerHTML=`<div class="fail">${esc(e.message)}</div>`}}
+    el.innerHTML=`<div class="row" style="justify-content:space-between"><h2 style="margin:0 0 8px">${bad?`Demo readiness · ${bad} to sort out`:"Ready for a demo"}</h2><button class="readyhide" style="font-size:12px">Hide</button></div>`+checksHTML(r.checks);
+    el.querySelector(".readyhide").onclick=()=>{el.style.display="none"}}catch(e){el.innerHTML=`<div class="fail">${esc(e.message)}</div>`}}
 $("#readybtn").onclick=()=>showReady($("#readyout"));
 $("#ziaready").onclick=()=>showReady($("#ziadashout"));
 $("#ziadrift").onclick=async()=>{$("#ziapfout").innerHTML='<div class="muted">Comparing the tenant with the kit\'s template…</div>';$("#ziafix").style.display="none";
