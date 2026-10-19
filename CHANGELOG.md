@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.11
 - **Diagnostics now include the newest log entries.** The zip kept only the first 20,000 characters of each day's
   log, so a morning's entries crowded out the afternoon's setup. It now keeps the newest 5,000 lines per day.
 - **ZIA, ZIdentity and Client Connector changes and failures are in the activity log** (Logs tab and diagnostics),
