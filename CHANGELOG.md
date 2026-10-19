@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.13
 - **ZIdentity test users go on `<vanity>.zslogin.net`.** On a domain routed to an identity provider, ZIdentity
   can't set the user's password, so the test user couldn't sign in. Setup now creates it on ZIdentity's own domain
   (`--domain` still overrides). A test user an earlier version created on the company domain is replaced, and
