@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.7"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.8"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -315,6 +315,14 @@ def zid_group(t, log):
     return grp
 
 
+def zid_domain(cfg):
+    """ZIdentity's own domain for this tenant (<vanity>.zslogin.net). A test user there signs in with a ZIdentity
+    password even when the company's domain is routed to an identity provider, which would refuse the password."""
+    v = str(cfg.get("vanity_domain") or "").strip().lower()
+    v = re.sub(r"\.zslogin\.net$", "", v)
+    return f"{v}.zslogin.net" if v else None
+
+
 def test_email(t, email=None, domain=None):
     if email:
         return email
@@ -432,8 +440,23 @@ def create_zia_user(t, cfg, log, email=None, domain=None):
 
 
 def create_zid_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
+    """The user goes on <vanity>.zslogin.net unless --user or --domain says otherwise: on a domain routed to an
+    identity provider ZIdentity can't give it a password."""
     z = zcfg(cfg)
-    email = test_email(t, email, domain)
+    made = z.get("created_user") or {}
+    old = made.get("email") or ""
+    if (made.get("via") == "zidentity" and old and email in (None, old) and not domain
+            and not old.lower().endswith(".zslogin.net") and zid_domain(cfg)):
+        # an earlier kit version put the user on the company domain; replace it, and keep the old one for teardown
+        log("info", f"Replacing the earlier test user {old} with one on {zid_domain(cfg)}: on your company domain "
+                    f"your identity provider handles sign-in, so ZIdentity can't give it a password. Teardown "
+                    f"removes the old one too.")
+        if made.get("zid_id"):
+            z.setdefault("retired_users", []).append({"zid_id": made["zid_id"], "email": old})
+        z.pop("created_user", None)
+        z.pop("users", None)
+        email = None
+    email = test_email(t, email, domain or zid_domain(cfg))
     found, _ = find_users(t, [email])
     if found and not (z.get("created_user") or {}).get("email") == email:
         z["users"] = found
@@ -814,6 +837,32 @@ def setup_apply(t, cfg, log, facts=None):
 ZCC_MANUAL = ("In the Client Connector portal: copy your Windows forwarding profile, set its ZIA action to Tunnel with "
               "Z-Tunnel 2.0, then add a Windows app profile for the test user's group with 'Install Zscaler SSL "
               "Certificate' on and that forwarding profile (ZIA.md, step 2).")
+ZCC_BY_HAND = ("Create them by hand in the Client Connector portal, then run Fix drift (`./aiguard-kit zia status --fix`), "
+               "which finds them by name and uses them as they are: "
+               "1) Forwarding profile named exactly '{fwd}': ZIA action Tunnel with Z-Tunnel 2.0 on every network type "
+               "(on corporate network, off corporate network, VPN, split VPN). "
+               "2) Windows app profile named exactly '{app}': group '{group}', Install Zscaler SSL Certificate on, "
+               "forwarding profile '{fwd}', and no broader profile above it in the order.")
+
+
+def zcc_by_hand(cfg):
+    app, fwd = zcc_names()
+    made = zcfg(cfg).get("created_user") or {}
+    return ZCC_BY_HAND.format(app=app, fwd=fwd, group=made.get("group") or zname("traffic generator"))
+
+
+def _bare_400(e):
+    return bool(re.search(r"\b400\b|invalid|bad request", str(e), re.I))
+
+
+def app_ok(a, fwd_id, gid):
+    """The app profile already does what the kit needs (as Fix drift checks it), so no write is needed."""
+    groups = [int(g(x, "id")) for x in (a.get("groups") or []) if g(x, "id")] or \
+        [int(x) for x in (a.get("groupIds") or []) if x]
+    return (int(gid) in groups and str(g(a, "forwardingProfileId")) == str(fwd_id)
+            and int((a.get("windowsPolicy") or {}).get("installSslCerts") or 0) == 1 and int(g(a, "active") or 0) == 1)
+
+
 ZCC_DROP = {"id", "groups", "users", "deviceGroups", "groupNames", "userNames", "deviceGroupNames", "policyToken",
             "createdBy", "editedBy", "lastModification", "lastModifiedBy", "lastModifiedTime"}
 
@@ -948,25 +997,46 @@ def setup_zcc(t, cfg, log):
     if not base and not mine_app:
         log("warn", "Client Connector profiles skipped: no Windows app profile to copy. " + ZCC_MANUAL)
         return None
-    try:
-        src_fwd_id = g(base or mine_app, "forwardingProfileId")
-        src_fwd = next((f for f in fwds if str(g(f, "id")) == str(src_fwd_id)), None) or \
-            next((f for f in fwds if g(f, "name") != fwd_name), None)
-        hit_fwd = next((f for f in fwds if g(f, "name") == fwd_name), None)
-        fwd = {k: v for k, v in dict(hit_fwd or src_fwd or {}).items() if k not in ZCC_DROP}
-        acts, how = z2_actions(fwds, fwd_name, fwd.get("forwardingProfileActions") or [])
-        fwd.update(name=fwd_name, forwardingProfileActions=acts)
-        log("info", f"Forwarding profile '{fwd_name}': {how}")
-        if hit_fwd:
-            fwd["id"] = g(hit_fwd, "id")
-        res = _save_fwd(t, log, fwd, src_fwd, fwd_name)
-        fwd_id = g(res, "id") if isinstance(res, dict) and g(res, "id") else g(hit_fwd, "id")
-        if not fwd_id:
-            fwd_id = next((g(f, "id") for f in _zcc_list(t, "zcc.forwarding_profile") if g(f, "name") == fwd_name), None)
-        log("ok", f"{'Updated' if hit_fwd else 'Created'} forwarding profile '{fwd_name}' (Z-Tunnel 2.0)")
-    except Exception as e:
-        log("warn", f"Forwarding profile '{fwd_name}' not created: {str(e)[:180]}. " + ZCC_MANUAL)
+    z = zcfg(cfg)
+    hit_fwd = next((f for f in fwds if g(f, "name") == fwd_name), None)
+    hit_acts = (hit_fwd or {}).get("forwardingProfileActions") or []
+    if hit_fwd and hit_acts and all(is_z2(a) for a in hit_acts):
+        fwd_id = g(hit_fwd, "id")   # already Tunnel + Z-Tunnel 2.0 (made by the kit or by hand): use it as it is
+        log("ok", f"Forwarding profile '{fwd_name}' is already Z-Tunnel 2.0; using it as it is")
+    elif z.get("zcc_api_refused"):
+        log("warn", "Client Connector profiles not created: an earlier run found that this tenant's Client Connector "
+                    "API refuses new forwarding profiles. " + zcc_by_hand(cfg))
         return None
+    else:
+        try:
+            src_fwd_id = g(base or mine_app, "forwardingProfileId")
+            src_fwd = next((f for f in fwds if str(g(f, "id")) == str(src_fwd_id)), None) or \
+                next((f for f in fwds if g(f, "name") != fwd_name), None)
+            fwd = {k: v for k, v in dict(hit_fwd or src_fwd or {}).items() if k not in ZCC_DROP}
+            acts, how = z2_actions(fwds, fwd_name, fwd.get("forwardingProfileActions") or [])
+            fwd.update(name=fwd_name, forwardingProfileActions=acts)
+            log("info", f"Forwarding profile '{fwd_name}': {how}")
+            if hit_fwd:
+                fwd["id"] = g(hit_fwd, "id")
+            res = _save_fwd(t, log, fwd, src_fwd, fwd_name)
+            fwd_id = g(res, "id") if isinstance(res, dict) and g(res, "id") else g(hit_fwd, "id")
+            if not fwd_id:
+                fwd_id = next((g(f, "id") for f in _zcc_list(t, "zcc.forwarding_profile") if g(f, "name") == fwd_name), None)
+            log("ok", f"{'Updated' if hit_fwd else 'Created'} forwarding profile '{fwd_name}' (Z-Tunnel 2.0)")
+        except Exception as e:
+            if _bare_400(e):   # even the minimal profile was refused: retrying on later runs won't help
+                z["zcc_api_refused"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                K.save_cfg(cfg)
+                log("warn", "Client Connector profiles not created: this tenant's Client Connector API refused every "
+                            "version of the forwarding profile, down to a minimal Z-Tunnel 2.0 one (HTTP 400, no "
+                            "reason given). The ZIA policy still applies. " + zcc_by_hand(cfg))
+            else:
+                log("warn", f"Forwarding profile '{fwd_name}' not created: {str(e)[:180]}. " + ZCC_MANUAL)
+            return None
+    if mine_app and app_ok(mine_app, fwd_id, gid):
+        log("ok", f"Windows app profile '{app_name}' already uses '{fwd_name}' for the test group; using it as it is")
+        zcc_verify(t, log, app_name, fwd_name, gid)
+        return {"app_profile": app_name, "forwarding_profile": fwd_name}
     try:
         app = {k: v for k, v in dict(mine_app or base).items() if k not in ZCC_DROP}
         win = dict(app.get("windowsPolicy") or {})
@@ -985,7 +1055,7 @@ def setup_zcc(t, cfg, log):
         zcc_verify(t, log, app_name, fwd_name, gid)
         return {"app_profile": app_name, "forwarding_profile": fwd_name}
     except Exception as e:
-        log("warn", f"App profile '{app_name}' not created: {str(e)[:180]}. " + ZCC_MANUAL)
+        log("warn", f"App profile '{app_name}' not created: {str(e)[:180]}. " + (zcc_by_hand(cfg) if _bare_400(e) else ZCC_MANUAL))
         return {"forwarding_profile": fwd_name}
 
 
@@ -1175,11 +1245,12 @@ def zcc_drift(t, cfg):
         return [_chk("drift-zcc", "Client Connector profiles", "info", f"couldn't read them ({str(e)[:100]})",
                      "Give the API client Client Connector access to check these.")]
     out = []
+    refused = bool(zcfg(cfg).get("zcc_api_refused"))
     f = next((x for x in fwds if g(x, "name") == fwd_name), None)
     acts = (f or {}).get("forwardingProfileActions") or []
     if not f:
         out.append(_chk("drift-zcc-fwd", "Z-Tunnel 2.0 forwarding profile", "warn", f"'{fwd_name}' not found",
-                        "Run `zia status --fix`.", True))
+                        zcc_by_hand(cfg) if refused else "Run `zia status --fix`.", not refused))
     elif not acts or not all(is_z2(a) for a in acts):
         out.append(_chk("drift-zcc-fwd", "Z-Tunnel 2.0 forwarding profile", "warn",
                         f"'{fwd_name}' isn't Tunnel + Z-Tunnel 2.0 on every network type",
@@ -1189,7 +1260,7 @@ def zcc_drift(t, cfg):
     a = next((x for x in pols if g(x, "name") == app_name), None)
     if not a:
         out.append(_chk("drift-zcc-app", "Client Connector app profile for the test group", "warn",
-                        f"'{app_name}' not found", "Run `zia status --fix`.", True))
+                        f"'{app_name}' not found", zcc_by_hand(cfg) if refused else "Run `zia status --fix`.", True))
         return out
     groups = [int(g(x, "id")) for x in (a.get("groups") or []) if g(x, "id")] or \
         [int(x) for x in (a.get("groupIds") or []) if x]
@@ -1322,6 +1393,8 @@ def kit_objects(t, cfg=None):
         for kind, key in (("zia_group", "zia_group_id"), ("zia_department", "zia_dept_id")):
             if made.get(key):
                 found.append((kind, None, {"id": made[key], "name": made.get("group")}))
+    for old in (zcfg(cfg).get("retired_users") if cfg else None) or []:   # earlier test users the kit replaced
+        found.append(("zidentity_user", None, {"id": old["zid_id"], "name": old["email"]}))
     if made.get("zid_id"):
         found.append(("zidentity_user", None, {"id": made["zid_id"], "name": made["email"]}))
         if made.get("group_id"):
@@ -1363,6 +1436,8 @@ def teardown(t, cfg, log, confirm=True):
         activate(t, log)
     z = zcfg(cfg)
     z.pop("state", None)
+    z.pop("retired_users", None)
+    z.pop("zcc_api_refused", None)
     if z.pop("created_user", None):
         z.pop("users", None)
         K.kc_del(PW_KEY)
@@ -1426,7 +1501,7 @@ def preflight(cfg, write_probe=False):
             {"hosted": "", "saml": "Setup will create the test user in ZIdentity; set its password there once.",
              "directory": "Create the test user in your directory (AD/LDAP) and pass --user."}.get(mode,
              "Setup assumes Hosted DB. Check Administration > Internet & SaaS Authentication > Internet Authentication Settings."))
-        dom = tenant_domain(t)
+        dom = zid_domain(cfg) if mode == "saml" else tenant_domain(t)
         email = f"{test_user_names()['login']}@{dom}" if dom else "the test user"
         try:
             items(t.call("user_management", "list_groups", query_params={"search": K.PREFIX}))
@@ -1442,7 +1517,8 @@ def preflight(cfg, write_probe=False):
         except Exception as e:
             if zid_managed(e):
                 add("zia-mkuser", "Can create the test user", "info",
-                    "users are managed in ZIdentity: setup creates the test user there", ZID_MANAGED_FIX.format(email=email))
+                    f"users are managed in ZIdentity: setup creates {test_user_names()['login']}@{zid_domain(cfg)} there",
+                    ZID_MANAGED_FIX.format(email=f"{test_user_names()['login']}@{zid_domain(cfg)}"))
             else:
                 add("zia-mkuser", "Can create the test user", "warn", rba_reason(e),
                     "The kit can't create users with this API role. " + USER_MGMT_FIX.format(email=email))
@@ -1545,10 +1621,12 @@ def choose_users(t, cfg):
         return
     K.info("The demo rules apply only to one test user: the one signed in to Client Connector on the traffic generator.")
     domain = K.opt("domain") or tenant_domain(t) or "yourdomain"
+    if not K.opt("domain") and auth_mode(t)[0] == "saml" and zid_domain(cfg):
+        domain = zid_domain(cfg)
     i = K.menu("Which test user?", [f"Create one for me: {test_user_names()['login']}@{domain} (recommended)",
                                     "Use a user I already have (never your own account)"])
     if i == 0:
-        create_test_user(t, cfg, K.cli_log, domain=None if domain == "yourdomain" else domain, via=K.opt("via"))
+        create_test_user(t, cfg, K.cli_log, domain=K.opt("domain"), via=K.opt("via"))
         return
     while True:
         w = K.ask("Test user email (comma-separate several)")
