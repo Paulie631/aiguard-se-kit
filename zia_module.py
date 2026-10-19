@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.5"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.6"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -105,10 +105,21 @@ class ZiaTenant:
                else self.c.zcc if resource.startswith("zcc.") else self.c.zia)
         api = getattr(svc, resource.split(".", 1)[-1])
         K.vlog(f"zia {resource}.{method} {a} {json.dumps(kw, default=str)[:300] if kw else ''}")
-        out = getattr(api, method)(*a, **kw)
+        write = not re.match(r"(list|get|search)", method)
+        req = json.loads(json.dumps({"args": list(a), "body": kw}, default=str)) if (a or kw) else {}
+        t0 = time.time()
+        try:
+            out = getattr(api, method)(*a, **kw)
+        except Exception as e:
+            K.activity("api", f"ZIA API {resource}.{method} failed", "error", request=req, error=str(e)[:2000],
+                       ms=int((time.time() - t0) * 1000))
+            raise
         if not (isinstance(out, tuple) and len(out) == 3):
             return out
         result, resp, err = out
+        if err or write:   # failures and changes go to the activity log (Logs tab, diagnostics); reads stay quiet
+            K.activity("api", f"ZIA API {resource}.{method}" + (" failed" if err else ""), "error" if err else "ok",
+                       request=req, **({"error": str(err)[:2000]} if err else {}), ms=int((time.time() - t0) * 1000))
         if err:
             K.vlog(f"error: {err}")
             if K.oauth_failed(err):

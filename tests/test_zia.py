@@ -1402,3 +1402,21 @@ def test_forwarding_profile_retries_a_plainer_copy_when_zcc_refuses(zenv, capsys
     assert all(z.is_z2(a) for a in mine_fwd["forwardingProfileActions"])
     assert "without trusted-network conditions" in out and "Created Windows app profile" in out
     assert any(p["name"] == "SE-Demo traffic generator" for p in fake.web)
+
+
+def test_zia_and_client_connector_writes_and_failures_reach_the_activity_log(monkeypatch, tmp_path):
+    """So a diagnostics zip shows what Client Connector refused, with passwords masked."""
+    kit = load_kit(monkeypatch, tmp_path, ["zia"])
+    z = kit.product("zia")
+    t = z.ZiaTenant.__new__(z.ZiaTenant)
+    bad = types.SimpleNamespace(update_forwarding_profile=lambda **kw: (None, None, '{"status": 400, "message": null}'))
+    users = types.SimpleNamespace(add_user=lambda **kw: ({"id": 1}, None, None))
+    t.c = types.SimpleNamespace(zcc=types.SimpleNamespace(forwarding_profile=bad),
+                                zia=types.SimpleNamespace(user_management=users))
+    with pytest.raises(kit.KitError):
+        t.call("zcc.forwarding_profile", "update_forwarding_profile", name="SE-Demo Z-Tunnel 2.0", trustedNetworkIds=[7])
+    t.call("user_management", "add_user", email="u@x.test", password="Sup3r-Secret-Value!")
+    logged = kit.ACTIVITY[-2:]
+    assert logged[0]["level"] == "error" and logged[0]["detail"]["request"]["body"]["trustedNetworkIds"] == [7]
+    assert '"status": 400' in logged[0]["detail"]["error"]
+    assert logged[1]["detail"]["request"]["body"]["password"].startswith("Sup3") and "Secret" not in json.dumps(logged[1])

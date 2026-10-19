@@ -53,7 +53,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.10"
+VERSION = "1.8.11"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -285,6 +285,9 @@ def prune_logs():
         pass
 
 
+DIAG_LINES = 5000   # newest log lines per day in a diagnostics zip
+
+
 def diagnostics_zip():
     """A zip of the recent logs, the preflight runbook data and versions, for sending to the kit owner. No secrets."""
     import io
@@ -298,11 +301,14 @@ def diagnostics_zip():
              "state": redact(cfg.get("state", {})), "answers": redact(cfg.get("answers", {}))}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("about.json", json.dumps(info_, indent=2))
+        # newest entries, line by line (redact() caps each string, so a whole file passed at once lost all but its start)
         for f in sorted(LOG_DIR.glob("kit-*.jsonl"))[-LOG_KEEP_DAYS:] if LOG_DIR.exists() else []:
-            z.writestr(f"logs/{f.name}", redact(f.read_text(encoding="utf-8", errors="replace")))
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()[-DIAG_LINES:]
+            z.writestr(f"logs/{f.name}", "\n".join(redact(line) for line in lines) + "\n")
         runs = CFG_DIR / "runs.jsonl"
         if runs.exists():
-            z.writestr("runs.jsonl", redact("\n".join(runs.read_text(encoding="utf-8", errors="replace").splitlines()[-500:])))
+            lines = runs.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
+            z.writestr("runs.jsonl", "\n".join(redact(line) for line in lines) + "\n")
     return buf.getvalue()
 
 

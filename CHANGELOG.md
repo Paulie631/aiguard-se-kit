@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.11
+- **Diagnostics now include the newest log entries.** The zip kept only the first 20,000 characters of each day's
+  log, so a morning's entries crowded out the afternoon's setup. It now keeps the newest 5,000 lines per day.
+- **ZIA, ZIdentity and Client Connector changes and failures are in the activity log** (Logs tab and diagnostics),
+  with the request the kit sent and the error, passwords masked. Reads stay out of the log.
+
 ## 1.8.10
 - **Client Connector forwarding profile: retries when the copy is refused.** Client Connector's API can answer a
   bare `400` to a forwarding profile copied from the tenant's own (seen with a profile that uses trusted-network
