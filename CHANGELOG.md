@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.1
 - **Guided demo: Monitor / Block on every step.** Run a step in Monitor, flip to Block and run it again; the recap
   lists both results with the policy each ran under.
 - **Guided demo: no more 30-second countdown.** A step switches the policy when you open it, so the change applies
