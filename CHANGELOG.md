@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- **Client Connector forwarding profile: retries when the copy is refused.** Client Connector's API can answer a
+  bare `400` to a forwarding profile copied from the tenant's own (seen with a profile that uses trusted-network
+  conditions). Setup now retries without the trusted-network conditions and copied ids, then from the default
+  profile's actions switched to Z-Tunnel 2.0, and says which copy it saved. The Windows app profile follows.
+
 ## 1.8.9
 - **Fixed: Cloud App Control rules left out DeepSeek, Character.AI, Claude, WeTransfer, TeamViewer and others.**
   ZIA lists actions only for apps with fine-grained controls (ChatGPT, Dropbox, Slack…); most apps list none but
