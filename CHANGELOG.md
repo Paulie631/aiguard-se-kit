@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.8
+- **Fixed: no Client Connector profiles when the test user is created in ZIdentity.** Setup skipped the
+  `SE-Demo traffic generator` app profile and the Z-Tunnel 2.0 forwarding profile, saying the user "wasn't created
+  by the kit". It now scopes them to ZIA's synced copy of the kit's ZIdentity group. ZIdentity syncs that group
+  after the test user's first sign-in, so if it isn't there yet, setup says to sign in once and run it again.
+
 ## 1.8.7
 - **Desktop shortcut with an icon.** The installer's shortcut now has the kit's own icon (blue for the AI Guard
   kit, teal for the ZIA kit). On a Mac it's now an app, **AI Guard Demo Console**, with no `.command` extension; it

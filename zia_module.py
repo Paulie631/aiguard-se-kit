@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.2"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.3"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -786,8 +786,21 @@ def zcc_names():
     return fix(c.get("app_profile")), fix(c.get("forwarding_profile"))
 
 
-def zcc_group_id(cfg):
+def zcc_group_id(cfg, t=None):
+    """The ZIA group the Client Connector profiles are scoped to. A ZIA-created test user has it from setup; a
+    ZIdentity-created one gets ZIA's synced copy of its ZIdentity group, looked up by name and remembered."""
     made = zcfg(cfg).get("created_user") or {}
+    if made.get("zia_group_id") or t is None or made.get("via") != "zidentity":
+        return made.get("zia_group_id")
+    try:
+        rows = items(t.call("user_management", "list_groups", query_params={"search": K.PREFIX}))
+    except Exception as e:
+        K.vlog(f"ZIA groups: {e}")
+        return None
+    hit = next((x for x in rows if g(x, "name") in names_for(made.get("group") or zname("traffic generator"))), None)
+    if hit:
+        made["zia_group_id"] = g(hit, "id")   # ZIA's copy: teardown removes the ZIdentity group, never this id
+        K.save_cfg(cfg)
     return made.get("zia_group_id")
 
 
@@ -798,10 +811,17 @@ def setup_zcc(t, cfg, log):
     app_name, fwd_name = zcc_names()
     if not app_name:
         return None
-    gid = zcc_group_id(cfg)
+    gid = zcc_group_id(cfg, t)
     if not gid:
-        log("warn", "Client Connector profiles skipped: the test user wasn't created by the kit, so there's no kit "
-                    "group to scope them to. " + ZCC_MANUAL)
+        made = zcfg(cfg).get("created_user") or {}
+        if made.get("via") == "zidentity":
+            log("warn", f"Client Connector profiles not created yet: ZIA hasn't received the ZIdentity group "
+                        f"'{made.get('group')}'. ZIdentity syncs it once the test user has signed in. Sign in to "
+                        f"Client Connector on the generator as {made.get('email')}, then run setup again (or Fix "
+                        f"drift) to add the profiles.")
+        else:
+            log("warn", "Client Connector profiles skipped: the test user wasn't created by the kit, so there's no "
+                        "kit group to scope them to. " + ZCC_MANUAL)
         return None
     try:
         policies = _zcc_list(t, "zcc.web_policy", device_type="windows")
@@ -1034,7 +1054,7 @@ def drift(t, cfg):
 
 def zcc_drift(t, cfg):
     app_name, fwd_name = zcc_names()
-    gid = zcc_group_id(cfg)
+    gid = zcc_group_id(cfg, t)
     if not app_name or not gid:
         return []
     try:
