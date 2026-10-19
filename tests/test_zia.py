@@ -1296,3 +1296,25 @@ def test_aws_template_uses_the_kits_installer_copy_pinned_by_hash_and_signature(
     import re as _re
     pat = p["ZccInstallerSha256"]["AllowedPattern"]
     assert _re.match(pat, "") and _re.match(pat, sha) and not _re.match(pat, "abc")
+
+
+def test_tenant_with_zidentity_managed_users_creates_the_test_user_in_zidentity(zenv, capsys):
+    """'OneIdentityUserLogin enabled users will have read only access': not a role problem, so don't say it is."""
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    real = fake.call
+    ro = ('user_management.add_group failed: {\n  "status": 400,\n  "code": "UNMODIFIABLE",\n'
+          '  "message": "Group can\'t be added.OneIdentityUserLogin enabled users will have read only access."\n}')
+
+    def read_only(resource, method, *a, **kw):
+        if resource == "user_management" and method.startswith("add"):
+            raise kit.KitError(ro)
+        return real(resource, method, *a, **kw)
+    fake.call = read_only
+    by = {c["id"]: c for c in z.preflight(kit.load_cfg(), write_probe=True)[0]}
+    assert by["zia-mkuser"]["status"] == "info" and "ZIdentity" in by["zia-mkuser"]["detail"]
+    assert "Users Admin" in by["zia-mkuser"]["fix"] and "User Management to Full" not in by["zia-mkuser"]["fix"]
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    assert any(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) and not fake.passwords
+    assert kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity" and "Directory > Users" in out
+    assert mine(fake)

@@ -327,13 +327,32 @@ def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, p
             log("info", f"Users sign in with SAML ({detail}), so the test user is created in ZIdentity")
     if via == "zidentity":
         return create_zid_user(t, cfg, log, email, domain, wait, poll)
-    return create_zia_user(t, cfg, log, email, domain)
+    try:
+        return create_zia_user(t, cfg, log, email, domain)
+    except K.KitError as e:
+        if not zid_managed(e):
+            raise
+        log("info", "This tenant manages users in ZIdentity (ZIA's copies are read-only), so the test user is "
+                    "created in ZIdentity instead")
+        return create_zid_user(t, cfg, log, email, domain, wait, poll)
 
 
 USER_MGMT_FIX = ("Either give the role User Management access (Administration > Role Management, open the API role "
                  "the kit's OneAPI client uses, set User Management to Full, save) and rerun setup, or create "
                  "{email} yourself (" + "Administration > Internet & SaaS Authentication > Internet & SaaS Users"
                  " > Add User) and rerun with --user {email}.")
+
+
+ZID_MANAGED_FIX = ("This tenant manages users in ZIdentity, so ZIA's API can't create users or groups. Setup creates "
+                   "the test user in ZIdentity instead: give the kit's API client ZIAM = Role: Users Admin "
+                   "(Administration > API > OneAPI > API Clients > Resources), run setup, then set the user's password "
+                   "once in ZIdentity. Or create {email} yourself and rerun with --user {email}.")
+
+
+def zid_managed(e):
+    """ZIA refuses user and group changes when ZIdentity owns the users ('UNMODIFIABLE ... OneIdentityUserLogin
+    enabled users will have read only access'), whatever the API role allows."""
+    return bool(re.search(r"UNMODIFIABLE|OneIdentity", str(e), re.I))
 
 
 def rba_reason(e):
@@ -1287,8 +1306,12 @@ def preflight(cfg, write_probe=False):
             add("zia-mkuser", "Can create the test user", "ok" if dom else "warn", detail,
                 "" if dom else "Pass --domain yourdomain.com to setup.")
         except Exception as e:
-            add("zia-mkuser", "Can create the test user", "warn", rba_reason(e),
-                "The kit can't create users with this API role. " + USER_MGMT_FIX.format(email=email))
+            if zid_managed(e):
+                add("zia-mkuser", "Can create the test user", "info",
+                    "users are managed in ZIdentity: setup creates the test user there", ZID_MANAGED_FIX.format(email=email))
+            else:
+                add("zia-mkuser", "Can create the test user", "warn", rba_reason(e),
+                    "The kit can't create users with this API role. " + USER_MGMT_FIX.format(email=email))
 
     step("reading DLP engines, file types and isolation profiles")
     facts = resolve(t, tpl)

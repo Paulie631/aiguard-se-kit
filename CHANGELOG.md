@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- **Tenants whose users are managed in ZIdentity.** ZIA refuses to create users there ("UNMODIFIABLE ...
+  OneIdentityUserLogin enabled users will have read only access"). Preflight used to blame the API role's User
+  Management access; it now says the users live in ZIdentity, and setup creates the test user in ZIdentity
+  automatically (the API client needs ZIAM = Role: Users Admin).
+
 ## 1.8.5
 - **Exact console menus.** The *AI security end to end* steps point at Data Security > Inline CASB > Shadow IT and
   SaaS/Cloud App Policy (AI & ML Applications) and at Data Security > Inline DLP > Data Loss Prevention. The Store Prompts/Responses check points at AI Guard >

@@ -28,7 +28,7 @@ The ZIA tab of the console does the same as these commands.
 
 1. Give the OneAPI client ZIA access (one time):
    - **Administration > Role Management > Internet & SaaS > Add API Role**: name it `SE-Demo kit` and give it **Full Access** to every area (it needs at least the policy areas, Activation and **User Management**; without User Management, create the test user yourself and pass `--user`).
-   - **Administration > API > OneAPI > API Clients**: edit the kit's client and, on its **Resources** tab, set **ZIA** to that role, **ZCC** to Role: Super Admin (Z-Tunnel 2.0 and certificate profiles) and **ZINSIGHTS** to Role: ZINSIGHTS Reader (dashboard and readiness checks). Tenants whose users sign in with SAML also need **ZIAM** set to Role: Users Admin.
+   - **Administration > API > OneAPI > API Clients**: edit the kit's client and, on its **Resources** tab, set **ZIA** to that role, **ZCC** to Role: Super Admin (Z-Tunnel 2.0 and certificate profiles) and **ZINSIGHTS** to Role: ZINSIGHTS Reader (dashboard and readiness checks). Tenants whose users sign in with SAML, or whose users are managed in ZIdentity, also need **ZIAM** set to Role: Users Admin.
 2. Create the policy. Setup creates the test user for you:
    ```
    ./aiguard-kit zia preflight
@@ -64,6 +64,7 @@ Setup reads **Administration > Internet & SaaS Authentication > Internet Authent
 |---|---|
 | **Hosted DB** with **Form-Based** (typical demo tenant) | Creates a ZIA Internet & SaaS user with a generated password. Nothing to do by hand |
 | **SAML** | Creates the user and the group `SE-Demo: traffic generator` in ZIdentity. Set its password in **Administration > Authentication > Directory > Users** (the API can't set it; this guide doesn't have click-by-click steps for that page yet). ZIA lists a ZIdentity user only after its first sign-in, so if setup says ZIA hasn't received the user, sign in once on the generator and rerun setup |
+| **Users managed in ZIdentity** (ZIA answers `UNMODIFIABLE ... OneIdentityUserLogin enabled users will have read only access`) | Same as SAML: creates the user and group in ZIdentity. The API client needs **ZIAM = Role: Users Admin**. Preflight says so instead of asking for User Management, which wouldn't help |
 | **Active Directory** or **OpenLDAP** | Stops and asks you to create the user in your directory, then rerun with `--user` |
 
 `--via zia` or `--via zidentity` overrides the choice.
