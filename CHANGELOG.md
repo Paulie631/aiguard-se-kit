@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.12
 - **Client Connector forwarding profile: more fallbacks.** A tenant whose profiles carry newer Unified Tunnel
   settings refused every copy with a bare `400`. Setup now also tries without the Unified Tunnel settings, then
   without the ZPA tunnel settings, and finally a minimal profile (a name and Tunnel + Z-Tunnel 2.0 for each network
