@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.8
 - **Fixed: no Client Connector profiles when the test user is created in ZIdentity.** Setup skipped the
   `SE-Demo traffic generator` app profile and the Z-Tunnel 2.0 forwarding profile, saying the user "wasn't created
   by the kit". It now scopes them to ZIA's synced copy of the kit's ZIdentity group. ZIdentity syncs that group
