@@ -3,6 +3,10 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.4
+- Fixed: Cloud App Control rules left out apps that list no actions of their own (DeepSeek, Claude, WeTransfer,
+  TeamViewer…); they now get the basic allow/deny web-use action (see AI Guard kit CHANGELOG).
+
 ## 0.2.3
 - Fixed: Client Connector profiles weren't created when the test user is created in ZIdentity (see AI Guard kit
   CHANGELOG).

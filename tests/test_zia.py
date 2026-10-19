@@ -721,10 +721,14 @@ def test_cloud_app_actions_come_only_from_what_the_tenant_lists(zenv):
     by = {n: b for k, rt, n, b in rules if k == "cloud_app_control"}
     up = by["SE-Demo: Block file uploads"]   # same verb and last word: DENY_..._UPLOAD
     assert up["actions"] == ["DENY_FILE_SHARE_UPLOAD"] and up["applications"] == ["MEGA", "SENDSPACE"]
-    assert by["SE-Demo: Allow GenAI"]["applications"] == ["CHATGPT_AI", "GOOGLE_GEMINI", "MICROSOFT_COPILOT", "CLAUDE_AI"]
-    assert "SE-Demo: Block risky GenAI" not in by and "SE-Demo: Block remote access" not in by
+    # PERPLEXITY lists nothing of its own, so it takes the same basic web-use action as the others
+    assert by["SE-Demo: Allow GenAI"]["applications"] == ["CHATGPT_AI", "GOOGLE_GEMINI", "MICROSOFT_COPILOT",
+                                                          "CLAUDE_AI", "PERPLEXITY"]
+    # none list actions: the deny web-use action learned from ChatGPT (a name the tenant gave, never a guess)
+    risky = by["SE-Demo: Block risky GenAI"]
+    assert risky["applications"] == ["DEEPSEEK", "CHARACTER_AI", "POE_AI"] and risky["actions"] == ["BLOCK_AI_ML_WEB_USE"]
+    assert "SE-Demo: Block remote access" not in by
     text = " ".join(notes)
-    assert "lists no actions for DEEPSEEK, CHARACTER_AI, POE_AI" in text
     assert "tenant offers: ALLOW_ENTERPRISE_COLLABORATION_CHAT" in text and "left out WETRANSFER" in text
 
 
@@ -1354,3 +1358,25 @@ def test_zidentity_group_not_synced_yet_says_to_sign_in_first(zenv, capsys):
     lines = []
     assert z.setup_zcc(fake, cfg, lambda lvl, msg: lines.append(msg)) is None
     assert "hasn't received the ZIdentity group" in lines[-1] and "sign" in lines[-1].lower()
+
+
+def test_apps_that_list_no_actions_get_the_basic_web_use_action(zenv):
+    """Like a real tenant: only big apps (ChatGPT, Dropbox, Slack) list actions; DeepSeek, Claude, WeTransfer and
+    TeamViewer list none, yet the console lets you allow or deny their web use. The kit now does the same."""
+    ai = ["ALLOW_AI_ML_WEB_USE", "DENY_AI_ML_WEB_USE", "ALLOW_AI_ML_UPLOAD"]
+    fs = ["ALLOW_FILE_SHARE_VIEW", "DENY_FILE_SHARE_UPLOAD", "ALLOW_FILE_SHARE_WEB_USE", "DENY_FILE_SHARE_WEB_USE"]
+    ec = ["ALLOW_ENTERPRISE_COLLABORATION_WEB_USE", "DENY_ENTERPRISE_COLLABORATION_WEB_USE"]
+    kit, z, fake = zenv("zia", actions={"AI_ML": {"CHATGPT_AI": ai, "GOOGLE_GEMINI": ai, "MICROSOFT_COPILOT": ai,
+                                                   "PERPLEXITY": ai},
+                                         "FILE_SHARE": {"DROPBOX": fs}, "ENTERPRISE_COLLABORATION": {"SLACK": ec}})
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"users": [{"id": 502, "name": "SE Traffic"}]}
+    rules, notes = z.plan(fake, cfg)
+    by = {n: b for k, rt, n, b in rules if k == "cloud_app_control"}
+    assert "CLAUDE_AI" in by["SE-Demo: Allow GenAI"]["applications"]
+    assert by["SE-Demo: Allow GenAI"]["actions"] == ["ALLOW_AI_ML_WEB_USE"]
+    assert by["SE-Demo: Block risky GenAI"]["actions"] == ["DENY_AI_ML_WEB_USE"]
+    assert by["SE-Demo: Block risky GenAI"]["applications"] == ["DEEPSEEK", "CHARACTER_AI", "POE_AI"]
+    assert by["SE-Demo: Block file uploads"]["actions"] == ["DENY_FILE_SHARE_WEB_USE"]
+    assert by["SE-Demo: Block remote access"]["applications"] == ["ANYDESK", "TEAMVIEWER"]
+    assert any("blocks the whole site" in n for n in notes)

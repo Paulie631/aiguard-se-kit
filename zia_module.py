@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.3"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.4"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -514,10 +514,32 @@ def _match(choice, avail):
     return next((a for a in avail if a.startswith(verb) and a.endswith(want)), None)
 
 
+# Apps that list their full action set in each category. Many apps (DeepSeek, Claude, WeTransfer, TeamViewer…) list
+# none: they only take the category's basic allow/deny web-use action, which the console offers for every app. The
+# kit learns those action names from one of these apps rather than guessing them.
+ACTION_REFERENCE = {"AI_ML": ["CHATGPT_AI", "GOOGLE_GEMINI"], "FILE_SHARE": ["DROPBOX", "GOOGLE_DRIVE", "BOX"],
+                    "ENTERPRISE_COLLABORATION": ["SLACK", "WEBEX"]}
+
+
+def _web_use(choice, avail):
+    """The basic web-use action with the choice's verb (ALLOW_… or DENY_/BLOCK_…), from a list the tenant gave."""
+    verb = ("BLOCK", "DENY") if choice[0].startswith(("BLOCK", "DENY")) else (choice[0].split("_", 1)[0],)
+    return next((a for a in avail if a.startswith(verb) and a.endswith("_WEB_USE")), None)
+
+
+def basic_actions(t, rule_type):
+    for app in ACTION_REFERENCE.get(rule_type, []):
+        avail = available_actions(t, rule_type, app)
+        if avail:
+            return avail
+    return []
+
+
 def pick_actions(t, rule_type, apps, choices):
     """Asks the tenant which actions each app supports. Returns (apps, actions, why): the largest set of apps that
-    share actions matching the template's choices, or ([], None, why) when none do. Never guesses action names:
-    a guessed name makes ZIA reject the whole rule ("Request body is invalid")."""
+    share actions matching the template's choices, or ([], None, why) when none do. Apps that list no actions of
+    their own get the category's basic web-use action. Never guesses action names: a guessed name makes ZIA reject
+    the whole rule ("Request body is invalid")."""
     groups, seen = {}, {}
     for app in apps:
         avail = available_actions(t, rule_type, app)
@@ -525,10 +547,20 @@ def pick_actions(t, rule_type, apps, choices):
         picked = [_match(c, avail) for c in choices]
         if avail and None not in picked:
             groups.setdefault(tuple(picked), []).append(app)
+    basic = [a for a in apps if not seen[a]]
     if groups:
         actions, kept = max(groups.items(), key=lambda kv: len(kv[1]))
+        if basic and all(str(x).endswith("_WEB_USE") for x in actions):
+            kept = [a for a in apps if a in kept or a in basic]      # basic apps take the same web-use action
         dropped = [a for a in apps if a not in kept]
         return kept, list(actions), (f"left out {', '.join(dropped)} (no matching actions)" if dropped else "")
+    if basic == list(apps):
+        ref = basic_actions(t, rule_type)
+        web = list(dict.fromkeys(_web_use(c, ref) for c in choices))
+        if ref and None not in web:
+            finer = not all(str(c[0]).endswith(("_WEB_USE", "_ACCESS")) for c in choices)
+            return list(apps), web, ("these apps only offer basic web-use control" +
+                                     (", so the rule blocks the whole site, not just that activity" if finer else ""))
     general = available_actions(t, rule_type, None)   # some app types only list actions without an app
     if general:
         picked = [_match(c, general) for c in choices]
