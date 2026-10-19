@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Guided demo: quieter policy wait.** The countdown is on the Run button ("Run step · 13s") in place of a
+  line of text; press Run early and the result area shows "Applying policy… 13s" before it runs.
+
 ## 1.8.2
 - **Guided demo: the switch just says Block,** and switches to the smallest profile that covers what the step tests
   (Block attacks for injection and toxicity, Block attacks + data for secrets and PII), or the step's own level when
