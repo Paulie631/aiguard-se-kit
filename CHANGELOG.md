@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- **Fixed: Cloud App Control rules left out DeepSeek, Character.AI, Claude, WeTransfer, TeamViewer and others.**
+  ZIA lists actions only for apps with fine-grained controls (ChatGPT, Dropbox, Slack…); most apps list none but
+  still take the category's basic allow/deny web-use action, as the console shows. Setup now gives those apps that
+  basic action, learning its exact name from ChatGPT, Dropbox or Slack instead of guessing. Where the template
+  wanted a finer action (blocking uploads), the note says the rule blocks the whole site instead.
+
 ## 1.8.8
 - **Fixed: no Client Connector profiles when the test user is created in ZIdentity.** Setup skipped the
   `SE-Demo traffic generator` app profile and the Z-Tunnel 2.0 forwarding profile, saying the user "wasn't created
