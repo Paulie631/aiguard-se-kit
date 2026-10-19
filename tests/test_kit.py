@@ -962,3 +962,19 @@ def test_diagnostics_keep_the_newest_log_entries(monkeypatch, tmp_path):
     data = zipfile.ZipFile(io.BytesIO(kit.diagnostics_zip()))
     lines = data.read(next(n for n in data.namelist() if n.startswith("logs/"))).decode().splitlines()
     assert all(json.loads(line) for line in lines)    # long entries stay valid JSON
+
+
+def test_deployment_guide_ships_and_is_stamped_with_the_version(tmp_path, monkeypatch):
+    """The guide is versioned with the kit: it's in the zip, and the release copy names the versions it describes."""
+    import importlib.util
+    root = pathlib.Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("build_guide", root / "tools" / "build_guide.py")
+    bg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bg)
+    kit, zia = bg.versions()
+    text = bg.stamped((root / "docs" / "DEPLOYMENT-GUIDE.md").read_text(encoding="utf-8"), kit, zia)
+    assert text.startswith("# AI Guard + ZIA SE Demo Kit: Deployment Guide\n\n")
+    assert f"AI Guard SE Demo Kit {kit} · ZIA SE Demo Kit {zia}" in text.splitlines()[2]
+    pkg = (root / "tools" / "package.py").read_text(encoding="utf-8")
+    assert '"docs"]' in pkg
+    assert "zslogin.net" in text and "SE-Demo Z-Tunnel 2.0" in text

@@ -39,6 +39,10 @@ jobs:
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - run: python tools/package.py
+      - name: Deployment guide (Markdown and Word, stamped with this version)
+        run: |
+          sudo apt-get install -y -qq pandoc
+          python tools/build_guide.py --require
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,8 +54,9 @@ jobs:
           m = re.search(r"^## .*?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
           notes = (m.group(1) if m else "").strip()
           notes += ("\n\n**Download** `aiguard-se-kit-*.zip`, extract it, and double-click the installer inside "
-                    "(see INSTALL.md). The `-email` files leave out the installers so mail filters accept them.\n")
+                    "(see INSTALL.md). The SE deployment guide for this version is attached as Word and Markdown. The `-email` files leave out the installers so mail filters accept them.\n")
           open("notes.md", "w", encoding="utf-8").write(notes)
           PY
           gh release create "$V" dist/aiguard-se-kit-*.zip dist/aiguard-se-demo-*.plugin dist/SHA256SUMS.txt dist/latest.json \
+            dist/AI-Guard-ZIA-SE-Demo-Kit-Deployment-Guide-*.md dist/AI-Guard-ZIA-SE-Demo-Kit-Deployment-Guide-*.docx \
             --target "$GITHUB_SHA" --title "AI Guard SE Demo Kit $V" --notes-file notes.md
