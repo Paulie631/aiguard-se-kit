@@ -94,6 +94,7 @@ class ZiaTenant:
         conf = {"clientId": cfg["client_id"], "clientSecret": secret, "vanityDomain": cfg["vanity_domain"]}
         if cfg.get("cloud"):
             conf["cloud"] = cfg["cloud"]
+        K.quiet_sdk()
         self.c = ZscalerClient(conf)
 
     def call(self, resource, method, *a, **kw):
@@ -110,6 +111,8 @@ class ZiaTenant:
         result, resp, err = out
         if err:
             K.vlog(f"error: {err}")
+            if K.oauth_failed(err):
+                raise K.KitError(K.OAUTH_FAILED)
             raise K.KitError(f"{resource}.{method} failed: {err}")
         if insights:
             return result
