@@ -892,3 +892,12 @@ def test_scan_result_carries_request_and_response(env):
     kit.das_scan = fake_scan
     r = kit.run_one(cfg, {"text": "hello", "direction": "IN"}, next(iter(cfg["state"]["apps"])), "a@b.c", "detect")
     assert r["exchange"]["request"]["body"]["content"] == "hello" and r["exchange"]["response"]["action"] == "ALLOW"
+
+
+def test_guided_demo_switches_policy_per_step_without_a_fixed_countdown():
+    """Each step has Monitor / Block, the policy switches when the step opens, and Run only waits for what's left."""
+    html = (ROOT / "gui.html").read_text(encoding="utf-8")
+    assert "for(let i=30;i>0;i--)" not in html            # the old fixed 30-second countdown is gone
+    assert 'id="smode"' in html and "S.choice[S.step]=b.dataset.v" in html
+    assert "function preApply(" in html and "demoOpen()" in html   # pre-switch only while the Guided demo tab is open
+    assert "n=applyLeft()" in html                         # Run waits for the remaining time only

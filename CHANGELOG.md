@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1
+- **Guided demo: Monitor / Block on every step.** Run a step in Monitor, flip to Block and run it again; the recap
+  lists both results with the policy each ran under.
+- **Guided demo: no more 30-second countdown.** A step switches the policy when you open it, so the change applies
+  while you talk. Run waits only for whatever is left of the ~30 seconds AI Guard needs.
+- **AI security end to end:** the ZIA show-steps point at the new console's menus (Analytics > Data Security > Inline
+  CASB / Inline DLP, Internet Access > Dashboards), with the older Analytics paths noted.
+
 ## 1.8.0
 - **Internet Access (ZIA) demo.** A new console tab and `aiguard-kit zia` commands fill ZIA and Insights dashboards
   in the same demo tenant: `zia setup` creates `SE-Demo` rules for one test user only (URL filtering, Cloud App Control,
