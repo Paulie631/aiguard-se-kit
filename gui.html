@@ -449,7 +449,7 @@ $$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.cla
 /* ---------- state ---------- */
 async function loadState(){
   const st=await api("/api/state");
-  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;S.ziaSetUp=!!st.zia_set_up;
+  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;S.ziaSetUp=!!st.zia_set_up;S.levels=st.block_levels||{attacks:[],data:[],never:[]};
   $("#tenant").textContent=`${st.tenant||"not set up"}${st.profile!="default"?" · profile "+st.profile:""} · kit ${st.version}`;
   $("#console").href=st.console;
   if(st.update_behind){const u=$("#upd");u.classList.add("new");u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
@@ -801,15 +801,25 @@ function drawStage(){
 }
 // Per-step Monitor / Block, and switching the policy when a step opens so the ~30 s it takes to apply is spent talking.
 const APPLY_MS=30000;
-function blockLevel(s){const p=s.policy&&normPol(s.policy);return p&&p!="monitor"?p:"everything"}
-function stepMode(i){const s=S.story.steps[i];if(!s||s.kind=="show")return null;return S.choice[i]||(s.policy?normPol(s.policy):null)}
+// Block = the smallest profile that covers the detectors the step's test is written to trigger (or the step's own
+// block level). A step whose test triggers nothing a policy can block gets no switch.
+const RANK=["attacks","data","everything"];
+function neededLevel(s){const L=S.levels||{attacks:[],data:[],never:[]};let need=-1;
+  for(const d of (stepTest(s)?.expect||[])){if(L.never.includes(d))continue;
+    need=Math.max(need,L.attacks.includes(d)?0:L.data.includes(d)?1:2)}
+  return need<0?null:RANK[need]}
+function blockLevel(s){const p=s.policy&&normPol(s.policy), n=neededLevel(s);
+  if(!n)return null;
+  return p&&p!="monitor"&&p!="custom"&&RANK.indexOf(p)>=RANK.indexOf(n)?p:n}
+function stepMode(i){const s=S.story.steps[i];if(!s||s.kind=="show")return null;
+  return (neededLevel(s)&&S.choice[i])||(s.policy?normPol(s.policy):null)}
 function kickPol(){const m=stepMode(S.step);return m?` · POLICY → ${PLABEL[m].toUpperCase()}`:""}
 function drawSteps(){
   $("#steps").innerHTML=S.story.steps.map((s,i)=>{const m=stepMode(i);return `<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${m?`<span class="polchip ${m=="monitor"?"detect":"block"}">${PLABEL[m]}</span>`:""}</span></li>`}).join("");
   $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()})}
 function canSwitch(){return S.policy!=null&&S.pol?.switchable!==false}
-function modeSwitch(s){if(!canSwitch())return"";const cur=stepMode(S.step)||S.policy, bl=blockLevel(s);
-  return `<div class="seg" id="smode" title="The policy for this step. Run it in Monitor, flip to Block, and run it again."><button data-v="monitor" class="${cur=="monitor"?"on":""}">Monitor</button><button data-v="${bl}" class="${cur&&cur!="monitor"?"on":""}">${esc(PLABEL[bl])}</button></div>`}
+function modeSwitch(s){const bl=blockLevel(s);if(!canSwitch()||!bl)return"";const cur=stepMode(S.step)||S.policy;
+  return `<div class="seg" id="smode" title="The policy for this step. Run it in Monitor, flip to Block, and run it again."><button data-v="monitor" class="${cur=="monitor"?"on":""}">Monitor</button><button data-v="${bl}" class="${cur&&cur!="monitor"?"on":""}" title="Switches the policy to ${esc(PLABEL[bl])}">Block</button></div>`}
 function applyLeft(){return Math.max(0,Math.ceil(((S.polChanged||0)+APPLY_MS-Date.now())/1000))}
 function applyNote(){const el=$("#sapply");if(!el)return;const n=applyLeft(), m=stepMode(S.step);
   if(m&&m!=S.policy&&canSwitch()){el.textContent=`Switching the policy to ${PLABEL[m]}…`;return}

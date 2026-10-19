@@ -901,3 +901,13 @@ def test_guided_demo_switches_policy_per_step_without_a_fixed_countdown():
     assert 'id="smode"' in html and "S.choice[S.step]=b.dataset.v" in html
     assert "function preApply(" in html and "demoOpen()" in html   # pre-switch only while the Guided demo tab is open
     assert "n=applyLeft()" in html                         # Run waits for the remaining time only
+
+
+def test_guided_demo_block_levels_match_the_policy_profiles(monkeypatch, tmp_path):
+    """The Block button's level comes from the same detector sets the profiles use; nothing-to-block steps get no switch."""
+    kit = load_kit(monkeypatch, tmp_path, ["help"])
+    lv = kit.block_levels()
+    assert set(lv["attacks"]) == set().union(*kit.ATTACKS.values())
+    assert set(lv["data"]) == {"secrets", "pii"} and "prompt_tags" in lv["never"]
+    html = (ROOT / "gui.html").read_text(encoding="utf-8")
+    assert '>Block</button>' in html and "if(!canSwitch()||!bl)return" in html

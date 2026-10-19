@@ -52,7 +52,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -718,6 +718,12 @@ def _set_action(det, action, only=None):
     if "defaultAction" in cfg:  # the API rejects defaultAction BLOCK (tested); blocking is set per item
         cfg["defaultAction"] = "DETECT"
     det["severity"] = "HIGH" if action == "BLOCK" else "LOW"
+
+
+def block_levels():
+    """For the Guided demo's Block button: which detectors the smaller profiles cover, and which never block."""
+    return {"attacks": sorted(set().union(*ATTACKS.values())), "data": sorted(set().union(*DATA.values())),
+            "never": sorted(NEVER_BLOCK)}
 
 
 def profile_blocks(profile):
@@ -2510,7 +2516,7 @@ def cmd_gui():
                         for n, a in c.get("state", {}).get("apps", {}).items()]
                 return self._send(200, {"tenant": c.get("vanity_domain"), "version": VERSION, "apps": apps,
                                         "policy_id": c.get("state", {}).get("policy_id"), "console": CONSOLE,
-                                        "lib": lib, "panels": PANELS, "prefix": PREFIX,
+                                        "lib": lib, "panels": PANELS, "prefix": PREFIX, "block_levels": block_levels(),
                                         "competitor": c.get("competitor", "Palo Alto"), "profile": PROFILE,
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE),
                                         "edition": (EDITION or {}).get("product"),
