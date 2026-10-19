@@ -358,7 +358,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <div id="readyout" style="display:none;margin-bottom:12px" class="panel"></div>
   <div class="demo">
     <div class="panel"><ol class="steps" id="steps"></ol>
-      <div class="hint">Steps that change the policy wait about 30 seconds for it to apply. Start the step a little early and talk while it counts down.</div>
+      <div class="hint">Each step switches the policy as soon as you open it, so it is in effect by the time you finish talking. Use Monitor / Block on the step to run it either way.</div>
     </div>
     <div class="panel stage" id="stage"></div>
   </div>
@@ -435,7 +435,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 const TOKEN="__KIT_TOKEN__";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const api=(p,b)=>fetch(p,{method:b?"POST":"GET",headers:{"X-Kit-Token":TOKEN,"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error||r.statusText)+(j.fix?" — "+j.fix:""));return j});
-let S={lib:null,apps:[],sel:new Set(),results:[],job:null,mode:"detect",panels:{},policy:null,story:null,step:0,done:new Set()};
+let S={lib:null,apps:[],sel:new Set(),results:[],job:null,mode:"detect",panels:{},policy:null,story:null,step:0,done:new Set(),choice:{}};
 const clean=t=>String(t??"").replace(/\{_\}/g,"").replace(/\{COMPETITOR\}/g,S.competitor||"Palo Alto");
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -611,7 +611,7 @@ async function setPolicy(target){
   try{const p=await api("/api/policy",body);S.pol=p;S.policy=p.mode;markPolicy();S.polChanged=Date.now();return true}
   catch(e){markPolicy();note(esc(e.message));return false}
 }
-$("#polsel").onchange=e=>{if(e.target.value=="custom"){openCustom();markPolicy();return}setPolicy(e.target.value)};
+$("#polsel").onchange=e=>{if(e.target.value=="custom"){openCustom();markPolicy();return}setPolicy(e.target.value).then(ok=>ok&&ticker())};
 let PM=null;
 function openCustom(preset){
   if(!S.pol?.detectors)return;
@@ -767,19 +767,18 @@ function drawStories(){
   demoControls();
   const st=S.lib.stories||[];
   $("#stories").innerHTML=st.map(s=>`<button data-s="${esc(s.id)}">${esc(s.name)}</button>`).join("");
-  $$("#stories button").forEach(b=>b.onclick=()=>{S.story=st.find(x=>x.id==b.dataset.s);S.step=0;S.done=new Set();S.ran={};$$("#stories button").forEach(x=>x.classList.toggle("preset",true));$$("#stories button").forEach(x=>x.classList.toggle("on",x===b));drawStage()});
+  $$("#stories button").forEach(b=>b.onclick=()=>{S.story=st.find(x=>x.id==b.dataset.s);S.step=0;S.done=new Set();S.ran={};S.choice={};$$("#stories button").forEach(x=>x.classList.toggle("preset",true));$$("#stories button").forEach(x=>x.classList.toggle("on",x===b));drawStage()});
   if(st.length)$("#stories button").click();
 }
 function drawStage(){
   if(!S.story){$("#stage").innerHTML='<div class="empty">No storylines found in tests.json.</div>';return}
   const steps=S.story.steps;
-  $("#steps").innerHTML=steps.map((s,i)=>`<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${s.policy?`<span class="polchip ${normPol(s.policy)=="monitor"?"detect":"block"}">${PLABEL[normPol(s.policy)]}</span>`:""}</span></li>`).join("");
-  $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()});
+  drawSteps();
   const s=steps[S.step], show=s.kind=="show", t=show?null:(stepTest(s)||{text:"(test not found: "+s.test+")",direction:"IN"});
   const viaProxy=!show&&demoProxy()&&t.direction=="IN", last=S.step==steps.length-1;
   const owasp=(s.owasp||[]).map(o=>`<span class="owasp" title="OWASP Top 10 for LLM Applications 2025: ${esc(OWASP[o]||o)}">${esc(o)}</span>`).join("");
   const needs=S.story.requires=="zia"&&!S.ziaSetUp?`<div class="notice" style="display:block;margin-bottom:14px">This storyline uses the ZIA demo. Set it up first: <code>zia setup</code> on this machine and a traffic generator running for a few days (Internet Access tab, ZIA.md).</div>`:"";
-  $("#stage").innerHTML=`${S.step==0?needs:""}<div class="kicker">STEP ${S.step+1} OF ${steps.length}${s.policy?` · POLICY → ${PLABEL[normPol(s.policy)].toUpperCase()}`:""}${show?" · SHOW IN THE CONSOLE":""}</div>
+  $("#stage").innerHTML=`${S.step==0?needs:""}<div class="kicker">STEP ${S.step+1} OF ${steps.length}<span id="skpol">${kickPol()}</span>${show?" · SHOW IN THE CONSOLE":""}</div>
     <h3>${esc(s.title)}${owasp}</h3>
     ${newsHTML(s)}${talkHTML(s)}${notesHTML(s)}
     ${show?`<div class="prompt" style="font-family:inherit">${esc(s.where||"")}</div>`:`
@@ -787,15 +786,44 @@ function drawStage(){
     <div class="prompt">${esc(clean(t.text))}</div>`}
     <div class="row" style="margin-top:18px;gap:10px">
       <button id="sback" ${S.step==0?"disabled":""}>‹ Back</button>
-      ${show?`${s.link?`<button class="primary" id="slink">${esc(s.link_label||"Open the console")} ↗</button>`:""}<button id="srun">Mark as shown</button>`:`<button class="primary" id="srun">Run step</button>`}
+      ${show?`${s.link?`<button class="primary" id="slink">${esc(s.link_label||"Open the console")} ↗</button>`:""}<button id="srun">Mark as shown</button>`:`${modeSwitch(s)}<button class="primary" id="srun">Run step</button>`}
       <button id="snext" ${last?"disabled":""}>Next ›</button>
       ${last?`<button id="srecap">Recap</button><a href="${esc(S.console)}" target="_blank">Show it in Insights ↗</a>`:""}
     </div>
+    <div class="hint" id="sapply" style="margin-top:8px"></div>
     <div class="verdict" id="sverdict"></div>`;
   if(last)$("#srecap").onclick=drawRecap;
   if(show&&s.link)$("#slink").onclick=()=>window.open(s.link,"_blank","noopener");
   $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=show?markShown:runStep;
+  $$("#smode button").forEach(b=>b.onclick=()=>{S.choice[S.step]=b.dataset.v;
+    $$("#smode button").forEach(x=>x.classList.toggle("on",x===b));$("#skpol").innerHTML=kickPol();drawSteps();preApply(0)});
+  applyNote();preApply();
 }
+// Per-step Monitor / Block, and switching the policy when a step opens so the ~30 s it takes to apply is spent talking.
+const APPLY_MS=30000;
+function blockLevel(s){const p=s.policy&&normPol(s.policy);return p&&p!="monitor"?p:"everything"}
+function stepMode(i){const s=S.story.steps[i];if(!s||s.kind=="show")return null;return S.choice[i]||(s.policy?normPol(s.policy):null)}
+function kickPol(){const m=stepMode(S.step);return m?` · POLICY → ${PLABEL[m].toUpperCase()}`:""}
+function drawSteps(){
+  $("#steps").innerHTML=S.story.steps.map((s,i)=>{const m=stepMode(i);return `<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${m?`<span class="polchip ${m=="monitor"?"detect":"block"}">${PLABEL[m]}</span>`:""}</span></li>`}).join("");
+  $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()})}
+function canSwitch(){return S.policy!=null&&S.pol?.switchable!==false}
+function modeSwitch(s){if(!canSwitch())return"";const cur=stepMode(S.step)||S.policy, bl=blockLevel(s);
+  return `<div class="seg" id="smode" title="The policy for this step. Run it in Monitor, flip to Block, and run it again."><button data-v="monitor" class="${cur=="monitor"?"on":""}">Monitor</button><button data-v="${bl}" class="${cur&&cur!="monitor"?"on":""}">${esc(PLABEL[bl])}</button></div>`}
+function applyLeft(){return Math.max(0,Math.ceil(((S.polChanged||0)+APPLY_MS-Date.now())/1000))}
+function applyNote(){const el=$("#sapply");if(!el)return;const n=applyLeft(), m=stepMode(S.step);
+  if(m&&m!=S.policy&&canSwitch()){el.textContent=`Switching the policy to ${PLABEL[m]}…`;return}
+  el.textContent=n&&m?`Policy is applying (${PLABEL[S.policy]||S.policy}): ready in ${n}s. Keep talking, or press Run and it waits.`:""}
+let PRE=null, TICK=null;
+function demoOpen(){return $("#v-demo")?.classList.contains("on")}
+function preApply(delay=700){   // a short delay so clicking through steps doesn't switch the policy at every one
+  clearTimeout(PRE);PRE=setTimeout(async()=>{const m=stepMode(S.step);
+    if(!demoOpen()||!m||m==S.policy||!canSwitch()||S.applying)return;
+    S.applying=true;try{await setPolicy(m)}finally{S.applying=false}
+    if(stepMode(S.step)!=S.policy)return preApply(0);   // the step changed while switching
+    ticker()},delay)}
+function ticker(){clearInterval(TICK);applyNote();TICK=setInterval(()=>{const n=applyLeft();applyNote();
+  if(n)$("#polstate").textContent=`applies in ${n}s`;else{markPolicy();clearInterval(TICK)}},500)}
 const OWASP={LLM01:"Prompt Injection",LLM02:"Sensitive Information Disclosure",LLM03:"Supply Chain",LLM04:"Data and Model Poisoning",
   LLM05:"Improper Output Handling",LLM06:"Excessive Agency",LLM07:"System Prompt Leakage",LLM08:"Vector and Embedding Weaknesses",
   LLM09:"Misinformation",LLM10:"Unbounded Consumption"};
@@ -806,20 +834,20 @@ function talkHTML(s){
   return `<p class="talk">${esc(s.say)}</p>${s.show?`<div class="showline"><b>Show:</b> ${esc(s.show)}</div>`:""}`}
 function notesHTML(s){
   if(!$("#shownotes").checked||!(s.sowhat||s.ask||s.objections||s.filler))return"";
-  return `<div class="notes">${s.sowhat?`<h4>SO WHAT</h4><div>${esc(s.sowhat)}</div>`:""}${s.ask?`<h4>ASK</h4><div>${esc(s.ask)}</div>`:""}${(s.objections||[]).length?`<h4>IF THEY ASK</h4><ul>${s.objections.map(o=>`<li><b>${esc(o.q)}</b> ${esc(o.a)}</li>`).join("")}</ul>`:""}${s.filler&&s.policy?`<h4>WHILE THE POLICY APPLIES (30 s)</h4><div>${esc(s.filler)}</div>`:""}</div>`}
-function stepDone(i,entry){S.ran=S.ran||{};S.ran[i]=entry;S.done.add(i);const li=$$("#steps li")[i];if(li){li.classList.add("done");li.querySelector(".num").textContent="✓"}}
+  return `<div class="notes">${s.sowhat?`<h4>SO WHAT</h4><div>${esc(s.sowhat)}</div>`:""}${s.ask?`<h4>ASK</h4><div>${esc(s.ask)}</div>`:""}${(s.objections||[]).length?`<h4>IF THEY ASK</h4><ul>${s.objections.map(o=>`<li><b>${esc(o.q)}</b> ${esc(o.a)}</li>`).join("")}</ul>`:""}${s.filler&&s.policy?`<h4>WHILE THE POLICY APPLIES</h4><div>${esc(s.filler)}</div>`:""}</div>`}
+function stepDone(i,entry){S.ran=S.ran||{};S.ran[i]=Object.assign(S.ran[i]||{},{[entry.mode||"-"]:entry});S.done.add(i);const li=$$("#steps li")[i];if(li){li.classList.add("done");li.querySelector(".num").textContent="✓"}}
 function markShown(){const s=S.story.steps[S.step];stepDone(S.step,{title:s.title,verdict:"SHOWN",dets:[],owasp:s.owasp||[]});
   const v=$("#sverdict");v.style.display="block";v.innerHTML='<span class="muted">Marked as shown.</span>'}
-function recapText(){const st=S.story, ran=S.ran||{}, rows=st.steps.map((s,i)=>[s,ran[i]]).filter(x=>x[1]);
+function recapText(){const st=S.story, ran=S.ran||{}, rows=st.steps.flatMap((s,i)=>Object.values(ran[i]||{}).map(r=>[s,r]));
   const ow=[...new Set(rows.flatMap(([s,r])=>r.owasp))].sort(), blocks=rows.filter(([,r])=>r.verdict=="BLOCK").length;
   const dets=[...new Set(rows.flatMap(([,r])=>r.dets))];
-  return {rows,ow,blocks,dets,text:`What we covered: ${st.name}\n\n`+rows.map(([s,r])=>`- ${s.title}: ${r.verdict}${r.dets.length?" ("+r.dets.join(", ")+")":""}`).join("\n")+
+  return {rows,ow,blocks,dets,text:`What we covered: ${st.name}\n\n`+rows.map(([s,r])=>`- ${s.title}${r.mode?" ("+PLABEL[r.mode]+")":""}: ${r.verdict}${r.dets.length?" ("+r.dets.join(", ")+")":""}`).join("\n")+
     (ow.length?`\n\nOWASP Top 10 for LLM Applications covered: ${ow.map(o=>o+" "+(OWASP[o]||"")).join("; ")}`:"")+
     `\n\nEvery step is logged in AI Guard Insights with the user, the detectors that fired and the action taken.`}}
 function drawRecap(){const r=recapText(), v=$("#sverdict");v.style.display="block";
   if(!r.rows.length){v.innerHTML='<span class="muted">Run some steps first; the recap lists what each one caught.</span>';return}
   v.innerHTML=`<div class="recap"><div class="lbl" style="margin-bottom:8px">Recap · ${r.rows.length} step${r.rows.length==1?"":"s"}, ${r.blocks} blocked${r.ow.length?` · you just saw ${r.ow.length} of the OWASP Top 10 for LLM Applications`:""}</div>
-    <table><tr><th>Step</th><th>Result</th><th>Detectors</th></tr>${r.rows.map(([s,x])=>`<tr><td>${esc(s.title)}</td><td>${esc(x.verdict)}</td><td>${x.dets.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</td></tr>`).join("")}</table>
+    <table><tr><th>Step</th><th>Policy</th><th>Result</th><th>Detectors</th></tr>${r.rows.map(([s,x])=>`<tr><td>${esc(s.title)}</td><td>${x.mode?esc(PLABEL[x.mode]||x.mode):""}</td><td>${esc(x.verdict)}</td><td>${x.dets.map(d=>`<span class="chip">${esc(d)}</span>`).join("")}</td></tr>`).join("")}</table>
     ${r.ow.length?`<div style="margin-top:10px">${r.ow.map(o=>`<span class="owasp" style="margin:0 6px 0 0">${esc(o)} ${esc(OWASP[o]||"")}</span>`).join("")}</div>`:""}
     <div class="row" style="margin-top:12px;gap:10px"><button id="recapcopy">Copy for the follow-up email</button><span class="muted" style="font-size:12px" id="recapok"></span></div></div>`;
   $("#recapcopy").onclick=async()=>{try{await navigator.clipboard.writeText(r.text);$("#recapok").textContent="Copied."}catch(e){$("#recapok").textContent="Couldn't copy: select the table instead."}}}
@@ -827,13 +855,16 @@ async function runStep(){
   const s=S.story.steps[S.step], t=S.lib.tests.find(x=>x.id==s.test), v=$("#sverdict");
   if(!t)return;
   $("#srun").disabled=true;v.style.display="block";
-  if(s.policy&&normPol(s.policy)!=S.policy){
-    if(S.policy===null){v.innerHTML='<span class="muted">The policy switch is unavailable, so this step runs with the current policy.</span>';await sleep(1200)}
-    else{v.innerHTML=`<span class="muted">Switching the policy to ${PLABEL[normPol(s.policy)]}…</span>`;
-      if(!await setPolicy(s.policy)){$("#srun").disabled=false;return}
-      for(let i=30;i>0;i--){v.innerHTML=`<span class="muted">Policy is applying… running in ${i}s</span>`;$("#polstate").textContent=`applies in ${i}s`;await sleep(1000)}
-      markPolicy()}
+  clearTimeout(PRE);while(S.applying)await sleep(200);
+  const want=stepMode(S.step);
+  if(want&&want!=S.policy){
+    if(!canSwitch()){v.innerHTML='<span class="muted">The policy switch is unavailable, so this step runs with the current policy.</span>';await sleep(1200)}
+    else{v.innerHTML=`<span class="muted">Switching the policy to ${PLABEL[want]}…</span>`;
+      if(!await setPolicy(want)){$("#srun").disabled=false;return}
+      ticker()}
   }
+  for(let n=applyLeft();n>0;n=applyLeft()){v.innerHTML=`<span class="muted">Policy is still applying… running in ${n}s</span>`;await sleep(500)}
+  markPolicy();applyNote();
   const tt=stepTest(s)||t, viaProxy=demoProxy()&&tt.direction=="IN", tags=$("#dtags").checked||!viaProxy;
   v.innerHTML=`<span class="muted">${viaProxy?"Sending to "+esc(demoAppLabel())+" through AI Guard…":"Scanning…"}</span>`;
   try{const user=S.lib.users[S.step%S.lib.users.length], text=clean(tt.text);
@@ -844,7 +875,7 @@ async function runStep(){
     const err=[p,d].find(r=>r&&r.status=="ERROR");
     const blocked=p?p.action=="BLOCK":!!(d&&d.action=="BLOCK");
     const big=err&&!(p&&p.status=="OK")&&!(d&&d.status=="OK")?"ERROR":blocked?"BLOCK":"ALLOW";
-    let html=`<span class="big ${big}">${big}</span>`;
+    let html=`<span class="big ${big}">${big}</span>${S.policy?` <span class="muted">with the policy on ${esc(PLABEL[S.policy]||S.policy)}</span>`:""}`;
     if(d&&d.status=="OK")html+=`<div style="margin-top:12px">${chips(d,false)||'<span class="muted">No detectors triggered</span>'}</div>`;
     if(p&&p.status=="OK"){
       if(p.action=="BLOCK")html+=`<div class="reply blocked"><div class="who">AI Guard · blocked before reaching ${esc(demoAppLabel())}</div><div class="txt">${esc(blockMsg(p.reply))}</div></div>`;
@@ -861,7 +892,7 @@ async function runStep(){
       scanOne({text:p.reply,direction:"OUT",app:proxyApp,user,mode:"detect"}).then(o=>{const el=$("#sresp");if(!el)return;
         el.innerHTML=o.status=="OK"?`<span class="lbl">Response check:</span> ${o.action=="BLOCK"?'<span class="badge BLOCK">BLOCK</span> ':""}${chips(o,false)||'<span class="muted">no detectors triggered</span>'}`:`<span class="muted">${esc(o.error)}</span>`}).catch(()=>{});
     }
-    stepDone(S.step,{title:s.title,verdict:big,dets:(d&&d.status=="OK"?d.detectors:[])||[],owasp:s.owasp||[]});
+    stepDone(S.step,{title:s.title,mode:S.policy,verdict:big,dets:(d&&d.status=="OK"?d.detectors:[])||[],owasp:s.owasp||[]});
   }catch(e){v.innerHTML=esc(e.message)}
   $("#srun").disabled=false;
 }
