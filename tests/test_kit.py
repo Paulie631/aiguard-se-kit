@@ -911,3 +911,11 @@ def test_guided_demo_block_levels_match_the_policy_profiles(monkeypatch, tmp_pat
     assert set(lv["data"]) == {"secrets", "pii"} and "prompt_tags" in lv["never"]
     html = (ROOT / "gui.html").read_text(encoding="utf-8")
     assert '>Block</button>' in html and "if(!canSwitch()||!bl)return" in html
+
+
+def test_guided_demo_ends_the_policy_wait_when_the_step_prompt_gets_the_new_verdict():
+    """The wait is a 30 s ceiling; probe scans (as kit-policy-check) end it as soon as the policy is enforced."""
+    html = (ROOT / "gui.html").read_text(encoding="utf-8")
+    assert "async function probe(m)" in html and 'user:"kit-policy-check"' in html
+    assert "const APPLY_MS=30000" in html                  # still the upper limit
+    assert html.count("probe(") >= 4                       # defined, and started after every switch

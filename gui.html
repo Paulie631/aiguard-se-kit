@@ -790,13 +790,12 @@ function drawStage(){
       <button id="snext" ${last?"disabled":""}>Next ›</button>
       ${last?`<button id="srecap">Recap</button><a href="${esc(S.console)}" target="_blank">Show it in Insights ↗</a>`:""}
     </div>
-    <div class="hint" id="sapply" style="margin-top:8px"></div>
     <div class="verdict" id="sverdict"></div>`;
   if(last)$("#srecap").onclick=drawRecap;
   if(show&&s.link)$("#slink").onclick=()=>window.open(s.link,"_blank","noopener");
   $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=show?markShown:runStep;
   $$("#smode button").forEach(b=>b.onclick=()=>{S.choice[S.step]=b.dataset.v;
-    $$("#smode button").forEach(x=>x.classList.toggle("on",x===b));$("#skpol").innerHTML=kickPol();drawSteps();preApply(0)});
+    $$("#smode button").forEach(x=>x.classList.toggle("on",x===b));$("#skpol").innerHTML=kickPol();drawSteps();applyNote();preApply(0)});
   applyNote();preApply();
 }
 // Per-step Monitor / Block, and switching the policy when a step opens so the ~30 s it takes to apply is spent talking.
@@ -821,17 +820,34 @@ function canSwitch(){return S.policy!=null&&S.pol?.switchable!==false}
 function modeSwitch(s){const bl=blockLevel(s);if(!canSwitch()||!bl)return"";const cur=stepMode(S.step)||S.policy;
   return `<div class="seg" id="smode" title="The policy for this step. Run it in Monitor, flip to Block, and run it again."><button data-v="monitor" class="${cur=="monitor"?"on":""}">Monitor</button><button data-v="${bl}" class="${cur&&cur!="monitor"?"on":""}" title="Switches the policy to ${esc(PLABEL[bl])}">Block</button></div>`}
 function applyLeft(){return Math.max(0,Math.ceil(((S.polChanged||0)+APPLY_MS-Date.now())/1000))}
-function applyNote(){const el=$("#sapply");if(!el)return;const n=applyLeft(), m=stepMode(S.step);
-  if(m&&m!=S.policy&&canSwitch()){el.textContent=`Switching the policy to ${PLABEL[m]}…`;return}
-  el.textContent=n&&m?`Policy is applying (${PLABEL[S.policy]||S.policy}): ready in ${n}s. Keep talking, or press Run and it waits.`:""}
+function applyNote(){   // the countdown lives on the Run button: "Run step · 13s" while the policy applies
+  const b=$("#srun");if(!b||S.story?.steps[S.step]?.kind=="show"||b.disabled)return;
+  const n=applyLeft(), m=stepMode(S.step), switching=m&&m!=S.policy&&canSwitch();
+  b.textContent=switching?"Run step · …":n?`Run step · ${n}s`:"Run step";
+  b.title=switching||n?`The policy is applying${n?`, about ${n}s left`:""}. Press Run and it waits.`:""}
 let PRE=null, TICK=null;
 function demoOpen(){return $("#v-demo")?.classList.contains("on")}
 function preApply(delay=700){   // a short delay so clicking through steps doesn't switch the policy at every one
   clearTimeout(PRE);PRE=setTimeout(async()=>{const m=stepMode(S.step);
-    if(!demoOpen()||!m||m==S.policy||!canSwitch()||S.applying)return;
-    S.applying=true;try{await setPolicy(m)}finally{S.applying=false}
+    if(!demoOpen()||!m||!canSwitch()||S.applying)return;
+    if(m==S.policy){if(applyLeft())probe(m);return}      // already switched: check this step's prompt instead
+    S.applying=true;let ok;try{ok=await setPolicy(m)}finally{S.applying=false}
     if(stepMode(S.step)!=S.policy)return preApply(0);   // the step changed while switching
-    ticker()},delay)}
+    if(ok){ticker();probe(m)}},delay)}
+// Ends the wait as soon as AI Guard enforces the new policy: scans the step's own prompt every few seconds (as the
+// user kit-policy-check, so these are easy to filter in Insights) until it gets the verdict the step should show.
+// 30 s stays the upper limit, e.g. when a detector doesn't fire on a given run.
+let PROBE=0;
+async function probe(m){const gen=++PROBE, s=S.story?.steps[S.step], t=s&&s.kind!="show"&&stepTest(s);
+  const app=S.apps.find(a=>a.detect)?.name;
+  if(!t||!app||(m!="monitor"&&!neededLevel(s)))return;
+  const want=m=="monitor"?"ALLOW":"BLOCK";
+  await sleep(2000);
+  while(gen==PROBE&&applyLeft()>0&&S.policy==m){
+    try{const r=await api("/api/scan",{text:clean(t.text),direction:t.direction,app,user:"kit-policy-check",mode:"detect"});
+      if(gen!=PROBE||S.policy!=m)return;
+      if(r.status=="OK"&&r.action==want){S.polChanged=Date.now()-APPLY_MS;applyNote();markPolicy();return}}catch(e){}
+    await sleep(2500)}}
 function ticker(){clearInterval(TICK);applyNote();TICK=setInterval(()=>{const n=applyLeft();applyNote();
   if(n)$("#polstate").textContent=`applies in ${n}s`;else{markPolicy();clearInterval(TICK)}},500)}
 const OWASP={LLM01:"Prompt Injection",LLM02:"Sensitive Information Disclosure",LLM03:"Supply Chain",LLM04:"Data and Model Poisoning",
@@ -871,10 +887,10 @@ async function runStep(){
     if(!canSwitch()){v.innerHTML='<span class="muted">The policy switch is unavailable, so this step runs with the current policy.</span>';await sleep(1200)}
     else{v.innerHTML=`<span class="muted">Switching the policy to ${PLABEL[want]}…</span>`;
       if(!await setPolicy(want)){$("#srun").disabled=false;return}
-      ticker()}
+      ticker();probe(want)}
   }
-  for(let n=applyLeft();n>0;n=applyLeft()){v.innerHTML=`<span class="muted">Policy is still applying… running in ${n}s</span>`;await sleep(500)}
-  markPolicy();applyNote();
+  for(let n=applyLeft();n>0;n=applyLeft()){v.innerHTML=`<span class="muted">Applying policy… ${n}s</span>`;await sleep(500)}
+  markPolicy();
   const tt=stepTest(s)||t, viaProxy=demoProxy()&&tt.direction=="IN", tags=$("#dtags").checked||!viaProxy;
   v.innerHTML=`<span class="muted">${viaProxy?"Sending to "+esc(demoAppLabel())+" through AI Guard…":"Scanning…"}</span>`;
   try{const user=S.lib.users[S.step%S.lib.users.length], text=clean(tt.text);
@@ -904,7 +920,7 @@ async function runStep(){
     }
     stepDone(S.step,{title:s.title,mode:S.policy,verdict:big,dets:(d&&d.status=="OK"?d.detectors:[])||[],owasp:s.owasp||[]});
   }catch(e){v.innerHTML=esc(e.message)}
-  $("#srun").disabled=false;
+  $("#srun").disabled=false;applyNote();
 }
 $("#showtalk").onchange=drawStage;$("#shownotes").onchange=drawStage;
 function blockMsg(raw){   // "HTTP 403: {...json...}" -> the message inside, else the raw text
