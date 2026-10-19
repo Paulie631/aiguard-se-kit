@@ -227,6 +227,8 @@ class FakeZia:
                 if (a[0], a[1]) in self.members:
                     raise KitError("zid.groups.add_user_to_group failed: 409 already a member")
                 self.members.append((a[0], a[1]))
+                if any(u.get("zid") == a[1] for u in self.db["users"]):   # already synced: its groups follow
+                    self.push_groups(a[1])
                 return None
             if method == "delete_group":
                 self.zid_groups = [x for x in self.zid_groups if x["id"] != a[0]]
@@ -257,6 +259,14 @@ class FakeZia:
     def push(self, u):
         """ZIdentity -> ZIA user sync."""
         self.db["users"].append({"id": next(self.ids), "name": u["displayName"], "email": u["loginName"], "zid": u["id"]})
+        self.push_groups(u["id"])
+
+    def push_groups(self, zid_user):
+        """ZIdentity -> ZIA group sync for one user's groups."""
+        for gid, uid in self.members:
+            grp = next((x for x in self.zid_groups if x["id"] == gid), None)
+            if uid == zid_user and grp and not any(z["name"] == grp["name"] for z in self.db.setdefault("zia_groups", [])):
+                self.db["zia_groups"].append({"id": next(self.ids), "name": grp["name"]})
 
     def all_rules(self):
         out = [r for k in ("url_filtering", "file_type_control_rule", "dlp_web_rules", "cloud_firewall_rules",
@@ -1318,3 +1328,29 @@ def test_tenant_with_zidentity_managed_users_creates_the_test_user_in_zidentity(
     assert any(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) and not fake.passwords
     assert kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity" and "Directory > Users" in out
     assert mine(fake)
+
+
+def test_zidentity_test_user_still_gets_the_client_connector_profiles(zenv, capsys):
+    """The ZIdentity path has no ZIA group id of its own; the profiles use ZIA's synced copy of the group."""
+    kit, z, fake = zenv("zia", "setup", "--via", "zidentity", "--yes")
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    zia_grp = next(x for x in fake.db["zia_groups"] if x["name"] == "SE-Demo: traffic generator")
+    app = next(p for p in fake.web if p["name"] == "SE-Demo traffic generator")
+    assert app["groupIds"] == [int(zia_grp["id"])] and "Created Windows app profile" in out
+    assert "wasn't created by the kit" not in out
+    cfg = kit.load_cfg()
+    assert cfg["zia"]["created_user"]["zia_group_id"] == zia_grp["id"]
+    found = {k for k, _, _ in z.kit_objects(fake, cfg)} if hasattr(z, "kit_objects") else set()
+    assert "zia_group" not in found     # ZIA's synced copy is never deleted by teardown
+
+
+def test_zidentity_group_not_synced_yet_says_to_sign_in_first(zenv, capsys):
+    kit, z, fake = zenv("zia")
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"created_user": {"via": "zidentity", "email": "se-demo-traffic@pyite.buzz",
+                                   "group": "SE-Demo: traffic generator", "group_id": "zg-1", "zid_id": "z-1"}}
+    kit.save_cfg(cfg)
+    lines = []
+    assert z.setup_zcc(fake, cfg, lambda lvl, msg: lines.append(msg)) is None
+    assert "hasn't received the ZIdentity group" in lines[-1] and "sign" in lines[-1].lower()

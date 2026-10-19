@@ -3,6 +3,10 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## Unreleased
+- Fixed: Client Connector profiles weren't created when the test user is created in ZIdentity (see AI Guard kit
+  CHANGELOG).
+
 ## 0.2.2
 Brings the ZIA kit up to date with AI Guard kit 1.8.1–1.8.7:
 - **Desktop shortcut with its own icon** (teal). On a Mac it's now an app, **Zscaler ZIA Demo Console**, with no
