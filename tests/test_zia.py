@@ -1108,7 +1108,7 @@ def test_aws_template_is_consistent_and_has_no_secrets(aws):
     assert t["Resources"]["Generator"]["Properties"]["MetadataOptions"] == {"HttpTokens": "required"}
     p = t["Parameters"]
     assert p["TestUser"]["Default"] == "se-demo-traffic@pyite.buzz" and p["ZccCloudName"]["Default"] == "zscalertwo"
-    assert p["KitZipUrl"]["Default"].endswith("/zia-latest/zscaler-zia-kit.zip") and p["ZccInstallerUrl"]["Default"] == ""
+    assert p["KitZipUrl"]["Default"].endswith("/zia-latest/zscaler-zia-kit.zip") and p["ZccInstallerUrl"]["Default"] == aws.ZCC_DEFAULT["url"]
     assert not [k for k, v in p.items() if v.get("NoEcho") or "password" in k.lower()]   # no secret parameters
     assert not re.search(r"(?i)(password|secret)\s*[=:]\s*\S", aws.USER_DATA)          # none in the boot script
     ud = aws.USER_DATA

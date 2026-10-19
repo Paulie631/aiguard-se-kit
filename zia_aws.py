@@ -22,7 +22,10 @@ KIT_ZIP = "https://github.com/Paulie631/aiguard-se-kit/releases/download/zia-lat
 # zcc-installer release (a pre-release, so the kit's update check never sees it). The instance installs it only if
 # its SHA-256 matches and it carries a valid Zscaler code signature. To change versions: attach the new file to that
 # release and update all three values here. Empty url: no default, SEs install by hand or give their own.
-ZCC_DEFAULT = {"version": "", "url": "", "sha256": ""}
+ZCC_DEFAULT = {"version": "4.10.0.477",
+               "url": "https://github.com/Paulie631/aiguard-se-kit/releases/download/zcc-installer/"
+                      "Zscaler-windows-4.10.0.477-installer.msi",
+               "sha256": "793fc24713c26e0d6ac5a9f0371d844d438972f5f68c4e05c531d02948eba2ef"}
 AMI_PARAM = "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
 NAME = "SE-Demo ZIA traffic generator"
 
