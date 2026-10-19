@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.8"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.9"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -84,6 +84,26 @@ def zcfg(cfg):
 
 
 # ---------------------------------------------------------------- OneAPI
+def _failed(resource, method, err):
+    """Summary and level for a failed call. ZIA refusing user changes on a tenant whose users ZIdentity manages is
+    expected (setup then uses ZIdentity), so it's logged as info, not as an error."""
+    if resource.startswith("user_management") and zid_managed(err):
+        return f"ZIA API {resource}.{method}: read-only here (users are managed in ZIdentity; the kit uses ZIdentity)", "info"
+    return f"ZIA API {resource}.{method} failed", "error"
+
+
+def cli_log(level, msg):
+    """The terminal's log for ZIA commands: prints, and records the line in the activity log (Logs tab,
+    diagnostics), as the console's ZIA jobs do."""
+    record(level, msg)
+    K.cli_log(level, msg)
+
+
+def record(level, msg):
+    if level != "head":
+        K.activity("setup", f"ZIA: {msg}", {"fail": "error", "warn": "warn", "ok": "ok"}.get(level, "info"))
+
+
 class ZiaTenant:
     def __init__(self, cfg):
         from zscaler import ZscalerClient
@@ -111,14 +131,14 @@ class ZiaTenant:
         try:
             out = getattr(api, method)(*a, **kw)
         except Exception as e:
-            K.activity("api", f"ZIA API {resource}.{method} failed", "error", request=req, error=str(e)[:2000],
+            K.activity("api", *_failed(resource, method, e), request=req, error=str(e)[:2000],
                        ms=int((time.time() - t0) * 1000))
             raise
         if not (isinstance(out, tuple) and len(out) == 3):
             return out
         result, resp, err = out
         if err or write:   # failures and changes go to the activity log (Logs tab, diagnostics); reads stay quiet
-            K.activity("api", f"ZIA API {resource}.{method}" + (" failed" if err else ""), "error" if err else "ok",
+            K.activity("api", *(_failed(resource, method, err) if err else (f"ZIA API {resource}.{method}", "ok")),
                        request=req, **({"error": str(err)[:2000]} if err else {}), ms=int((time.time() - t0) * 1000))
         if err:
             K.vlog(f"error: {err}")
@@ -338,7 +358,7 @@ def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, p
     a generated password kept in this computer's keychain. via="zidentity": a ZIdentity user (set its password by
     hand). Safe to run again: an existing user is reused."""
     z = zcfg(cfg)
-    via = via or (z.get("created_user") or {}).get("via")
+    via = via or (z.get("created_user") or {}).get("via") or ("zidentity" if z.get("users_in_zidentity") else None)
     if not via:
         mode, detail = auth_mode(t)
         if mode == "directory":
@@ -356,6 +376,8 @@ def create_test_user(t, cfg, log, email=None, domain=None, via=None, wait=180, p
             raise
         log("info", "This tenant manages users in ZIdentity (ZIA's copies are read-only), so the test user is "
                     "created in ZIdentity instead")
+        z["users_in_zidentity"] = True   # kept after teardown: next time setup goes straight to ZIdentity
+        K.save_cfg(cfg)
         return create_zid_user(t, cfg, log, email, domain, wait, poll)
 
 
@@ -1617,7 +1639,7 @@ def choose_users(t, cfg):
         return
     pending = (z.get("created_user") or {}).get("email")
     if K.YES or pending or "--create-user" in K.ARGS:
-        create_test_user(t, cfg, K.cli_log, email=pending, domain=K.opt("domain"), via=K.opt("via"))
+        create_test_user(t, cfg, cli_log, email=pending, domain=K.opt("domain"), via=K.opt("via"))
         return
     K.info("The demo rules apply only to one test user: the one signed in to Client Connector on the traffic generator.")
     domain = K.opt("domain") or tenant_domain(t) or "yourdomain"
@@ -1626,7 +1648,7 @@ def choose_users(t, cfg):
     i = K.menu("Which test user?", [f"Create one for me: {test_user_names()['login']}@{domain} (recommended)",
                                     "Use a user I already have (never your own account)"])
     if i == 0:
-        create_test_user(t, cfg, K.cli_log, domain=K.opt("domain"), via=K.opt("via"))
+        create_test_user(t, cfg, cli_log, domain=K.opt("domain"), via=K.opt("via"))
         return
     while True:
         w = K.ask("Test user email (comma-separate several)")
@@ -1675,7 +1697,7 @@ def cmd_setup():
         print("  Cancelled. Nothing was changed.")
         return
     K.head("Step 4 of 4 · Create and activate")
-    res = setup_apply(t, cfg, K.cli_log, getattr(t, "_facts", None))
+    res = setup_apply(t, cfg, cli_log, getattr(t, "_facts", None))
     K.head("Done" if not res["failed"] else f"Done, {len(res['failed'])} rule(s) need attention (see above)")
     print("  Next, on the traffic generator (Client Connector signed in as the test user):")
     print("    ./aiguard-kit zia check      confirms traffic reaches this tenant")
@@ -1727,7 +1749,7 @@ def cmd_status():
     if any(c.get("fixable") for c in checks):
         if "--fix" in K.ARGS or K.yesno("Fix these now? (runs setup again; only kit objects change)", False):
             K.head("Fixing")
-            res = fix_drift(t, cfg, K.cli_log)
+            res = fix_drift(t, cfg, cli_log)
             K.head("After the fix")
             K.print_checks(res["checks"])
         else:
@@ -1827,7 +1849,7 @@ def api_password(cfg):
 def cmd_teardown():
     cfg = K.load_cfg()
     K.head("ZIA teardown")
-    teardown(connect(cfg), cfg, K.cli_log)
+    teardown(connect(cfg), cfg, cli_log)
 
 
 def cmd_dashboards():

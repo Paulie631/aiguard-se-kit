@@ -53,7 +53,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.13"
+VERSION = "1.8.14"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -2782,7 +2782,9 @@ def cmd_gui():
                     return self._send(400, {"error": "Type DELETE to confirm."})
                 jid = uuid.uuid4().hex[:8]
                 job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
-                zlog = lambda level, msg: job["results"].append({"level": level, "msg": msg})  # noqa: E731
+                def zlog(level, msg):   # shown in the console, and kept in the activity log for diagnostics
+                    job["results"].append({"level": level, "msg": msg})
+                    product("zia").record(level, msg)
 
                 def zia_work():
                     try:
