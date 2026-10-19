@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.6
+- **Rejected OneAPI sign-in.** When the client secret stops working (rotated, deleted, expired, client disabled),
+  the kit now says so once, with the fix (Setup > Connect > Use different credentials), instead of a wall of
+  `401 Unauthorized - token refresh attempts exhausted` lines from the SDK. `--verbose` still shows them.
+- **Tenants whose users are managed in ZIdentity.** ZIA refuses to create users there ("UNMODIFIABLE ...
+  OneIdentityUserLogin enabled users will have read only access"). Preflight used to blame the API role's User
+  Management access; it now says the users live in ZIdentity, and setup creates the test user in ZIdentity
+  automatically (the API client needs ZIAM = Role: Users Admin).
+
 ## 1.8.5
 - **Exact console menus.** The *AI security end to end* steps point at Data Security > Inline CASB > Shadow IT and
   SaaS/Cloud App Policy (AI & ML Applications) and at Data Security > Inline DLP > Data Loss Prevention. The Store Prompts/Responses check points at AI Guard >

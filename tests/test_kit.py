@@ -919,3 +919,17 @@ def test_guided_demo_ends_the_policy_wait_when_the_step_prompt_gets_the_new_verd
     assert "async function probe(m)" in html and 'user:"kit-policy-check"' in html
     assert "const APPLY_MS=30000" in html                  # still the upper limit
     assert html.count("probe(") >= 4                       # defined, and started after every switch
+
+
+def test_a_rejected_oneapi_login_is_one_clear_message_not_a_wall_of_sdk_errors(monkeypatch, tmp_path):
+    import logging
+    kit = load_kit(monkeypatch, tmp_path, ["help"])
+    t = kit.Tenant.__new__(kit.Tenant)
+    failing = types.SimpleNamespace(list_policies=lambda: (None, None, Exception(
+        "401 Unauthorized - token refresh attempts exhausted or OAuth not available.")))
+    t.ag = types.SimpleNamespace(policies=failing)
+    with pytest.raises(kit.KitError) as e:
+        t.call("policies", "list_policies")
+    assert "Use different credentials" in str(e.value) and "token refresh" not in str(e.value)
+    kit.quiet_sdk()
+    assert logging.getLogger("zscaler-sdk-python").level == logging.CRITICAL

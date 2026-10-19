@@ -52,7 +52,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.5"
+VERSION = "1.8.6"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -403,6 +403,23 @@ def yesno(prompt, default=True):
 
 
 # ---------------------------------------------------------------- Zscaler OneAPI
+OAUTH_FAILED = ("Zscaler rejected the kit's OneAPI sign-in (401). Usual causes: the API client's secret was rotated, "
+                "deleted or has expired; the API client was disabled; or the vanity domain is wrong. Re-enter them in "
+                "the console's Setup tab > Connect > Use different credentials (or ./aiguard-kit setup).")
+
+
+def oauth_failed(err):
+    """The SDK's way of saying the client ID/secret no longer work (it retries, then gives up)."""
+    return bool(re.search(r"token refresh attempts exhausted|OAuth not available|invalid_client", str(err), re.I))
+
+
+def quiet_sdk():
+    """The SDK logs every failed retry at ERROR; the kit reports one clear message instead. --verbose keeps them."""
+    import logging
+    if not VERBOSE:
+        logging.getLogger("zscaler-sdk-python").setLevel(logging.CRITICAL)
+
+
 class Tenant:
     def __init__(self, cfg):
         from zscaler import ZscalerClient
@@ -412,6 +429,7 @@ class Tenant:
         conf = {"clientId": cfg["client_id"], "clientSecret": secret, "vanityDomain": cfg["vanity_domain"]}
         if cfg.get("cloud"):
             conf["cloud"] = cfg["cloud"]
+        quiet_sdk()
         self.c = ZscalerClient(conf)
         self.ag = self.c.aiguard
 
@@ -428,6 +446,8 @@ class Tenant:
         if err:
             vlog(f"error: {err}")
             activity("api", f"AI Guard API {resource}.{method} failed", "error", request=req, error=str(err), ms=ms)
+            if oauth_failed(err):
+                raise KitError(OAUTH_FAILED)
             raise KitError(f"{resource}.{method} failed: {err}")
         body = resp.get_body() if resp is not None else None
         activity("api", f"AI Guard API {resource}.{method}", "ok", request=req, response=body, ms=ms)
