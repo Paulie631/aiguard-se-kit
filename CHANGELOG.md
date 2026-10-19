@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.4
 - **AWS traffic generator installs Client Connector for you.** The CloudFormation template now points at the kit's
   copy of the Windows installer (4.10.0.477, on the `zcc-installer` release). The instance installs it only if its
   SHA-256 matches the pinned value and it carries a valid Zscaler code signature; any installer you supply gets the
