@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.9
 - **Fixed: Cloud App Control rules left out DeepSeek, Character.AI, Claude, WeTransfer, TeamViewer and others.**
   ZIA lists actions only for apps with fine-grained controls (ChatGPT, Dropbox, Slack…); most apps list none but
   still take the category's basic allow/deny web-use action, as the console shows. Setup now gives those apps that
