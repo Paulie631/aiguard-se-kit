@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.3
 - **Guided demo: shorter policy wait.** After a switch the kit re-checks the step's prompt every few seconds and
   ends the wait as soon as AI Guard enforces the new policy, with 30 seconds as the upper limit. The checks are
   logged under the user `kit-policy-check`, so they're easy to filter out in Insights.
