@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.6
 - **Rejected OneAPI sign-in.** When the client secret stops working (rotated, deleted, expired, client disabled),
   the kit now says so once, with the fix (Setup > Connect > Use different credentials), instead of a wall of
   `401 Unauthorized - token refresh attempts exhausted` lines from the SDK. `--verbose` still shows them.
