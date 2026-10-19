@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.8.14
+- **The SE deployment guide ships with each release**, as Word and Markdown files stamped with the kit version
+  (source: `docs/DEPLOYMENT-GUIDE.md`, also inside the kit zip).
 - **ZIA setup messages are now in the Logs tab and diagnostics** (the warnings and manual steps setup shows), not
   only the API calls, so a diagnostics zip tells the whole story.
 - **No more red "user_management.add_group failed" on ZIdentity tenants.** That refusal is the expected sign that
