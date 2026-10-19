@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.10
 - **Client Connector forwarding profile: retries when the copy is refused.** Client Connector's API can answer a
   bare `400` to a forwarding profile copied from the tenant's own (seen with a profile that uses trusted-network
   conditions). Setup now retries without the trusted-network conditions and copied ids, then from the default
