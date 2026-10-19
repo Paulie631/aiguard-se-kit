@@ -1278,3 +1278,21 @@ def test_another_prefix_gets_its_own_test_user_and_client_connector_profiles(zen
     assert z.test_user_names()["login"] == "se-demo-traffic"
     assert z.zcc_names() == ("SE-Demo traffic generator", "SE-Demo Z-Tunnel 2.0")
 
+
+
+def test_aws_template_uses_the_kits_installer_copy_pinned_by_hash_and_signature(aws, monkeypatch):
+    """With a default copy set, the template points at it with its SHA-256; 'none' or your own source overrides it."""
+    sha = "ab" * 32
+    monkeypatch.setattr(aws, "ZCC_DEFAULT", {"version": "4.7", "url": "https://example.test/zcc.msi", "sha256": sha})
+    p = aws.build(domain="pyite.buzz", test_user="t@pyite.buzz")["Parameters"]
+    assert p["ZccInstallerUrl"]["Default"] == "https://example.test/zcc.msi" and p["ZccInstallerSha256"]["Default"] == sha
+    p = aws.build(domain="pyite.buzz", test_user="t@pyite.buzz", zcc_url="none")["Parameters"]
+    assert p["ZccInstallerUrl"]["Default"] == "" and p["ZccInstallerSha256"]["Default"] == ""
+    p = aws.build(domain="pyite.buzz", test_user="t@pyite.buzz", zcc_s3="b-1/zcc.msi")["Parameters"]
+    assert p["ZccInstallerUrl"]["Default"] == "" and p["ZccS3Object"]["Default"] == "b-1/zcc.msi"
+    ud = aws.USER_DATA
+    assert "Get-FileHash $f -Algorithm SHA256" in ud and "Get-AuthenticodeSignature $f" in ud
+    assert ud.index("Get-AuthenticodeSignature") < ud.index("msiexec.exe")   # checked before anything runs
+    import re as _re
+    pat = p["ZccInstallerSha256"]["AllowedPattern"]
+    assert _re.match(pat, "") and _re.match(pat, sha) and not _re.match(pat, "abc")
