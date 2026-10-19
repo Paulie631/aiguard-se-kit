@@ -18,6 +18,14 @@ import json
 
 # The newest ZIA kit release (a rolling copy on the zia-latest release). Override with the KitZipUrl parameter.
 KIT_ZIP = "https://github.com/Paulie631/aiguard-se-kit/releases/download/zia-latest/zscaler-zia-kit.zip"
+# The Client Connector installer the kit offers by default: a copy of Zscaler's Windows installer attached to the
+# zcc-installer release (a pre-release, so the kit's update check never sees it). The instance installs it only if
+# its SHA-256 matches and it carries a valid Zscaler code signature. To change versions: attach the new file to that
+# release and update all three values here. Empty url: no default, SEs install by hand or give their own.
+ZCC_DEFAULT = {"version": "4.10.0.477",
+               "url": "https://github.com/Paulie631/aiguard-se-kit/releases/download/zcc-installer/"
+                      "Zscaler-windows-4.10.0.477-installer.msi",
+               "sha256": "793fc24713c26e0d6ac5a9f0371d844d438972f5f68c4e05c531d02948eba2ef"}
 AMI_PARAM = "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
 NAME = "SE-Demo ZIA traffic generator"
 
@@ -38,6 +46,7 @@ if ($zcc -or $s3o) {
   $ext = "msi"
   if (($zcc + $s3o) -match "\.exe(\?|$)") { $ext = "exe" }
   $f = "$root\zcc-installer.$ext"
+  $want = "${ZccInstallerSha256}"
   if ($s3o) {
     # Your own bucket: the instance role may read only this one object, so there's no link to expire or leak.
     $b, $k = $s3o.Split("/", 2)
@@ -45,12 +54,27 @@ if ($zcc -or $s3o) {
   } else {
     Invoke-WebRequest -Uri $zcc -OutFile $f -UseBasicParsing
   }
-  if ($ext -eq "msi") {
+  # Never run a file that isn't Zscaler's: check the pinned SHA-256 (when given) and the code signature.
+  $ok = Test-Path $f
+  if ($ok -and $want) {
+    $got = (Get-FileHash $f -Algorithm SHA256).Hash
+    if ($got -ne $want.ToUpper()) { "Client Connector installer SHA-256 is $got, expected $want. Not installing it."; $ok = $false }
+  }
+  if ($ok) {
+    $sig = Get-AuthenticodeSignature $f
+    if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Zscaler") {
+      "Client Connector installer isn't validly signed by Zscaler (" + $sig.Status + "): not installing it."; $ok = $false
+    }
+  }
+  if (-not $ok) {
+    "Install Client Connector by hand from your demo tenant, then sign in as ${TestUser}."
+  } elseif ($ext -eq "msi") {
     Start-Process msiexec.exe -Wait -ArgumentList "/i `"$f`" /quiet /norestart CLOUDNAME=${ZccCloudName} USERDOMAIN=${ZccUserDomain}"
+    "Client Connector installed. Sign in as ${TestUser}."
   } else {
     Start-Process $f -Wait -ArgumentList "--mode unattended --cloudName ${ZccCloudName} --userDomain ${ZccUserDomain}"
+    "Client Connector installed. Sign in as ${TestUser}."
   }
-  "Client Connector installed. Sign in as ${TestUser}."
 } else {
   "No Client Connector installer URL given: install it by hand, then sign in as ${TestUser}."
 }
@@ -108,7 +132,11 @@ def param(type_, default, desc, **kw):
 
 
 def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@example.com", kit_zip=KIT_ZIP,
-          zcc_url="", zcc_s3="", every=30, per_type=4, schedule=True):
+          zcc_url="", zcc_s3="", zcc_sha256="", every=30, per_type=4, schedule=True):
+    if zcc_url == "none":                                   # explicitly no installer: install by hand
+        zcc_url = ""
+    elif not zcc_url and not zcc_s3 and ZCC_DEFAULT["url"]:  # the kit's own copy, pinned by hash
+        zcc_url, zcc_sha256 = ZCC_DEFAULT["url"], ZCC_DEFAULT["sha256"]
     tags = [{"Key": "Name", "Value": NAME}, {"Key": "se-demo", "Value": "zia-traffic-generator"}]
     params = {
         "TestUser": param("String", test_user, "The ZIA test user (from aiguard-kit zia setup). Sign in to Client "
@@ -117,6 +145,10 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
         "ZccUserDomain": param("String", domain, "Your tenant's user domain."),
         "ZccInstallerUrl": param("String", zcc_url, "Optional HTTPS URL of the Client Connector Windows installer "
                                                     "(.msi or .exe), e.g. an S3 presigned URL. Empty: install it by hand."),
+        "ZccInstallerSha256": param("String", zcc_sha256, "Optional SHA-256 the installer must match (the kit fills "
+                                                          "it in for its own copy). The installer must also carry a "
+                                                          "valid Zscaler signature either way.",
+                                    AllowedPattern=r"^$|^[A-Fa-f0-9]{64}$", ConstraintDescription="64 hex characters, or empty"),
         "ZccS3Object": param("String", zcc_s3, "Optional, instead of a URL: the Client Connector installer in your own S3 "
                                                "bucket, as bucket/key (for example my-bucket/Zscaler-windows-x64.msi), "
                                                "in this region. The instance may read only that object.",
@@ -231,7 +263,7 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
     return {"AWSTemplateFormatVersion": "2010-09-09",
             "Description": f"{NAME} for {test_user} (aiguard-kit zia aws). Delete the stack to remove everything.",
             "Metadata": {"AWS::CloudFormation::Interface": {"ParameterGroups": [
-                {"Label": {"default": "Zscaler"}, "Parameters": ["TestUser", "ZccCloudName", "ZccUserDomain", "ZccS3Object", "ZccInstallerUrl"]},
+                {"Label": {"default": "Zscaler"}, "Parameters": ["TestUser", "ZccCloudName", "ZccUserDomain", "ZccS3Object", "ZccInstallerUrl", "ZccInstallerSha256"]},
                 {"Label": {"default": "Traffic"}, "Parameters": ["TrafficEveryMinutes", "RequestsPerType", "KitZipUrl"]},
                 {"Label": {"default": "AWS"}, "Parameters": ["InstanceType", "WeekdaySchedule", "NetworkMode", "ExistingVpcId",
                                                               "ExistingSubnetId", "ExistingInstanceProfile", "KeyPairName", "WindowsAmi"]}]}},

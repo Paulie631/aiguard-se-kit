@@ -1522,10 +1522,24 @@ def aws_settings(t, cfg, zcc_url=""):
     if not user:
         raise K.KitError("Run ./aiguard-kit zia setup first: the template needs the test user.")
     zcc_url, zcc_s3 = (zcc_url or "").strip(), ""
-    if zcc_url.lower().startswith("s3://"):   # your own bucket: s3://bucket/key
+    if zcc_url.lower() in ("none", "no", "manual"):
+        zcc_url = "none"
+    elif zcc_url.lower().startswith("s3://"):   # your own bucket: s3://bucket/key
         zcc_url, zcc_s3 = "", zcc_url[5:]
     return {"cloud": cloud_name(t) or cfg.get("cloud") or "zscalertwo", "domain": user.split("@", 1)[1],
             "test_user": user, "zcc_url": zcc_url, "zcc_s3": zcc_s3}
+
+
+def zcc_source(st):
+    """Where the generator gets Client Connector, in words."""
+    dflt = aws_module().ZCC_DEFAULT
+    if st["zcc_s3"]:
+        return f"Client Connector from s3://{st['zcc_s3']}"
+    if st["zcc_url"] == "none" or not (st["zcc_url"] or dflt["url"]):
+        return "no Client Connector installer: install it by hand on the instance"
+    if st["zcc_url"]:
+        return "Client Connector from your URL"
+    return f"Client Connector {dflt['version'] or ''} from the kit's release (checked by SHA-256 and Zscaler signature)".replace("  ", " ")
 
 
 def cmd_aws():
@@ -1539,8 +1553,7 @@ def cmd_aws():
     K.save_cfg(cfg)
     K.ok(f"Wrote {out}")
     K.info(f"Test user {st['test_user']} · cloud {st['cloud']} · domain {st['domain']}"
-           + (f" · Client Connector from s3://{st['zcc_s3']}" if st["zcc_s3"] else "" if st["zcc_url"]
-              else " · no Client Connector installer: install it by hand on the instance"))
+           + " · " + zcc_source(st))
     print("  Next: AWS console > CloudFormation > Create stack > With new resources > Upload a template file,")
     print("        choose that file, review the parameters, tick the IAM acknowledgement, Submit. See ZIA.md (AWS).")
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.4
+- **AWS traffic generator installs Client Connector for you.** The CloudFormation template now points at the kit's
+  copy of the Windows installer (4.10.0.477, on the `zcc-installer` release). The instance installs it only if its
+  SHA-256 matches the pinned value and it carries a valid Zscaler code signature; any installer you supply gets the
+  signature check too. `--zcc-url none` (or `none` in the console field) installs by hand as before.
+
 ## 1.8.3
 - **Guided demo: shorter policy wait.** After a switch the kit re-checks the step's prompt every few seconds and
   ends the wait as soon as AI Guard enforces the new policy, with 30 seconds as the upper limit. The checks are
