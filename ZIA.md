@@ -27,8 +27,8 @@ With the ZIA kit, `zia-kit setup` is the same as `aiguard-kit zia setup`, and li
 The ZIA tab of the console does the same as these commands.
 
 1. Give the OneAPI client ZIA access (one time):
-   - **Administration > Role Management**: add an **API** role with full access to URL Filtering, Cloud App Control, File Type Control, DLP, Firewall, Activation and **User Management** (for creating the test user; without it, create the user yourself and pass `--user`).
-   - **Administration > API > OneAPI > API Clients**: edit the kit's client and add Zscaler Internet Access with that role.
+   - **Administration > Role Management > Internet & SaaS > Add API Role**: name it `SE-Demo kit` and give it **Full Access** to every area (it needs at least the policy areas, Activation and **User Management**; without User Management, create the test user yourself and pass `--user`).
+   - **Administration > API > OneAPI > API Clients**: edit the kit's client and, on its **Resources** tab, set **ZIA** to that role, **ZCC** to Role: Super Admin (Z-Tunnel 2.0 and certificate profiles) and **ZINSIGHTS** to Role: ZINSIGHTS Reader (dashboard and readiness checks). Tenants whose users sign in with SAML also need **ZIAM** set to Role: Users Admin.
 2. Create the policy. Setup creates the test user for you:
    ```
    ./aiguard-kit zia preflight

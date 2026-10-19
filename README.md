@@ -13,7 +13,7 @@ Fill every Zscaler AI Guard dashboard in **your own** tenant in about ten minute
 **Command line:**
 
 1. **Install uv** (one time): `brew install uv` (Mac) or see the Windows note below.
-2. **Create a OneAPI client** in ZIdentity → Integration → API Clients, with AI Guard access. Copy the client ID and secret, and note your vanity domain: the `acme` in `acme.zslogin.net`.
+2. **Create a OneAPI client** in **Administration > API > OneAPI > API Clients > Add API Client**. On its **Resources** tab give **ZGUARD** (AI Guard) the Administrator role; for the ZIA demo also see ZIA.md. Add a secret on the **Client** tab and copy it with the client ID, and note your vanity domain: the `acme` in `acme.zslogin.net`.
 3. **Open the console** from this folder. It starts on the **Setup** tab the first time:
    ```bash
    ./aiguard-kit gui
