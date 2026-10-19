@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.4"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.5"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -807,6 +807,51 @@ ZCC_DROP = {"id", "groups", "users", "deviceGroups", "groupNames", "userNames", 
             "createdBy", "editedBy", "lastModification", "lastModifiedBy", "lastModifiedTime"}
 
 
+# Trusted-network conditions point at objects of the profile they came from; on a new profile ZCC can reject them
+# with a bare 400. The kit's profile is for one demo machine, so it doesn't need them.
+ZCC_TRUSTED = {"trustedNetworkIds", "trustedNetworks", "trustedSubnets", "trustedGateways", "trustedDhcpServers",
+               "trustedEgressIps", "dnsServers", "dnsSearchDomains", "hostname", "resolvedIpsForHostname",
+               "conditionType", "predefinedTrustedNetworks", "predefinedTnAll", "skipTrustedCriteriaMatch"}
+
+
+def _clean_fwd(fwd):
+    """A forwarding-profile body with nothing tied to another profile: no ids inside the per-network actions and
+    no trusted-network conditions."""
+    out = {k: v for k, v in fwd.items() if k not in ZCC_TRUSTED}
+    out["evaluateTrustedNetwork"] = 0
+    for key in ("forwardingProfileActions", "forwardingProfileZpaActions"):
+        if isinstance(out.get(key), list):
+            out[key] = [{k: v for k, v in dict(a).items() if k not in ("id", "forwardingProfileId")}
+                        for a in out[key] if isinstance(a, dict)]
+    return out
+
+
+def _save_fwd(t, log, fwd, src_fwd, fwd_name):
+    """Creates or updates the kit's forwarding profile. ZCC can answer a bare 400 to a body copied from another
+    profile, so this tries progressively plainer copies and says which one it kept."""
+    plain = dict(_clean_fwd(fwd))
+    base_acts = [dict(a) for a in (src_fwd or {}).get("forwardingProfileActions") or []]
+    for a in base_acts:
+        a.update(actionType=ZCC_TUNNEL, enablePacketTunnel=1)
+    from_base = dict(_clean_fwd(dict(plain, forwardingProfileActions=base_acts))) if base_acts else None
+    tries = [("as copied", fwd), ("without trusted-network conditions and copied ids", plain)]
+    if from_base:
+        tries.append(("from your default profile's actions, switched to Z-Tunnel 2.0", from_base))
+    last = None
+    for i, (how, body) in enumerate(tries):
+        try:
+            res = t.call("zcc.forwarding_profile", "update_forwarding_profile", **body)
+            if i:
+                log("info", f"Forwarding profile '{fwd_name}': saved {how} (Client Connector refused the fuller copy)")
+            return res
+        except Exception as e:
+            last = e
+            if not re.search(r"\b400\b|invalid|bad request", str(e), re.I):
+                raise
+            K.vlog(f"forwarding profile ({how}) refused: {e}")
+    raise last
+
+
 def _zcc_list(t, resource, **q):
     return items(t.call(resource, "list_by_company", query_params=q or None))
 
@@ -880,7 +925,7 @@ def setup_zcc(t, cfg, log):
         log("info", f"Forwarding profile '{fwd_name}': {how}")
         if hit_fwd:
             fwd["id"] = g(hit_fwd, "id")
-        res = t.call("zcc.forwarding_profile", "update_forwarding_profile", **fwd)
+        res = _save_fwd(t, log, fwd, src_fwd, fwd_name)
         fwd_id = g(res, "id") if isinstance(res, dict) and g(res, "id") else g(hit_fwd, "id")
         if not fwd_id:
             fwd_id = next((g(f, "id") for f in _zcc_list(t, "zcc.forwarding_profile") if g(f, "name") == fwd_name), None)

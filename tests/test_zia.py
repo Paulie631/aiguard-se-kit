@@ -185,6 +185,8 @@ class FakeZia:
             return copy.deepcopy(objs)
         if method in ("update_forwarding_profile", "web_policy_edit"):
             assert "groups" not in kw and "users" not in kw, "read-only arrays echoed back"
+            if method == "update_forwarding_profile" and getattr(self, "fwd_rejects", None) and self.fwd_rejects(kw):
+                raise err(f'{resource}.{method} failed: {{ "status": 400, "code": null, "message": null }}')
             o = copy.deepcopy(kw)
             if o.get("id"):
                 i = next(i for i, x in enumerate(objs) if x["id"] == o["id"])
@@ -1380,3 +1382,23 @@ def test_apps_that_list_no_actions_get_the_basic_web_use_action(zenv):
     assert by["SE-Demo: Block file uploads"]["actions"] == ["DENY_FILE_SHARE_WEB_USE"]
     assert by["SE-Demo: Block remote access"]["applications"] == ["ANYDESK", "TEAMVIEWER"]
     assert any("blocks the whole site" in n for n in notes)
+
+
+def test_forwarding_profile_retries_a_plainer_copy_when_zcc_refuses(zenv, capsys):
+    """Greg's tenant: ZCC answered a bare 400 to the copied profile. The kit retries without trusted-network
+    conditions and copied ids, and the app profile still gets created."""
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    for f in fake.fwd:   # the tenant's own profile has trusted-network settings and ids in its actions
+        f["trustedNetworkIds"] = [77]
+        f["evaluateTrustedNetwork"] = 1
+        for a in f.get("forwardingProfileActions") or []:
+            a["id"] = 991
+    fake.fwd_rejects = lambda body: bool(body.get("trustedNetworkIds")) or any(
+        "id" in a for a in body.get("forwardingProfileActions") or [])
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    mine_fwd = next(f for f in fake.fwd if f["name"] == "SE-Demo Z-Tunnel 2.0")
+    assert not mine_fwd.get("trustedNetworkIds") and mine_fwd["evaluateTrustedNetwork"] == 0
+    assert all(z.is_z2(a) for a in mine_fwd["forwardingProfileActions"])
+    assert "without trusted-network conditions" in out and "Created Windows app profile" in out
+    assert any(p["name"] == "SE-Demo traffic generator" for p in fake.web)
