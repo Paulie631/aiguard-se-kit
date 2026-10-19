@@ -2,7 +2,8 @@
 
 ## Unreleased
 - **Exact console menus.** The *AI security end to end* steps point at Data Security > Inline CASB > Shadow IT and
-  SaaS/Cloud App Policy (AI & ML Applications) and at Data Security > Inline DLP. The README and ZIA.md give the
+  SaaS/Cloud App Policy (AI & ML Applications) and at Data Security > Inline DLP > Data Loss Prevention. The Store Prompts/Responses check points at AI Guard >
+  Tenant Settings > Security. The README and ZIA.md give the
   API client's exact roles per service (ZGUARD, ZIA, ZCC, ZINSIGHTS, and ZIAM for SAML tenants) and the ZIA API
   role path (Administration > Role Management > Internet & SaaS > Add API Role).
 

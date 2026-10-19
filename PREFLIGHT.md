@@ -282,7 +282,7 @@ In the console: Setup → step 2 → **Copy report** puts the same report on the
 
 **Verify by hand:**
 
-- AI Security console → Tenant Settings → Security → Store Prompts/Responses is on.
+- AI Security console (≡ > AI Security) → AI Guard → Tenant Settings → Security tab → Store Prompts/Responses is on.
 
 **Fix:**
 

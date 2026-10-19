@@ -196,7 +196,7 @@
    "what": "A reminder. This setting can't be read through the API.",
    "why": "When it's off, events still appear but prompt and response text isn't shown in event details.",
    "verify": [
-    "AI Security console → Tenant Settings → Security → Store Prompts/Responses is on."
+    "AI Security console (≡ > AI Security) → AI Guard → Tenant Settings → Security tab → Store Prompts/Responses is on."
    ],
    "fix": [
     "Turn it on and save. It applies to new events only."
