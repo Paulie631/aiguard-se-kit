@@ -3,6 +3,17 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.2
+Brings the ZIA kit up to date with AI Guard kit 1.8.1–1.8.7:
+- **Desktop shortcut with its own icon** (teal). On a Mac it's now an app, **Zscaler ZIA Demo Console**, with no
+  `.command` extension.
+- **Tenants whose users are managed in ZIdentity:** setup creates the test user in ZIdentity automatically instead of
+  failing with "UNMODIFIABLE … read only access" (the API client needs ZIAM = Role: Users Admin).
+- **One clear message when Zscaler rejects the OneAPI sign-in**, instead of a wall of SDK retry errors.
+- **AWS generator installs Client Connector 4.10.0.477 itself**, checked by SHA-256 and Zscaler signature.
+- **Guided demo:** Monitor / Block on each step, no 30-second countdown (the wait ends as soon as the policy is
+  enforced), and the exact new-console menus for the ZIA show-steps.
+
 ## 0.2.1
 - Fixed: the ZIA kit's console hid the AI Guard **Policy** menu (Monitor, Block attacks, … and **Custom…**, where
   you choose Detect or Block per detector) and the Insights link, even when AI Guard is set up on that computer.

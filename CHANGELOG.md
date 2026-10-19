@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.7
 - **Desktop shortcut with an icon.** The installer's shortcut now has the kit's own icon (blue for the AI Guard
   kit, teal for the ZIA kit). On a Mac it's now an app, **AI Guard Demo Console**, with no `.command` extension; it
   opens the console in a Terminal window as before, and replaces the old `.command` shortcut. The AWS generator's
