@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+- **ZIdentity test users go on `<vanity>.zslogin.net`.** On a domain routed to an identity provider, ZIdentity
+  can't set the user's password, so the test user couldn't sign in. Setup now creates it on ZIdentity's own domain
+  (`--domain` still overrides). A test user an earlier version created on the company domain is replaced, and
+  teardown removes both.
+- **Client Connector API that refuses every forwarding profile:** when even the minimal Z-Tunnel 2.0 profile gets
+  a bare `400`, setup says so once with the exact names and settings to create by hand, and doesn't retry on later
+  runs. Setup and Fix drift now use a forwarding profile that is already Z-Tunnel 2.0, and an app profile that's
+  already right, as they are, without writing to them.
+
 ## 1.8.12
 - **Client Connector forwarding profile: more fallbacks.** A tenant whose profiles carry newer Unified Tunnel
   settings refused every copy with a bare `400`. Setup now also tries without the Unified Tunnel settings, then

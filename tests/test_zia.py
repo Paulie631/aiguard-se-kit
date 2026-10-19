@@ -614,7 +614,7 @@ def test_zidentity_option_creates_the_user_there(zenv, capsys):
     kit, z, fake = zenv("zia", "setup", "--via", "zidentity", "--yes")
     kit.cmd_zia()
     out = capsys.readouterr().out
-    new = next(u for u in fake.zid_users if u["loginName"] == "se-demo-traffic@pyite.buzz")
+    new = next(u for u in fake.zid_users if u["loginName"] == "se-demo-traffic@paulaiuto.zslogin.net")
     grp = next(x for x in fake.zid_groups if x["name"] == "SE-Demo: traffic generator")
     assert (grp["id"], new["id"]) in fake.members and "Directory > Users" in out
     assert kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity"
@@ -630,7 +630,7 @@ def test_slow_zidentity_sync_stops_cleanly_and_resumes(zenv):
     cfg = kit.load_cfg()
     with pytest.raises(kit.KitError, match="hasn't received it yet"):
         z.create_test_user(fake, cfg, lambda *a: None, via="zidentity", wait=0)
-    assert not mine(fake) and kit.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@pyite.buzz"
+    assert not mine(fake) and kit.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@paulaiuto.zslogin.net"
     fake.push(fake.zid_users[-1])   # ZIA catches up
     kit.ARGS[:] = ["zia", "setup", "--yes"]
     kit.YES = True
@@ -646,7 +646,7 @@ def test_where_the_user_is_created_follows_the_tenants_sign_in(zenv):
     assert by["zia-auth"]["status"] == "ok" and "Hosted DB" in by["zia-auth"]["detail"]
     fake.auth = {"orgAuthType": "SAFECHANNEL_DIR", "samlEnabled": True}      # SAML: the user goes in ZIdentity
     z.create_test_user(fake, kit.load_cfg(), lambda *a: None)
-    assert any(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) and not fake.passwords
+    assert any(u["loginName"] == "se-demo-traffic@paulaiuto.zslogin.net" for u in fake.zid_users) and not fake.passwords
     fake.auth = {"orgAuthType": "MICROSOFT_ACTIVE_DIRECTORY", "samlEnabled": False}
     cfg = kit.load_cfg()
     cfg["zia"] = {}
@@ -1331,7 +1331,7 @@ def test_tenant_with_zidentity_managed_users_creates_the_test_user_in_zidentity(
     assert "Users Admin" in by["zia-mkuser"]["fix"] and "User Management to Full" not in by["zia-mkuser"]["fix"]
     kit.cmd_zia()
     out = capsys.readouterr().out
-    assert any(u["loginName"] == "se-demo-traffic@pyite.buzz" for u in fake.zid_users) and not fake.passwords
+    assert any(u["loginName"] == "se-demo-traffic@paulaiuto.zslogin.net" for u in fake.zid_users) and not fake.passwords
     assert kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity" and "Directory > Users" in out
     assert mine(fake)
 
@@ -1447,3 +1447,72 @@ def test_forwarding_profile_falls_back_to_a_minimal_profile(zenv, capsys):
     assert "as a minimal Z-Tunnel 2.0 profile" in lines[-1]
     assert [a["networkType"] for a in res["forwardingProfileActions"]] == [0, 1, 2, 3]
     assert all(z.is_z2(a) and "customPac" not in a and "id" not in a for a in res["forwardingProfileActions"])
+
+
+def test_zidentity_test_user_goes_on_the_zslogin_domain(zenv, capsys):
+    """Greg's tenant routes its company domain to Okta, so ZIdentity can't give a user there a password. The kit's
+    ZIdentity test user goes on <vanity>.zslogin.net instead; --domain still wins."""
+    kit, z, fake = zenv("zia")
+    cfg = kit.load_cfg()
+    assert z.zid_domain(cfg) == "paulaiuto.zslogin.net"
+    assert z.zid_domain({"vanity_domain": "Kamerlabs.zslogin.net"}) == "kamerlabs.zslogin.net"
+    z.create_test_user(fake, cfg, lambda *a: None, via="zidentity")
+    assert kit.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@paulaiuto.zslogin.net"
+    kit2, z2, fake2 = zenv("zia")
+    z2.create_test_user(fake2, kit2.load_cfg(), lambda *a: None, via="zidentity", domain="pyite.buzz")
+    assert kit2.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@pyite.buzz"
+    kit3, z3, fake3 = zenv("zia")
+    fake3.auth = {"orgAuthType": "SAFECHANNEL_DIR", "samlEnabled": True}
+    by = {c["id"]: c for c in z3.preflight(kit3.load_cfg())[0]}
+    assert "paulaiuto.zslogin.net" in by["zia-mkuser"]["detail"]
+
+
+def test_earlier_company_domain_test_user_is_replaced_and_still_torn_down(zenv, capsys):
+    kit, z, fake = zenv("zia")
+    z.create_test_user(fake, kit.load_cfg(), lambda *a: None, via="zidentity", domain="pyite.buzz")
+    cfg = kit.load_cfg()   # as an earlier kit version left it
+    lines = []
+    z.create_test_user(fake, cfg, lambda lvl, msg: lines.append(msg), email=cfg["zia"]["created_user"]["email"])
+    cfg = kit.load_cfg()
+    assert cfg["zia"]["created_user"]["email"] == "se-demo-traffic@paulaiuto.zslogin.net"
+    assert cfg["zia"]["retired_users"][0]["email"] == "se-demo-traffic@pyite.buzz"
+    assert any("Replacing the earlier test user se-demo-traffic@pyite.buzz" in m for m in lines)
+    z.teardown(fake, cfg, lambda *a: None, confirm=False)
+    assert not [u for u in fake.zid_users if u["loginName"].startswith("se-demo-traffic@")]
+    assert "retired_users" not in kit.load_cfg()["zia"]
+
+
+def test_tenant_that_refuses_every_forwarding_profile_gets_the_manual_steps_once(zenv, capsys):
+    """Greg's tenant: every version, down to the minimal one, got a bare 400. Say so once with the exact steps,
+    don't retry on later runs, and adopt the profiles once they're made by hand."""
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    fake.fwd_rejects = lambda body: True
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    assert "refused every version of the forwarding profile" in out and "named exactly 'SE-Demo Z-Tunnel 2.0'" in out
+    assert "group 'SE-Demo: traffic generator'" in out and "status --fix" in out
+    cfg = kit.load_cfg()
+    assert cfg["zia"]["zcc_api_refused"]
+    checks = {c["id"]: c for c in z.zcc_drift(fake, cfg)}
+    assert "by hand" in checks["drift-zcc-fwd"]["fix"] and not checks["drift-zcc-fwd"]["fixable"]
+    tries = []
+    fake.fwd_rejects = lambda body: tries.append(1) or True
+    lines = []
+    assert z.setup_zcc(fake, cfg, lambda lvl, msg: lines.append(msg)) is None
+    assert not tries and "an earlier run found" in lines[-1]
+    # the SE makes both by hand; the kit adopts them without writing
+    gid = cfg["zia"]["created_user"]["zia_group_id"]
+    fake.fwd.append({"id": 9001, "name": "SE-Demo Z-Tunnel 2.0", "forwardingProfileActions": [
+        {"networkType": n, "actionType": 1, "enablePacketTunnel": 1} for n in range(4)]})
+    fake.web.append({"id": 9002, "name": "SE-Demo traffic generator", "active": 1, "ruleOrder": 1,
+                     "groups": [{"id": gid}], "forwardingProfileId": 9001, "windowsPolicy": {"installSslCerts": 1}})
+    writes = []
+    real = fake.call
+    fake.call = lambda r, m, *a, **kw: (writes.append(m) if m in ("update_forwarding_profile", "web_policy_edit")
+                                       else None) or real(r, m, *a, **kw)
+    lines = []
+    assert z.setup_zcc(fake, cfg, lambda lvl, msg: lines.append(msg))
+    assert not writes and any("using it as it is" in m for m in lines)
+    assert all(c["status"] == "ok" for c in z.zcc_drift(fake, cfg))
+    z.teardown(fake, cfg, lambda *a: None, confirm=False)
+    assert "zcc_api_refused" not in kit.load_cfg()["zia"]
