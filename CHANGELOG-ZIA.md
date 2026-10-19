@@ -3,6 +3,10 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## Unreleased
+- Diagnostics include the newest log entries, and ZIA / ZIdentity / Client Connector changes and failures are
+  logged with the request sent (see AI Guard kit CHANGELOG).
+
 ## 0.2.5
 - Client Connector forwarding profile: setup retries plainer copies when Client Connector refuses the first one
   with a bare 400 (see AI Guard kit CHANGELOG).

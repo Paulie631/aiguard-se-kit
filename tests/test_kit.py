@@ -946,3 +946,15 @@ def test_a_rejected_oneapi_login_is_one_clear_message_not_a_wall_of_sdk_errors(m
     assert "Use different credentials" in str(e.value) and "token refresh" not in str(e.value)
     kit.quiet_sdk()
     assert logging.getLogger("zscaler-sdk-python").level == logging.CRITICAL
+
+
+def test_diagnostics_keep_the_newest_log_entries(monkeypatch, tmp_path):
+    """The zip used to keep only the first 20,000 characters of a day's log, i.e. the oldest entries."""
+    import io
+    import zipfile
+    kit = load_kit(monkeypatch, tmp_path, ["help"])
+    for i in range(400):
+        kit.activity("setup", f"entry {i} " + "x" * 200)
+    data = zipfile.ZipFile(io.BytesIO(kit.diagnostics_zip()))
+    log = data.read(next(n for n in data.namelist() if n.startswith("logs/"))).decode()
+    assert "entry 399 " in log and "entry 0 " in log and len(log) > 20000
