@@ -837,6 +837,24 @@ def _clean_fwd(fwd):
     return out
 
 
+ZCC_CORE_ACTION = ("networkType", "actionType", "enablePacketTunnel", "primaryTransport", "allowTLSFallback",
+                   "tunnel2FallbackType", "DTLSTimeout", "UDPTimeout", "TLSTimeout", "mtuForZadapter", "systemProxy",
+                   "systemProxyData")
+
+
+def _minimal_fwd(fwd_name, actions):
+    """Only what a Z-Tunnel 2.0 profile needs: a name and, per network type, Tunnel + Z-Tunnel 2.0."""
+    nets = sorted({int(a.get("networkType") or 0) for a in actions if isinstance(a, dict)}) or [0, 1, 2, 3]
+    by = {int(a.get("networkType") or 0): a for a in actions if isinstance(a, dict)}
+    acts = []
+    for n in nets:
+        a = {k: v for k, v in dict(by.get(n) or {}).items() if k in ZCC_CORE_ACTION}
+        a.update(networkType=n, actionType=ZCC_TUNNEL, enablePacketTunnel=1)
+        a.setdefault("primaryTransport", 1)
+        acts.append(a)
+    return {"name": fwd_name, "active": 1, "evaluateTrustedNetwork": 0, "forwardingProfileActions": acts}
+
+
 def _save_fwd(t, log, fwd, src_fwd, fwd_name):
     """Creates or updates the kit's forwarding profile. ZCC can answer a bare 400 to a body copied from another
     profile, so this tries progressively plainer copies and says which one it kept."""
@@ -845,9 +863,14 @@ def _save_fwd(t, log, fwd, src_fwd, fwd_name):
     for a in base_acts:
         a.update(actionType=ZCC_TUNNEL, enablePacketTunnel=1)
     from_base = dict(_clean_fwd(dict(plain, forwardingProfileActions=base_acts))) if base_acts else None
+    no_ut = {k: v for k, v in plain.items() if k not in ("unifiedTunnel", "enableUnifiedTunnel")}
+    no_zpa = {k: v for k, v in no_ut.items() if k not in ("forwardingProfileZpaActions", "enableLWFDriver")}
     tries = [("as copied", fwd), ("without trusted-network conditions and copied ids", plain)]
     if from_base:
         tries.append(("from your default profile's actions, switched to Z-Tunnel 2.0", from_base))
+    tries += [("without the Unified Tunnel settings", no_ut),
+              ("without the Unified Tunnel and ZPA tunnel settings", no_zpa),
+              ("as a minimal Z-Tunnel 2.0 profile", _minimal_fwd(fwd_name, plain.get("forwardingProfileActions") or []))]
     last = None
     for i, (how, body) in enumerate(tries):
         try:

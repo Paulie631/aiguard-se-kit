@@ -958,3 +958,7 @@ def test_diagnostics_keep_the_newest_log_entries(monkeypatch, tmp_path):
     data = zipfile.ZipFile(io.BytesIO(kit.diagnostics_zip()))
     log = data.read(next(n for n in data.namelist() if n.startswith("logs/"))).decode()
     assert "entry 399 " in log and "entry 0 " in log and len(log) > 20000
+    kit.activity("api", "big", response={"items": ["y" * 30000]})
+    data = zipfile.ZipFile(io.BytesIO(kit.diagnostics_zip()))
+    lines = data.read(next(n for n in data.namelist() if n.startswith("logs/"))).decode().splitlines()
+    assert all(json.loads(line) for line in lines)    # long entries stay valid JSON

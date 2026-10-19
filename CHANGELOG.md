@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- **Client Connector forwarding profile: more fallbacks.** A tenant whose profiles carry newer Unified Tunnel
+  settings refused every copy with a bare `400`. Setup now also tries without the Unified Tunnel settings, then
+  without the ZPA tunnel settings, and finally a minimal profile (a name and Tunnel + Z-Tunnel 2.0 for each network
+  type). Each attempt is in the Logs tab.
+- **Diagnostics:** long log entries stay valid JSON (they used to be cut mid-line).
+
 ## 1.8.11
 - **Diagnostics now include the newest log entries.** The zip kept only the first 20,000 characters of each day's
   log, so a morning's entries crowded out the afternoon's setup. It now keeps the newest 5,000 lines per day.
