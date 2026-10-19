@@ -1420,3 +1420,30 @@ def test_zia_and_client_connector_writes_and_failures_reach_the_activity_log(mon
     assert logged[0]["level"] == "error" and logged[0]["detail"]["request"]["body"]["trustedNetworkIds"] == [7]
     assert '"status": 400' in logged[0]["detail"]["error"]
     assert logged[1]["detail"]["request"]["body"]["password"].startswith("Sup3") and "Secret" not in json.dumps(logged[1])
+
+
+def test_forwarding_profile_falls_back_to_a_minimal_profile(zenv, capsys):
+    """Greg's tenant refused every copy of its own profile (it carries Unified Tunnel settings). The last resort is
+    a minimal profile: a name and Tunnel + Z-Tunnel 2.0 for each network type."""
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    for f in fake.fwd:
+        f["unifiedTunnel"] = [{"networkType": 0, "actionTypeZIA": 1, "tunnel2FallbackType": 4}]
+        f["enableUnifiedTunnel"] = 0
+        f["forwardingProfileZpaActions"] = [{"networkType": 0, "actionType": 1, "partnerInfo": {}}]
+    fake.fwd_rejects = lambda body: "forwardingProfileZpaActions" in body
+    kit.cmd_zia()
+    out = capsys.readouterr().out
+    mine_fwd = next(f for f in fake.fwd if f["name"] == "SE-Demo Z-Tunnel 2.0")
+    assert "unifiedTunnel" not in mine_fwd and all(z.is_z2(a) for a in mine_fwd["forwardingProfileActions"])
+    assert "without the Unified Tunnel and ZPA tunnel settings" in out and "Created Windows app profile" in out
+    # a tenant that only takes the bare minimum
+    core = set(z.ZCC_CORE_ACTION)
+    fake.fwd_rejects = lambda body: bool(set(body) - {"name", "active", "evaluateTrustedNetwork", "forwardingProfileActions"}) \
+        or any(set(a) - core for a in body.get("forwardingProfileActions") or [])
+    src = {"name": "Kamer Labs FP", "unifiedTunnel": [], "forwardingProfileActions": [
+        {"id": 5, "networkType": n, "actionType": 3, "enablePacketTunnel": 0, "customPac": "x"} for n in range(4)]}
+    lines = []
+    res = z._save_fwd(fake, lambda lvl, msg: lines.append(msg), dict(src, name="SE-Demo Z-Tunnel 2.0"), src, "SE-Demo Z-Tunnel 2.0")
+    assert "as a minimal Z-Tunnel 2.0 profile" in lines[-1]
+    assert [a["networkType"] for a in res["forwardingProfileActions"]] == [0, 1, 2, 3]
+    assert all(z.is_z2(a) and "customPac" not in a and "id" not in a for a in res["forwardingProfileActions"])
