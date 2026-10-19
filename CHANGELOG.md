@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- **Desktop shortcut with an icon.** The installer's shortcut now has the kit's own icon (blue for the AI Guard
+  kit, teal for the ZIA kit). On a Mac it's now an app, **AI Guard Demo Console**, with no `.command` extension; it
+  opens the console in a Terminal window as before, and replaces the old `.command` shortcut. The AWS generator's
+  **SE-Demo ZIA console** shortcut gets the icon too.
+
 ## 1.8.6
 - **Rejected OneAPI sign-in.** When the client secret stops working (rotated, deleted, expired, client disabled),
   the kit now says so once, with the fix (Setup > Connect > Use different credentials), instead of a wall of

@@ -578,13 +578,24 @@ def test_install_and_uninstall_mac_linux(env, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(kit, "APP_DIR", home / ".aiguard-se-kit" / "app")
     monkeypatch.setattr(kit, "schedule_installed", lambda: False)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    legacy = home / "Desktop" / "AI Guard Demo Console.command"     # what earlier versions put on the desktop
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("old")
     kit.cmd_install()
     app = home / ".aiguard-se-kit" / "app"
     assert (app / "aiguard_kit.py").read_bytes() == (ROOT / "aiguard_kit.py").read_bytes()
     assert (app / "packs").is_dir() and (app / "aiguard-kit").stat().st_mode & 0o111
     assert not (app / "aiguard-kit.cmd").exists() and not (app / "tests").exists()
-    shortcut = home / "Desktop" / "AI Guard Demo Console.command"
-    assert f'exec "{app / "aiguard-kit"}" gui' in shortcut.read_text() and shortcut.stat().st_mode & 0o111
+    shortcut = home / "Desktop" / "AI Guard Demo Console.app"           # an app: the kit's icon, no extension shown
+    import plistlib
+    info = plistlib.loads((shortcut / "Contents/Info.plist").read_bytes())
+    assert info["CFBundleName"] == "AI Guard Demo Console" and info["CFBundleIconFile"] == "icon"
+    assert (shortcut / "Contents/Resources/icon.icns").read_bytes() == (ROOT / "assets/aiguard-icon.icns").read_bytes()
+    console = shortcut / "Contents/Resources/console.command"
+    assert f'exec "{app / "aiguard-kit"}" gui' in console.read_text() and console.stat().st_mode & 0o111
+    launch = shortcut / "Contents/MacOS/launch"
+    assert f'open -a Terminal "{console}"' in launch.read_text() and launch.stat().st_mode & 0o111
+    assert not legacy.exists()
     assert f'exec "{app / "aiguard-kit"}" "$@"' in (home / ".local/bin/aiguard-kit").read_text()
     # reinstalling keeps the previous copy for rollback
     kit.cmd_install()
@@ -626,6 +637,8 @@ def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path)
         if src.is_file():
             (kit.HERE / f).write_bytes(src.read_bytes())
     (kit.HERE / "packs").mkdir()
+    import shutil
+    shutil.copytree(ROOT / "assets", kit.HERE / "assets")
     home = tmp_path / "home"
     monkeypatch.setattr(kit, "HOME", home)
     monkeypatch.setattr(kit, "BASE_DIR", home / ".aiguard-se-kit")
@@ -633,7 +646,7 @@ def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path)
     monkeypatch.setenv("APPDATA", str(home / "AppData/Roaming"))
     shortcuts, path = [], []
     monkeypatch.setattr(kit, "_desktop_dir", lambda: home / "OneDrive/Desktop")
-    monkeypatch.setattr(kit, "_win_shortcut", lambda p, target, args, wd, desc: shortcuts.append((p.name, target.name, args)))
+    monkeypatch.setattr(kit, "_win_shortcut", lambda p, target, args, wd, desc, icon=None: shortcuts.append((p.name, target.name, args, icon and icon.name)))
     monkeypatch.setattr(kit, "_win_user_path", lambda add=None, remove=None: path.append((add, remove)))
     monkeypatch.setattr(kit, "schedule_installed", lambda: True)
     ran = []
@@ -642,8 +655,8 @@ def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path)
     app = home / ".aiguard-se-kit" / "app"
     assert (app / "aiguard-kit.cmd").exists() and not (app / "aiguard-kit").exists()
     assert (app / "Uninstall AI Guard Kit.cmd").exists() and not (app / "Uninstall AI Guard Kit.command").exists()
-    assert ("AI Guard Demo Console.lnk", "aiguard-kit.cmd", "gui") in shortcuts
-    assert ("Uninstall AI Guard Demo Kit.lnk", "Uninstall AI Guard Kit.cmd", "") in shortcuts
+    assert ("AI Guard Demo Console.lnk", "aiguard-kit.cmd", "gui", "aiguard-icon.ico") in shortcuts
+    assert ("Uninstall AI Guard Demo Kit.lnk", "Uninstall AI Guard Kit.cmd", "", None) in shortcuts
     assert path == [(str(app), None)]
     # the existing schedule now runs the installed copy
     assert ran[-1][:2] == ["schtasks", "/Create"]

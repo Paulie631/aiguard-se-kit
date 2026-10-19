@@ -112,7 +112,9 @@ Register-ScheduledTask -TaskName "SE-Demo ZIA check" -Action $a2 -Trigger (New-S
 # 5. Desktop shortcuts for whoever signs in over remote desktop
 $sh = New-Object -ComObject WScript.Shell
 foreach ($s in @(@("SE-Demo ZIA console", "$root\console.cmd"), @("SE-Demo traffic log", "$root\traffic.log"), @("SE-Demo setup log", "$root\setup.log"))) {
-  $l = $sh.CreateShortcut("C:\Users\Public\Desktop\" + $s[0] + ".lnk"); $l.TargetPath = $s[1]; $l.Save()
+  $l = $sh.CreateShortcut("C:\Users\Public\Desktop\" + $s[0] + ".lnk"); $l.TargetPath = $s[1]
+  if ($s[1] -like "*console.cmd" -and (Test-Path "$root\kit\assets\zia-icon.ico")) { $l.IconLocation = "$root\kit\assets\zia-icon.ico,0" }
+  $l.Save()
 }
 # 6. Let whoever signs in run the console too. Setup ran as SYSTEM, so C:\SE-Demo (uv cache, Python, settings)
 #    is otherwise read-only to a remote desktop user's non-elevated session. This box is single-purpose and only
