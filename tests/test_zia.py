@@ -1214,7 +1214,7 @@ def test_edition_file_gives_the_zia_kit_its_own_install_and_updates(zenv, tmp_pa
         assert sp["start_uninstall"].name == "Uninstall Zscaler ZIA Demo Kit.lnk"
         assert sp["desktop"].name == "Zscaler ZIA Demo Console.lnk"
     else:
-        assert sp["wrapper"].name == "zia-kit" and sp["desktop"].name == "Zscaler ZIA Demo Console.command"
+        assert sp["wrapper"].name == "zia-kit" and sp["desktop"].name == "Zscaler ZIA Demo Console.app"
     called = []
     kit.cmd_zia = lambda: called.append(list(kit.ARGS))
     kit.cmds_seen = None

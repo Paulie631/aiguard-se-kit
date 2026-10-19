@@ -45,6 +45,7 @@ import getpass
 import json
 import os
 import re
+import shutil
 import secrets
 import sys
 import threading
@@ -52,7 +53,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.6"
+VERSION = "1.8.7"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -1273,7 +1274,7 @@ INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html",
                  "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
                  "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command",
                  "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md",
-                 "CHANGELOG-ZIA.md", "edition.json", "zia-kit", "zia-kit.cmd"]
+                 "CHANGELOG-ZIA.md", "edition.json", "zia-kit", "zia-kit.cmd", "assets"]
 
 
 def _install_files():
@@ -1318,15 +1319,23 @@ def _desktop_dir():
     return HOME / "Desktop"
 
 
-def _win_shortcut(path, target, args, workdir, description):
+def icon_path(ext):
+    """The kit's app icon in the installed copy: blue for the AI Guard kit, teal for the ZIA kit."""
+    name = "zia" if (EDITION or {}).get("product") == "zia" else "aiguard"
+    p = APP_DIR / "assets" / f"{name}-icon.{ext}"
+    return p if p.exists() else None
+
+
+def _win_shortcut(path, target, args, workdir, description, icon=None):
     import subprocess
     ps = ("$ErrorActionPreference='Stop'; try { "
           "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:AIGK_LNK); $s.TargetPath=$env:AIGK_TGT; "
-          "$s.Arguments=$env:AIGK_ARGS; $s.WorkingDirectory=$env:AIGK_WD; $s.Description=$env:AIGK_DESC; $s.Save(); "
+          "$s.Arguments=$env:AIGK_ARGS; $s.WorkingDirectory=$env:AIGK_WD; $s.Description=$env:AIGK_DESC; "
+          "if ($env:AIGK_ICON) { $s.IconLocation=$env:AIGK_ICON + ',0' }; $s.Save(); "
           "if (-not (Test-Path -LiteralPath $env:AIGK_LNK)) { throw 'the shortcut file was not written' } "
           "} catch { [Console]::Out.WriteLine('ERR: ' + $_.Exception.Message); exit 1 }")
     env = {**os.environ, "AIGK_LNK": str(path), "AIGK_TGT": str(target), "AIGK_ARGS": args, "AIGK_WD": str(workdir),
-           "AIGK_DESC": description}
+           "AIGK_DESC": description, "AIGK_ICON": str(icon or "")}
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps],
                            capture_output=True, text=True, env=env, timeout=60)
@@ -1343,7 +1352,35 @@ def shortcut_paths():
         menu_dir = Path(os.getenv("APPDATA", HOME)) / "Microsoft/Windows/Start Menu/Programs"
         return {"desktop": _desktop_dir() / f"{APP_NAME}.lnk", "start": menu_dir / f"{APP_NAME}.lnk",
                 "start_uninstall": menu_dir / UNINSTALL_LNK}
-    return {"desktop": HOME / "Desktop" / f"{APP_NAME}.command", "wrapper": HOME / ".local/bin" / CLI_NAME}
+    return {"desktop": HOME / "Desktop" / f"{APP_NAME}.app", "legacy": HOME / "Desktop" / f"{APP_NAME}.command",
+            "wrapper": HOME / ".local/bin" / CLI_NAME}
+
+
+def _mac_app(app):
+    """A small app bundle on the desktop: shows the kit's icon and no file extension, and opens the console in a
+    Terminal window (closing that window stops the console, as before). Built locally, so Gatekeeper doesn't block it."""
+    import plistlib
+    shutil.rmtree(app, ignore_errors=True)
+    (app / "Contents/MacOS").mkdir(parents=True)
+    (app / "Contents/Resources").mkdir(parents=True)
+    product = (EDITION or {}).get("product") or "aiguard"
+    info = {"CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME, "CFBundleExecutable": "launch",
+            "CFBundleIdentifier": f"com.se-demo-kit.{product}.console", "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": VERSION, "LSMinimumSystemVersion": "10.13"}
+    icon = icon_path("icns")
+    if icon:
+        shutil.copy2(icon, app / "Contents/Resources/icon.icns")
+        info["CFBundleIconFile"] = "icon"
+    with open(app / "Contents/Info.plist", "wb") as f:
+        plistlib.dump(info, f)
+    console = app / "Contents/Resources/console.command"
+    console.write_text(f'#!/bin/bash\n# Opens the {APP_NAME}. Close this window to stop it.\n'
+                       f'exec "{APP_DIR / "aiguard-kit"}" gui\n', encoding="utf-8")
+    os.chmod(console, 0o755)
+    launch = app / "Contents/MacOS/launch"
+    launch.write_text(f'#!/bin/bash\nexec open -a Terminal "{console}"\n', encoding="utf-8")
+    os.chmod(launch, 0o755)
+    os.utime(app)   # nudges Finder to pick up the icon
 
 
 def _win_user_path(add=None, remove=None):
@@ -1408,7 +1445,7 @@ def cmd_install():
                                 ("start", "gui", "Open the AI Guard demo console")):
             try:
                 sp[key].parent.mkdir(parents=True, exist_ok=True)
-                _win_shortcut(sp[key], launcher, args, HOME, desc)
+                _win_shortcut(sp[key], launcher, args, HOME, desc, icon_path("ico"))
                 ok(f"Shortcut: {sp[key]}")
             except KitError as e:
                 warn(str(e))
@@ -1423,10 +1460,10 @@ def cmd_install():
             warn(f"Couldn't add the kit to your PATH ({e}). Use the desktop shortcut, or {APP_DIR / 'aiguard-kit.cmd'}")
     else:
         sp["desktop"].parent.mkdir(parents=True, exist_ok=True)
-        sp["desktop"].write_text(f'#!/bin/bash\n# Opens the AI Guard demo console. Close this window to stop it.\n'
-                                 f'exec "{APP_DIR / "aiguard-kit"}" gui\n', encoding="utf-8")
-        os.chmod(sp["desktop"], 0o755)
-        ok(f"Shortcut: {sp['desktop']} (double-click to open the console)")
+        _mac_app(sp["desktop"])
+        if sp["legacy"].exists():          # the .command shortcut earlier versions made
+            sp["legacy"].unlink()
+        ok(f"Shortcut: {sp['desktop'].stem} on your desktop (double-click to open the console)")
         sp["wrapper"].parent.mkdir(parents=True, exist_ok=True)
         sp["wrapper"].write_text(f'#!/bin/bash\nexec "{APP_DIR / "aiguard-kit"}" "$@"\n', encoding="utf-8")
         os.chmod(sp["wrapper"], 0o755)
@@ -1462,10 +1499,10 @@ def cmd_uninstall():
             ARGS = ["schedule", "remove"]
             cmd_schedule(job)
     sp = shortcut_paths()
-    for key in ("desktop", "start", "start_uninstall", "wrapper"):
+    for key in ("desktop", "legacy", "start", "start_uninstall", "wrapper"):
         p = sp.get(key)
         if p and p.exists():
-            p.unlink()
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
             ok(f"Removed {p}")
     if WINDOWS:
         try:
