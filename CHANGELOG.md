@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.2
 - **Guided demo: the switch just says Block,** and switches to the smallest profile that covers what the step tests
   (Block attacks for injection and toxicity, Block attacks + data for secrets and PII), or the step's own level when
   it sets a higher one. Steps whose prompt triggers nothing a policy can block no longer offer the switch.
