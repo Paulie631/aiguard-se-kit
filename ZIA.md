@@ -187,7 +187,7 @@ GenAI visits fill app usage. Prompt-level GenAI logs need signed-in test account
 
 ## Timing
 
-- **ZIA logs and dashboards** (Internet Access > Dashboards, such as Web Browsing, SaaS/Cloud Apps and Firewall Overview; Analytics > Web Insights in older consoles): within minutes.
+- **ZIA logs and dashboards** (Internet Access > Dashboards, such as Web Browsing, SaaS/Cloud Apps and Firewall Overview, plus Analytics > Cybersecurity and Analytics > Data Security > Inline CASB / Inline DLP; Analytics > Web Insights in older consoles): within minutes.
 - **Insights dashboards and `zia dashboards`:** Insights answers for 7- or 14-day windows that end a day or two ago, so new traffic shows after about two days.
 - **Shadow IT:** fills as rounds rotate through the SaaS list.
 
