@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.5
 - **Exact console menus.** The *AI security end to end* steps point at Data Security > Inline CASB > Shadow IT and
   SaaS/Cloud App Policy (AI & ML Applications) and at Data Security > Inline DLP > Data Loss Prevention. The Store Prompts/Responses check points at AI Guard >
   Tenant Settings > Security. The README and ZIA.md give the
