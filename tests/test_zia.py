@@ -1516,3 +1516,33 @@ def test_tenant_that_refuses_every_forwarding_profile_gets_the_manual_steps_once
     assert all(c["status"] == "ok" for c in z.zcc_drift(fake, cfg))
     z.teardown(fake, cfg, lambda *a: None, confirm=False)
     assert "zcc_api_refused" not in kit.load_cfg()["zia"]
+
+
+def test_zidentity_managed_refusal_is_logged_as_info_and_remembered(zenv, capsys):
+    """Greg saw 'user_management.add_group failed' in red: it's the expected probe on a ZIdentity tenant. It's logged
+    as info, setup's own messages reach the activity log, and after teardown setup goes straight to ZIdentity."""
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    ro = ('{"status": 409, "code": "UNMODIFIABLE", "message": "Group can\'t be added.OneIdentityUserLogin enabled '
+          'users will have read only access."}')
+    summary, level = z._failed("user_management", "add_group", ro)
+    assert level == "info" and "managed in ZIdentity" in summary
+    assert z._failed("url_filtering", "add_rule", "400")[1] == "error"
+    real = fake.call
+    tried = []
+
+    def read_only(resource, method, *a, **kw):
+        if resource == "user_management" and method.startswith("add"):
+            tried.append(method)
+            raise kit.KitError(ro)
+        return real(resource, method, *a, **kw)
+    fake.call = read_only
+    kit.cmd_zia()
+    capsys.readouterr()
+    assert kit.load_cfg()["zia"]["users_in_zidentity"] is True
+    assert any(e["kind"] == "setup" and e["summary"].startswith("ZIA: ") and "ZIdentity" in e["summary"]
+               for e in kit.ACTIVITY)
+    z.teardown(fake, kit.load_cfg(), lambda *a: None, confirm=False)
+    assert kit.load_cfg()["zia"]["users_in_zidentity"] is True
+    tried.clear()
+    z.create_test_user(fake, kit.load_cfg(), lambda *a: None)
+    assert not tried and kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity"

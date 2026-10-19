@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- **ZIA setup messages are now in the Logs tab and diagnostics** (the warnings and manual steps setup shows), not
+  only the API calls, so a diagnostics zip tells the whole story.
+- **No more red "user_management.add_group failed" on ZIdentity tenants.** That refusal is the expected sign that
+  ZIdentity manages users; it's logged as info. The kit remembers it, so setup after a teardown goes straight to
+  ZIdentity.
+
 ## 1.8.13
 - **ZIdentity test users go on `<vanity>.zslogin.net`.** On a domain routed to an identity provider, ZIdentity
   can't set the user's password, so the test user couldn't sign in. Setup now creates it on ZIdentity's own domain
