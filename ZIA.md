@@ -34,7 +34,7 @@ The ZIA tab of the console does the same as these commands.
    ./aiguard-kit zia preflight
    ./aiguard-kit zia setup
    ```
-   - **The test user.** With no `--user`, setup creates `se-demo-traffic@<your tenant's domain>` as a ZIA **Internet & SaaS user**, in a new group and department called `SE-Demo: traffic generator`.
+   - **The test user.** With no `--user`, setup creates `se-demo-traffic@<your tenant's domain>` as a ZIA **Internet & SaaS user**, in a new group and department called `SE-Demo: traffic generator`. On a tenant whose users sign in with SAML or are managed in ZIdentity, it creates `se-demo-traffic@<vanity>.zslogin.net` in ZIdentity instead and you set its password there once ([how the kit decides](#how-the-kit-decides-where-to-create-the-user)).
      - Use `--domain` to choose the domain.
      - Use `--user someone@yourdomain` to use a dedicated user you already have (never your own account).
    - **The password.** Setup generates one and saves it in this computer's keychain. It isn't printed during setup. When you sign in to Client Connector on the generator, show it with `./aiguard-kit zia password`, or **Show password** on the console's ZIA tab. Keep it out of chat, email and tickets.
@@ -83,7 +83,7 @@ Every object is scoped to the test user only, labeled `SE-Demo`, placed above yo
 | Firewall | Block TCP 23, 2222, 4444 and 8888 (network service `SE-Demo: demo ports`) |
 | DNS | Block the marijuana category. The web sweep never visits it, so DNS blocks don't hide URL blocks |
 | Shared objects | URL category `SE-Demo - tenant check` (example.com), network service `SE-Demo: demo ports`, rule label `SE-Demo demo kit`. ZIA rejects `:` in category and label names, so these use `-` |
-| Test user (unless you pass `--user`) | ZIA user `se-demo-traffic@<domain>` with a generated password, in group and department `SE-Demo: traffic generator` (with `--via zidentity`: a ZIdentity user and group) |
+| Test user (unless you pass `--user`) | ZIA user `se-demo-traffic@<domain>` with a generated password, in group and department `SE-Demo: traffic generator` (on a SAML or ZIdentity-managed tenant, or with `--via zidentity`: ZIdentity user `se-demo-traffic@<vanity>.zslogin.net` and group) |
 
 The rules are defined in `zia_policy_template.json`. Setup checks the template against your tenant and skips or trims anything it doesn't have (an isolation profile, a DLP engine, an app action), saying which in the review.
 
@@ -141,7 +141,7 @@ The simplest generator is a Windows instance in an AWS account you can use for d
 3. **Sign in once.**
    1. After about 10 minutes, open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Sign in with your AWS single sign-on if offered, or with the Administrator password if you set `KeyPairName`.
    2. **Install Client Connector** only if the setup log says it was skipped (or you chose `none`). On the instance, open Edge, sign in to your **demo tenant's** admin console, and download the latest Windows 64-bit .msi from the Client Connector App Store (in the Client Connector admin area; the menu name varies by console version). Never use an installer from your corporate tenant. Run it with the defaults.
-   3. **Sign in to Client Connector** as the test user (for example `se-demo-traffic@<your domain>`). The domain sends it to your tenant; then the sign-in page asks for the password, which `./aiguard-kit zia password` shows on your admin machine.
+   3. **Sign in to Client Connector** as the test user (for example `se-demo-traffic@<your domain>`, or `se-demo-traffic@<vanity>.zslogin.net` on a ZIdentity tenant). The domain sends it to your tenant; then the sign-in page asks for the password, which `./aiguard-kit zia password` shows on your admin machine (on a ZIdentity tenant, the one you set in ZIdentity).
    4. **Pick up the kit's profile.** Client Connector > **More > Update Policy**. That applies the `SE-Demo traffic generator` app profile from `zia setup` (Zscaler root certificate and Z-Tunnel 2.0). If the remote desktop window drops, reconnect after a minute.
 4. **Check it.** On the instance's desktop, open **SE-Demo ZIA console > Internet Access (ZIA) > Check this machine**, or open **SE-Demo traffic log**. The next scheduled round starts within 30 minutes.
 
