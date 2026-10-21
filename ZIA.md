@@ -64,7 +64,7 @@ Setup reads **Administration > Internet & SaaS Authentication > Internet Authent
 |---|---|
 | **Hosted DB** with **Form-Based** (typical demo tenant) | Creates a ZIA Internet & SaaS user with a generated password. Nothing to do by hand |
 | **SAML** | Creates the user `se-demo-traffic@<vanity>.zslogin.net` and the group `SE-Demo: traffic generator` in ZIdentity. The user goes on ZIdentity's own `zslogin.net` domain because ZIdentity can't set a password for a user on a domain routed to an identity provider (Okta, Entra ID…); `--domain` overrides this. Set its password in **Administration > Authentication > Directory > Users** (the API can't set it; this guide doesn't have click-by-click steps for that page yet). ZIA lists a ZIdentity user only after its first sign-in, so if setup says ZIA hasn't received the user, sign in once on the generator and rerun setup |
-| **Users managed in ZIdentity** (ZIA answers `UNMODIFIABLE ... OneIdentityUserLogin enabled users will have read only access`) | Same as SAML: creates the user (on `<vanity>.zslogin.net`) and group in ZIdentity. A test user an earlier kit version created on your company domain is replaced, and teardown removes both. The API client needs **ZIAM = Role: Users Admin**. Preflight says so instead of asking for User Management, which wouldn't help |
+| **Users managed in ZIdentity** (ZIA answers `UNMODIFIABLE ... OneIdentityUserLogin enabled users will have read only access`) | Same as SAML: creates the user (on `<vanity>.zslogin.net`) and group in ZIdentity. A test user an earlier kit version created on your company domain is replaced, and teardown removes both. ZIdentity only sends a user to ZIA if it has the **Internet & SaaS** service entitlement. If your tenant grants it only to chosen users or groups (common with Okta or Entra ID), setup stops and asks you to assign it to the group `SE-Demo: traffic generator`; then rerun setup. The API client needs **ZIAM = Role: Users Admin**. Preflight says so instead of asking for User Management, which wouldn't help |
 | **Active Directory** or **OpenLDAP** | Stops and asks you to create the user in your directory, then rerun with `--user` |
 
 `--via zia` or `--via zidentity` overrides the choice.
@@ -139,7 +139,14 @@ The simplest generator is a Windows instance in an AWS account you can use for d
 
    Rounds only send traffic once ip.zscaler.com confirms it goes through Zscaler, so nothing is sent before you sign in.
 3. **Sign in once.**
-   1. After about 10 minutes, open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Sign in with your AWS single sign-on if offered, or with the Administrator password if you set `KeyPairName`.
+   1. After about 10 minutes, open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Fleet Manager offers three ways in. Use the first one you have:
+      - **Single sign-on:** only shown if you signed in to the AWS console through IAM Identity Center (AWS SSO). No password needed.
+      - **User credentials** (no single sign-on, no rebuild): go to **Systems Manager > Session Manager > Start session**, pick the instance, and run the command in the stack's **SetAdministratorPassword** output:
+        ```powershell
+        $p = Read-Host -AsSecureString 'New password'; Set-LocalUser -Name Administrator -Password $p; Enable-LocalUser Administrator
+        ```
+        Type a strong password at the prompt (it isn't echoed, and never goes in chat or email). Then connect with **User credentials** as `Administrator`.
+      - **Key pair:** if you set the stack's `KeyPairName` parameter (adding it later replaces the instance), choose **Key pair** and upload the `.pem` file.
    2. **Install Client Connector** only if the setup log says it was skipped (or you chose `none`). On the instance, open Edge, sign in to your **demo tenant's** admin console, and download the latest Windows 64-bit .msi from the Client Connector App Store (in the Client Connector admin area; the menu name varies by console version). Never use an installer from your corporate tenant. Run it with the defaults.
    3. **Sign in to Client Connector** as the test user (for example `se-demo-traffic@<your domain>`, or `se-demo-traffic@<vanity>.zslogin.net` on a ZIdentity tenant). The domain sends it to your tenant; then the sign-in page asks for the password, which `./aiguard-kit zia password` shows on your admin machine (on a ZIdentity tenant, the one you set in ZIdentity).
    4. **Pick up the kit's profile.** Client Connector > **More > Update Policy**. That applies the `SE-Demo traffic generator` app profile from `zia setup` (Zscaler root certificate and Z-Tunnel 2.0). If the remote desktop window drops, reconnect after a minute.

@@ -218,6 +218,10 @@ class FakeZia:
                 self.zid_users = [u for u in self.zid_users if u["id"] != a[0]]
                 self.db["users"] = [u for u in self.db["users"] if u.get("zid") != a[0]]
                 return None
+        if resource == "zid.user_entitlement":
+            if getattr(self, "entitlements", None) is None:
+                return [{"service": {"serviceName": "ZIA", "cloudName": "zscalertwo"}, "roles": []}]
+            return copy.deepcopy(self.entitlements)
         if resource == "zid.groups":
             if method == "list_groups":
                 return {"records": copy.deepcopy(self.zid_groups)}
@@ -1546,3 +1550,41 @@ def test_zidentity_managed_refusal_is_logged_as_info_and_remembered(zenv, capsys
     tried.clear()
     z.create_test_user(fake, kit.load_cfg(), lambda *a: None)
     assert not tried and kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity"
+
+
+def test_aws_template_explains_remote_desktop_without_single_sign_on(zenv):
+    """Fleet Manager only offers single sign-on to IAM Identity Center sessions; the outputs give the other way in,
+    and the password hint covers ZIdentity users too. No password is ever put in the template."""
+    kit, z, fake = zenv("zia")
+    import zia_aws
+    t = zia_aws.build(test_user="se-demo-traffic@acme.zslogin.net")
+    out = t["Outputs"]
+    assert "IAM Identity Center" in out["ConnectWithFleetManager"]["Description"]
+    assert "Set-LocalUser -Name Administrator" in out["SetAdministratorPassword"]["Value"]
+    assert "Read-Host -AsSecureString" in out["SetAdministratorPassword"]["Value"]
+    assert "ZIdentity" in out["NextSteps"]["Value"]["Fn::Sub"]
+    assert "Password" not in t["Parameters"]
+
+
+def test_zidentity_user_without_the_zia_entitlement_says_so_instead_of_waiting(zenv):
+    """Michael's tenant (Okta behind ZIdentity) grants the Internet & SaaS entitlement to chosen groups only, so the
+    kit's new ZIdentity user never reached ZIA and setup said 'wait and rerun'. Now it names the missing entitlement
+    right away, and a rerun after the SE assigns it carries on."""
+    kit, z, fake = zenv("zia")
+    fake.sync = False
+    fake.entitlements = [{"service": {"serviceName": "ZPA"}, "roles": []}]
+    cfg = kit.load_cfg()
+    with pytest.raises(kit.KitError) as e:
+        z.create_test_user(fake, cfg, lambda *a: None, via="zidentity", wait=60, poll=0)
+    msg = str(e.value)
+    assert "Internet & SaaS" in msg and "'SE-Demo: traffic generator'" in msg and "se-demo-traffic@paulaiuto.zslogin.net" in msg
+    assert kit.load_cfg()["zia"]["created_user"]["email"] == "se-demo-traffic@paulaiuto.zslogin.net"   # resumable
+    # the SE assigns the entitlement; ZIdentity syncs the user; the rerun picks it up without a second user
+    fake.entitlements = [{"service": {"serviceName": "ZIA"}, "roles": []}]
+    fake.push(fake.zid_users[-1])
+    z.create_test_user(fake, kit.load_cfg(), lambda *a: None, wait=0)
+    assert sum(u["loginName"].startswith("se-demo-traffic@") for u in fake.zid_users) == 1
+    assert kit.load_cfg()["zia"]["users"][0]["email"] == "se-demo-traffic@paulaiuto.zslogin.net"
+    # unreadable entitlements: no false alarm, the timeout message still mentions the entitlement
+    assert z.zia_entitled(None) and z.zia_entitled(z.zid_services(fake, "zu-x"))
+    assert z.zia_entitled(["Internet & SaaS"]) and not z.zia_entitled(["Private Access", "ZDX"])

@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.9"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.10"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -322,6 +322,41 @@ def zid_find(t, email):
     return next((u for u in rows if str(g(u, "login_name", "")).lower() == email.lower()), None)
 
 
+ZIA_SERVICE = re.compile(r"\bZIA\b|internet\s*(&|and)\s*saas|internet access", re.I)
+ENTITLE_FIX = ("ZIdentity created {email}, but hasn't given it the Internet & SaaS (ZIA) service entitlement, so ZIA "
+               "never receives it (your tenant grants entitlements to chosen users or groups, not to everyone). In "
+               "ZIdentity, assign the Internet & SaaS entitlement to the group '{group}' (or to the user), then run "
+               "setup again; it picks up where it left off. Zscaler Help: 'Assigning entitlements to users'.")
+
+
+def zid_services(t, user_id):
+    """The service names a ZIdentity user is entitled to, or None if they can't be read. ZIdentity only syncs a user
+    to ZIA when it has the Internet & SaaS entitlement, and its API can read entitlements but not grant them."""
+    try:
+        body = t.call("zid.user_entitlement", "get_service_entitlement", user_id)
+    except Exception as e:
+        K.vlog(f"entitlements {user_id}: {e}")
+        return None
+    names = []
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k in ("serviceName", "service_name", "name", "displayName", "display_name") and isinstance(v, str):
+                    names.append(v)
+                else:
+                    walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(body)
+    return names
+
+
+def zia_entitled(names):
+    return names is None or any(ZIA_SERVICE.search(n) for n in names)
+
+
 def zid_group(t, log):
     """ZIdentity group for the test user. Assign the Client Connector Z-Tunnel 2.0 app profile to it."""
     name = zname("traffic generator")
@@ -390,7 +425,9 @@ USER_MGMT_FIX = ("Either give the role User Management access (Administration > 
 ZID_MANAGED_FIX = ("This tenant manages users in ZIdentity, so ZIA's API can't create users or groups. Setup creates "
                    "the test user in ZIdentity instead: give the kit's API client ZIAM = Role: Users Admin "
                    "(Administration > API > OneAPI > API Clients > Resources), run setup, then set the user's password "
-                   "once in ZIdentity. Or create {email} yourself and rerun with --user {email}.")
+                   "once in ZIdentity. If your tenant grants the Internet & SaaS entitlement only to chosen users or "
+                   "groups, assign it to the group 'SE-Demo: traffic generator' too, or ZIA never receives the user. "
+                   "Or create {email} yourself and rerun with --user {email}.")
 
 
 def zid_managed(e):
@@ -511,14 +548,23 @@ def create_zid_user(t, cfg, log, email=None, domain=None, wait=180, poll=10):
     if not found:
         log("info", "Waiting for ZIdentity to sync the user to ZIA (usually under a minute)…")
         deadline = time.time() + wait
+        checked = False
         while True:
             found, _ = find_users(t, [email])
             if found or time.time() >= deadline:
                 break
+            if not checked:   # a user without the ZIA entitlement never syncs: say so now instead of waiting
+                checked = True
+                if not zia_entitled(zid_services(t, g(user, "id"))):
+                    raise K.KitError(ENTITLE_FIX.format(email=email, group=g(grp, "name")))
             time.sleep(poll)
         if not found:
-            raise K.KitError(f"Created {email} in ZIdentity, but ZIA hasn't received it yet. Wait a few minutes, then "
-                             f"rerun ./aiguard-kit zia setup (it picks up where it left off).")
+            services = zid_services(t, g(user, "id"))
+            if not zia_entitled(services):
+                raise K.KitError(ENTITLE_FIX.format(email=email, group=g(grp, "name")))
+            raise K.KitError(f"Created {email} in ZIdentity, but ZIA hasn't received it yet. Check that it has the "
+                             f"Internet & SaaS entitlement in ZIdentity (it needs it to reach ZIA), wait a few "
+                             f"minutes, then rerun ./aiguard-kit zia setup (it picks up where it left off).")
     z["users"] = found
     K.save_cfg(cfg)
     log("ok", f"ZIA has the test user; the demo rules will apply only to {email}")

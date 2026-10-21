@@ -119,7 +119,7 @@ The console's **Setup** tab walks you through five screens. Nothing changes in t
 
 The kit creates ZIA rules that apply **only to one test user**, so the rest of the tenant is unaffected. Do this on your laptop, in the console's **Internet Access (ZIA)** tab, section **1 · Demo policy**.
 
-1. **Test user.** Click **Create one for me**. The kit creates `se-demo-traffic@<your user domain>` as a ZIA Internet & SaaS user, in the group and department `SE-Demo: traffic generator`, with a generated password saved in your keychain. If your tenant's users sign in with SAML or are managed in ZIdentity, the kit instead creates `se-demo-traffic@<vanity>.zslogin.net` in ZIdentity (an identity provider such as Okta can't take over that domain). ZIdentity's API can't set passwords, so set one once in Administration > Authentication > Directory > Users, and skip Show password.
+1. **Test user.** Click **Create one for me**. The kit creates `se-demo-traffic@<your user domain>` as a ZIA Internet & SaaS user, in the group and department `SE-Demo: traffic generator`, with a generated password saved in your keychain. If your tenant's users sign in with SAML or are managed in ZIdentity, the kit instead creates `se-demo-traffic@<vanity>.zslogin.net` in ZIdentity (an identity provider such as Okta can't take over that domain). ZIdentity's API can't set passwords, so set one once in Administration > Authentication > Directory > Users, and skip Show password. If setup says the user lacks the **Internet & SaaS** entitlement, assign that entitlement to the group `SE-Demo: traffic generator` in ZIdentity and run setup again.
    - Never use your own account. To use an existing dedicated user, type its User ID instead.
 2. Click **Run checks** (preflight). It confirms ZIA API access, how users sign in (Hosted DB with Form-Based is the usual demo setup), and what your tenant has licensed. Fix anything red.
 3. Click **Create or update policy**, read the review, and confirm. The kit creates and activates:
@@ -146,7 +146,14 @@ ZIA dashboards fill only from real traffic, so a separate Windows machine browse
    6. Wait for **CREATE\_COMPLETE** (about 5 minutes), then another 10 minutes for first boot to install the kit.
 
    The stack makes its own small VPC, a security group with no inbound ports, an SSM role, a Windows Server 2022 t3.medium, and a weekday 7am–9pm New York start/stop schedule.
-3. **Connect.** Open the stack's **Outputs** tab, follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Sign in with your AWS single sign-on.
+3. **Connect.** Open the stack's **Outputs** tab, follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. Fleet Manager offers three ways in. Use the first one you have:
+   - **Single sign-on:** only shown if you signed in to the AWS console through IAM Identity Center (AWS SSO). No password needed.
+   - **User credentials** (no single sign-on, no rebuild): go to **Systems Manager > Session Manager > Start session**, pick the instance, and run the command in the stack's **SetAdministratorPassword** output:
+     ```powershell
+     $p = Read-Host -AsSecureString 'New password'; Set-LocalUser -Name Administrator -Password $p; Enable-LocalUser Administrator
+     ```
+     Type a strong password at the prompt (it isn't echoed, and never goes in chat or email). Then connect with **User credentials** as `Administrator`.
+   - **Key pair:** if you set the stack's `KeyPairName` parameter (adding it later replaces the instance), choose **Key pair** and upload the `.pem` file.
 4. Continue at **Sign in to Client Connector** below.
 
 > Account won't let stacks create a VPC or IAM roles? Set `NetworkMode` to `ExistingSubnet` (with a subnet that doesn't route through corporate inspection) and/or `ExistingInstanceProfile` to a profile with `AmazonSSMManagedInstanceCore`, plus `WeekdaySchedule` = `false`.
@@ -263,6 +270,8 @@ Start with the **Logs** tab: it shows every call with the request and response, 
 | Client Connector shows Tunnel Version v1.0 | Click **More > Update Policy**. Still v1.0: on your laptop, **Check for drift** then **Fix drift**, and update policy again |
 | HTTPS blocks show as errors, not blocks | SSL inspection isn't applied yet: **Update Policy** in Client Connector so it installs the Zscaler certificate |
 | DLP or TCP 2222 not blocked | **Check for drift**; out-of-order or Z-Tunnel 1.0 findings explain it. **Fix drift** |
+| Setup: "hasn't given it the Internet & SaaS (ZIA) service entitlement" | Your tenant entitles only chosen users or groups (typical with Okta). In ZIdentity, assign the Internet & SaaS entitlement to the group `SE-Demo: traffic generator`, then run setup again |
+| Fleet Manager has no single sign-on option | You didn't sign in to AWS through IAM Identity Center. Set an Administrator password with Session Manager (Part 5, step 3) and connect with **User credentials** |
 | AWS remote desktop: TargetNotConnected | The instance is stopped (weekday 7am–9pm New York schedule). Start it in EC2 |
 | Generator console: "Access is denied" | Use a stack made from a current template; older stacks need the kit folder permissions reset |
 | Insights panels empty | Normal for the first \~2 days. Use the Internet Access dashboards meanwhile; **Check Insights** lists what's still empty |
