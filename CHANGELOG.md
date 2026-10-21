@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.16
 - **Missing ZIA entitlement:** the console's Fix line under the error now gives the entitlement steps instead of
   a generic hint.
 
