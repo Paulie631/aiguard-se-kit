@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.16
+- **Missing ZIA entitlement:** the console's Fix line under the error now gives the entitlement steps instead of
+  a generic hint.
+
 ## 1.8.15
 - **ZIdentity tenants that entitle only chosen users** (typical with Okta): ZIdentity never sends the kit's test
   user to ZIA without the Internet & SaaS entitlement, and setup used to say "wait and rerun". It now checks the

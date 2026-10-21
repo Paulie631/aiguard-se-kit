@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.10"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.11"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -188,6 +188,10 @@ def connect(cfg):
 
 
 ZIA_HINTS = [
+    (r"Internet & SaaS \(ZIA\) service entitlement",
+     "In ZIdentity, give the group 'SE-Demo: traffic generator' the Internet & SaaS (ZIA) service entitlement (Zscaler "
+     "Help: 'Assigning entitlements to users'), set the test user's password there, then run setup again. It reuses "
+     "the user it created."),
     (r"can't manage users",
      "See above: give the API role User Management access, or create the test user yourself and pass --user."),
     (r"RBA_LIMITED|scope restriction",
