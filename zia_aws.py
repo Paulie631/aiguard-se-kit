@@ -255,12 +255,22 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
     out = {
         "InstanceId": {"Value": {"Ref": "Generator"}},
         "ConnectWithFleetManager": {
-            "Description": "Open, then Node actions > Connect > Connect with Remote Desktop",
+            "Description": "Open, then Node actions > Connect > Connect with Remote Desktop. Single sign-on is offered only "
+                           "if you signed in to AWS with IAM Identity Center; otherwise choose User credentials and set an "
+                           "Administrator password first (see SetAdministratorPassword).",
             "Value": {"Fn::Sub": "https://${AWS::Region}.console.aws.amazon.com/systems-manager/fleet-manager/"
                                  "managed-nodes/${Generator}/general?region=${AWS::Region}"}},
+        "SetAdministratorPassword": {
+            "Description": "Only if Fleet Manager offers no single sign-on: Systems Manager > Session Manager > Start "
+                           "session on this instance, run this, type a password (not echoed), then Connect with Remote "
+                           "Desktop > User credentials as Administrator",
+            "Value": "$p = Read-Host -AsSecureString 'New password'; Set-LocalUser -Name Administrator -Password $p; "
+                     "Enable-LocalUser Administrator"},
         "NextSteps": {"Value": {"Fn::Sub": "Wait about 10 minutes, connect with Fleet Manager remote desktop, sign in "
-                                           "to Client Connector as ${TestUser} (password: aiguard-kit zia password "
-                                           "on your laptop), then open 'SE-Demo traffic log' on the desktop."}},
+                                           "to Client Connector as ${TestUser} (password: the one the kit created, "
+                                           "shown by aiguard-kit zia password on your laptop, or for a ZIdentity user "
+                                           "the one you set in ZIdentity), then open 'SE-Demo traffic log' on the "
+                                           "desktop."}},
     }
     return {"AWSTemplateFormatVersion": "2010-09-09",
             "Description": f"{NAME} for {test_user} (aiguard-kit zia aws). Delete the stack to remove everything.",

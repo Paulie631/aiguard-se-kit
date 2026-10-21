@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- **AWS generator: remote desktop without single sign-on.** Fleet Manager only offers single sign-on to people
+  signed in through IAM Identity Center. The template's new **SetAdministratorPassword** output, ZIA.md and the
+  deployment guide give the other way in (set an Administrator password through Session Manager, then User
+  credentials). The NextSteps output now names the right Client Connector password for ZIdentity users too.
+
 ## 1.8.14
 - **The SE deployment guide ships with each release**, as Word and Markdown files stamped with the kit version
   (source: `docs/DEPLOYMENT-GUIDE.md`, also inside the kit zip).

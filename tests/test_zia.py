@@ -1546,3 +1546,17 @@ def test_zidentity_managed_refusal_is_logged_as_info_and_remembered(zenv, capsys
     tried.clear()
     z.create_test_user(fake, kit.load_cfg(), lambda *a: None)
     assert not tried and kit.load_cfg()["zia"]["created_user"]["via"] == "zidentity"
+
+
+def test_aws_template_explains_remote_desktop_without_single_sign_on(zenv):
+    """Fleet Manager only offers single sign-on to IAM Identity Center sessions; the outputs give the other way in,
+    and the password hint covers ZIdentity users too. No password is ever put in the template."""
+    kit, z, fake = zenv("zia")
+    import zia_aws
+    t = zia_aws.build(test_user="se-demo-traffic@acme.zslogin.net")
+    out = t["Outputs"]
+    assert "IAM Identity Center" in out["ConnectWithFleetManager"]["Description"]
+    assert "Set-LocalUser -Name Administrator" in out["SetAdministratorPassword"]["Value"]
+    assert "Read-Host -AsSecureString" in out["SetAdministratorPassword"]["Value"]
+    assert "ZIdentity" in out["NextSteps"]["Value"]["Fn::Sub"]
+    assert "Password" not in t["Parameters"]
