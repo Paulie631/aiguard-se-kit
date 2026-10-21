@@ -188,6 +188,10 @@ def connect(cfg):
 
 
 ZIA_HINTS = [
+    (r"Internet & SaaS \(ZIA\) service entitlement",
+     "In ZIdentity, give the group 'SE-Demo: traffic generator' the Internet & SaaS (ZIA) service entitlement (Zscaler "
+     "Help: 'Assigning entitlements to users'), set the test user's password there, then run setup again. It reuses "
+     "the user it created."),
     (r"can't manage users",
      "See above: give the API role User Management access, or create the test user yourself and pass --user."),
     (r"RBA_LIMITED|scope restriction",

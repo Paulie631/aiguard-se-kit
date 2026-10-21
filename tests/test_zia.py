@@ -1586,3 +1586,11 @@ def test_zidentity_user_without_the_zia_entitlement_says_so_instead_of_waiting(z
     # unreadable entitlements: no false alarm, the timeout message still mentions the entitlement
     assert z.zia_entitled(None) and z.zia_entitled(z.zid_services(fake, "zu-x"))
     assert z.zia_entitled(["Internet & SaaS"]) and not z.zia_entitled(["Private Access", "ZDX"])
+
+
+def test_missing_entitlement_gets_its_own_fix_line(zenv):
+    """The console shows zhint() under an error; the entitlement error mustn't fall back to a generic hint."""
+    kit, z, fake = zenv("zia")
+    err = kit.KitError(z.ENTITLE_FIX.format(email="u@acme.zslogin.net", group="SE-Demo: traffic generator"))
+    fix = z.zhint(err)
+    assert "Internet & SaaS (ZIA) service entitlement" in fix and "'SE-Demo: traffic generator'" in fix
