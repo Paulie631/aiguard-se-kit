@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- **Guided demo: Monitor / Block no longer disappears silently.** If the console couldn't read the AI Guard policy
+  (for example, no network when it started), the steps showed no switch and ran without changing the policy. The
+  step now says so with a **Retry** link, and opening the Guided demo tab reads the policy again.
+
 ## 1.8.16
 - **Missing ZIA entitlement:** the console's Fix line under the error now gives the entitlement steps instead of
   a generic hint.
