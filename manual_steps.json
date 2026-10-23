@@ -1,5 +1,5 @@
 {
- "_comment": "Everything the kit can't do through Zscaler's APIs, in one place. Source for Manual steps on the console's Setup tab, `aiguard-kit todo`, MANUAL-STEPS.md and the deployment guide's appendix (tools/gen_manual_doc.py). 'applies' says when a step shows for a tenant (docs: only in the docs). 'check' names a test the kit runs to see whether it's done; without one, the SE marks it done. 'confirmed': the click path was checked against a real console on that date; false means it hasn't been yet.",
+ "_comment": "Everything the kit can't do through Zscaler's APIs, in order with what the kit does around it. Source for Manual steps on the console's Setup tab, `aiguard-kit todo`, demo readiness, diagnostics, MANUAL-STEPS.md and the deployment guide's appendix (tools/gen_manual_doc.py). who: you (a manual step) or kit (the kit does it; 'action' says how to start it). applies: when a step shows (docs: only in the docs). needs: steps that must be done first; 'id?condition' only counts when that condition applies to the tenant, and a step that doesn't apply counts as done. then: what to do once this step is done. check: a test the kit runs; without one, you mark the step done. confirmed: the click path was checked against a real console on that date; false means not yet.",
  "stages": {
   "before": "Before you start",
   "setup": "During setup",
@@ -10,9 +10,11 @@
   {
    "id": "oneapi-client",
    "stage": "before",
+   "who": "you",
    "title": "Create the OneAPI client and its roles",
    "why": "The kit reaches your tenant through this client, so it has to exist before the kit can do anything.",
    "applies": "always",
+   "needs": [],
    "check": "oneapi-saved",
    "steps": [
     "In the Zscaler console (console.zscaler.com), open the ≡ menu and choose **Administration > Role Management > Internet & SaaS**. Click **Add API Role**, name it `SE-Demo kit`, set **Full Access** for every area, and save.",
@@ -21,66 +23,37 @@
     "Copy the **Client ID** from the list, and note your vanity domain: the `acme` in `acme.zslogin.net`.",
     "In the kit's console, **Setup > Connect**: enter the vanity domain, client ID and secret, then **Save and test**."
    ],
+   "then": "",
    "help": [],
    "confirmed": "2026-10"
   },
   {
-   "id": "zid-password",
+   "id": "kit-aiguard",
    "stage": "setup",
-   "title": "Set the ZIdentity test user's password",
-   "why": "Your tenant manages users in ZIdentity, and ZIdentity's API can't set passwords. The kit created the user; you give it a password once.",
-   "applies": "zia-zidentity-user",
-   "check": null,
-   "steps": [
-    "In the Zscaler console, go to **Administration > Authentication > Directory > Users**.",
-    "Find and click **{test_user}**.",
-    "Set a password and save. Keep it out of chat, email and tickets.",
-    "You'll use it once, to sign in to Client Connector on the traffic generator."
+   "who": "kit",
+   "title": "Kit: create the AI Guard demo",
+   "why": "The demo policy, the two apps, their keys and rules.",
+   "applies": "aiguard-kit",
+   "needs": [
+    "oneapi-client"
    ],
+   "check": "kit-aiguard",
+   "action": "Setup wizard above: Preflight checks, Choices, then Create it.",
+   "steps": [],
+   "then": "",
    "help": [],
-   "confirmed": false
-  },
-  {
-   "id": "zid-entitlement",
-   "stage": "setup",
-   "title": "Give the test group the Internet & SaaS entitlement",
-   "why": "ZIdentity only sends a user to ZIA when it has the Internet & SaaS (ZIA) service entitlement. Tenants that grant it to chosen users or groups (common with Okta or Entra ID) don't give it to the kit's user, and the API can read entitlements but not grant them.",
-   "applies": "zia-zidentity-user",
-   "check": "zia-entitled",
-   "steps": [
-    "In the Zscaler console, open ZIdentity's entitlements for **Internet & SaaS** (see Zscaler Help below for where it sits in your console version).",
-    "Assign the entitlement to the group **{group}** (or to the user **{test_user}**).",
-    "In the kit, run ZIA setup again (console: Internet Access (ZIA) > Create or update policy). It picks up where it left off once ZIA has the user."
-   ],
-   "help": [
-    {"title": "Assigning entitlements to users", "url": "https://help.zscaler.com/unified/assigning-entitlements-users"},
-    {"title": "Managing entitlements", "url": "https://help.zscaler.com/unified/managing-entitlements"}
-   ],
-   "confirmed": false
-  },
-  {
-   "id": "zcc-profiles",
-   "stage": "setup",
-   "title": "Create the two Client Connector profiles",
-   "why": "The kit normally creates them. This shows when your tenant's Client Connector API refused the forwarding profile, or when you chose your own test user (so there's no kit group to scope them to).",
-   "applies": "zia-zcc-manual",
-   "check": "zcc-profiles",
-   "steps": [
-    "In the Zscaler console, open the Client Connector administration area.",
-    "Add a **forwarding profile** named exactly `{fwd_profile}`. Set the ZIA action to **Tunnel** with **Z-Tunnel 2.0** on every network type (on corporate network, off corporate network, VPN, split VPN), and save.",
-    "Add a **Windows app profile** named exactly `{app_profile}`. Assign it to the group **{group}** (your own test user's group if you picked one), turn on **Install Zscaler SSL Certificate**, select the forwarding profile `{fwd_profile}`, and save.",
-    "Make sure no broader Windows app profile (for example one for all users) sits above it in the order.",
-    "In the kit, click **Check for drift**, then **Fix drift**: it finds both profiles by name and uses them as they are."
-   ],
-   "help": [],
-   "confirmed": false
+   "confirmed": "2026-10"
   },
   {
    "id": "store-prompts",
    "stage": "setup",
+   "who": "you",
    "title": "Turn on Store Prompts/Responses in AI Guard",
    "why": "Without it, Insights shows detections but not the prompt text. The API can't read or set this, so the kit can't check it.",
-   "applies": "aiguard",
+   "applies": "aiguard-kit",
+   "needs": [
+    "kit-aiguard"
+   ],
    "check": null,
    "steps": [
     "In the Zscaler console, open the ≡ menu and choose **AI Security** (it opens in a new tab).",
@@ -88,93 +61,241 @@
     "Turn on **Store Prompts/Responses** and save.",
     "**Enable Data Sharing for AI Training** is on the same tab: fine in your demo tenant, but never turn it on in a customer's tenant without their agreement."
    ],
+   "then": "",
    "help": [],
    "confirmed": "2026-10"
   },
   {
+   "id": "zid-entitlement",
+   "stage": "setup",
+   "who": "you",
+   "title": "Give the test group the Internet & SaaS entitlement",
+   "why": "ZIdentity only sends a user to ZIA when it has the Internet & SaaS (ZIA) service entitlement. Tenants that grant it to chosen users or groups (common with Okta or Entra ID) don't give it to the kit's user, and the API can read entitlements but not grant them.",
+   "applies": "zia-zidentity-user",
+   "needs": [],
+   "check": "zia-entitled",
+   "steps": [
+    "In the Zscaler console, open ZIdentity's entitlements for **Internet & SaaS** (see Zscaler Help below for where it sits in your console version).",
+    "Assign the entitlement to the group **{group}** (or to the user **{test_user}**)."
+   ],
+   "then": "Run ZIA setup again (Internet Access (ZIA) > Create or update policy); it continues from the test user.",
+   "help": [
+    {
+     "title": "Assigning entitlements to users",
+     "url": "https://help.zscaler.com/unified/assigning-entitlements-users"
+    },
+    {
+     "title": "Managing entitlements",
+     "url": "https://help.zscaler.com/unified/managing-entitlements"
+    }
+   ],
+   "confirmed": false
+  },
+  {
+   "id": "kit-zia-user",
+   "stage": "setup",
+   "who": "kit",
+   "title": "Kit: create the ZIA test user",
+   "why": "The dedicated user the demo rules apply to (in ZIdentity on SAML or ZIdentity-managed tenants).",
+   "applies": "zia",
+   "needs": [
+    "oneapi-client",
+    "zid-entitlement?zia-zidentity-user"
+   ],
+   "check": "kit-zia-user",
+   "action": "Internet Access (ZIA) tab > Create or update policy.",
+   "steps": [],
+   "then": "",
+   "help": [],
+   "confirmed": "2026-10"
+  },
+  {
+   "id": "zid-password",
+   "stage": "setup",
+   "who": "you",
+   "title": "Set the ZIdentity test user's password",
+   "why": "Your tenant manages users in ZIdentity, and ZIdentity's API can't set passwords. The kit created the user; you give it a password once.",
+   "applies": "zia-zidentity-user",
+   "needs": [],
+   "check": null,
+   "steps": [
+    "In the Zscaler console, go to **Administration > Authentication > Directory > Users**.",
+    "Find and click **{test_user}**.",
+    "Set a password and save. Keep it out of chat, email and tickets.",
+    "You'll use it once, to sign in to Client Connector on the traffic generator."
+   ],
+   "then": "Sign in to Client Connector on the generator with it.",
+   "help": [],
+   "confirmed": false
+  },
+  {
+   "id": "kit-zia-policy",
+   "stage": "setup",
+   "who": "kit",
+   "title": "Kit: create the ZIA demo rules",
+   "why": "URL filtering, Cloud App Control, File Type Control, DLP, firewall, DNS and SSL inspection rules for the test user.",
+   "applies": "zia",
+   "needs": [
+    "kit-zia-user"
+   ],
+   "check": "kit-zia-policy",
+   "action": "Internet Access (ZIA) tab > Create or update policy.",
+   "steps": [],
+   "then": "",
+   "help": [],
+   "confirmed": "2026-10"
+  },
+  {
+   "id": "kit-zcc",
+   "stage": "setup",
+   "who": "kit",
+   "title": "Kit: create the Client Connector profiles",
+   "why": "The Windows app profile and Z-Tunnel 2.0 forwarding profile for the test user's group. On a ZIdentity tenant, ZIA only gets that group after the first Client Connector sign-in.",
+   "applies": "zia-zcc-auto",
+   "needs": [
+    "kit-zia-policy",
+    "generator-signin?zia-zidentity-user"
+   ],
+   "check": "zcc-profiles",
+   "action": "Internet Access (ZIA) tab > Check for drift, then Fix drift (or Create or update policy).",
+   "steps": [],
+   "then": "Then, on the generator: Client Connector > More > Update Policy.",
+   "help": [],
+   "confirmed": "2026-10"
+  },
+  {
+   "id": "zcc-profiles",
+   "stage": "setup",
+   "who": "you",
+   "title": "Create the two Client Connector profiles",
+   "why": "The kit normally creates them. This shows when your tenant's Client Connector API refused the forwarding profile, or when you chose your own test user (so there's no kit group to scope them to).",
+   "applies": "zia-zcc-manual",
+   "needs": [
+    "kit-zia-policy"
+   ],
+   "check": "zcc-profiles",
+   "steps": [
+    "In the Zscaler console, open the Client Connector administration area.",
+    "Add a **forwarding profile** named exactly `{fwd_profile}`. Set the ZIA action to **Tunnel** with **Z-Tunnel 2.0** on every network type (on corporate network, off corporate network, VPN, split VPN), and save.",
+    "Add a **Windows app profile** named exactly `{app_profile}`. Assign it to the group **{group}** (your own test user's group if you picked one), turn on **Install Zscaler SSL Certificate**, select the forwarding profile `{fwd_profile}`, and save.",
+    "Make sure no broader Windows app profile (for example one for all users) sits above it in the order."
+   ],
+   "then": "Click Check for drift, then Fix drift: the kit finds both profiles by name and uses them as they are.",
+   "help": [],
+   "confirmed": false
+  },
+  {
    "id": "generator-build",
    "stage": "generator",
+   "who": "you",
    "title": "Build the traffic generator machine",
    "why": "ZIA dashboards fill only from real traffic, from a separate Windows machine. The kit writes the template or script; creating the machine happens in AWS or CloudShare.",
    "applies": "zia",
+   "needs": [
+    "kit-zia-policy"
+   ],
    "check": null,
    "steps": [
     "**AWS:** in the kit's ZIA tab, **Download CloudFormation template**. In the AWS console, **CloudFormation > Create stack > With new resources (standard) > Upload a template file**, choose the file, keep the parameters, tick the IAM acknowledgement and **Submit**. Wait about 15 minutes.",
     "**CloudShare or any Windows VM:** create a Windows Server 2022 VM with direct internet access. In the kit's ZIA tab, **Download setup script**, copy it to the VM, open PowerShell **as Administrator** and run `powershell -ExecutionPolicy Bypass -File .\\se-demo-zia-generator-setup.ps1`. Progress: `C:\\SE-Demo\\setup.log`, about 10 minutes.",
     "Make the template or script after the Client Connector profiles exist, so Client Connector is installed with the kit's app profile."
    ],
+   "then": "Connect to the machine and sign in to Client Connector.",
    "help": [],
    "confirmed": "2026-10"
   },
   {
    "id": "generator-connect",
    "stage": "generator",
+   "who": "you",
    "title": "Connect to the AWS generator without single sign-on",
    "why": "Fleet Manager offers single sign-on only to people signed in to AWS through IAM Identity Center, and the template sets no Windows password.",
    "applies": "zia-aws",
+   "needs": [
+    "generator-build"
+   ],
    "check": null,
    "steps": [
     "Open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. If **Single sign-on** is offered, use it and skip the rest.",
     "Otherwise: **Systems Manager > Session Manager > Start session**, pick the instance, and run the command in the stack's **SetAdministratorPassword** output. Type a strong password at the prompt (it isn't shown).",
     "Back in Fleet Manager, choose **User credentials** and sign in as `Administrator` with that password."
    ],
+   "then": "",
    "help": [],
    "confirmed": "2026-10"
   },
   {
    "id": "generator-signin",
    "stage": "generator",
+   "who": "you",
    "title": "Sign in to Client Connector on the generator",
    "why": "Client Connector needs the test user signed in once; a password can't be supplied silently.",
    "applies": "zia",
+   "needs": [
+    "generator-build",
+    "zid-password?zia-zidentity-user",
+    "kit-zia-user"
+   ],
    "check": null,
    "steps": [
     "On the generator, open Client Connector and sign in as **{test_user}**. Password: {password_source}.",
     "Click **More > Update Policy**, then check that the status shows **Tunnel Version v2.0**.",
     "On the generator's desktop, open **SE-Demo ZIA console > Internet Access (ZIA)** and click **Check this machine**. Every row should pass; traffic rounds start on their own after that."
    ],
+   "then": "On a ZIdentity tenant, ZIA only receives the test group after this first sign-in: if the Client Connector profiles are still waiting, click Fix drift on your laptop now, then More > Update Policy here. Traffic rounds start by themselves.",
    "help": [],
    "confirmed": "2026-10"
   },
   {
    "id": "zcc-manual-install",
    "stage": "generator",
+   "who": "you",
    "title": "Install Client Connector by hand",
    "why": "Only when the generator's setup log says the installer was skipped (its download failed, or it didn't match the pinned hash or Zscaler's signature).",
    "applies": "docs",
+   "needs": [],
    "check": null,
    "steps": [
     "On the generator, sign in to your **demo tenant's** admin console in Edge and download the latest Windows 64-bit .msi from the Client Connector App Store. Never use an installer from your corporate tenant.",
     "Run it with the defaults, then sign in as the test user."
    ],
+   "then": "",
    "help": [],
    "confirmed": false
   },
   {
    "id": "directory-user",
    "stage": "setup",
+   "who": "you",
    "title": "Create the test user in your directory (AD or LDAP tenants)",
    "why": "When ZIA signs users in from Active Directory or LDAP, the user has to exist there; the kit can't create it.",
    "applies": "docs",
+   "needs": [],
    "check": null,
    "steps": [
     "Create a dedicated user in your directory (never your own account) and let it sync to ZIA.",
     "Run ZIA setup with `--user <that email>`, or type it in the ZIA tab instead of **Create one for me**.",
     "Create the two Client Connector profiles by hand for that user's group (see 'Create the two Client Connector profiles')."
    ],
+   "then": "",
    "help": [],
    "confirmed": false
   },
   {
    "id": "insights-filter",
    "stage": "demo",
+   "who": "you",
    "title": "Filter kit-policy-check out of AI Guard Insights",
    "why": "The Guided demo checks each policy switch with a few scans under the user kit-policy-check. Insights views can't be saved through the API.",
-   "applies": "aiguard",
+   "applies": "aiguard-kit",
+   "needs": [
+    "kit-aiguard"
+   ],
    "check": "reminder",
    "steps": [
     "In **AI Guard > Insights**, add a filter on the user that excludes `kit-policy-check` before you share your screen."
    ],
+   "then": "",
    "help": [],
    "confirmed": false
   }

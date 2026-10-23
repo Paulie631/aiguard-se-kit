@@ -220,7 +220,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 <div class="panel" id="manpanel" style="max-width:1100px">
     <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px"><h2 style="margin:0">Manual steps</h2>
       <div class="row" style="gap:10px"><label class="muted" style="font-size:13px"><input type="checkbox" id="mandone"> Show finished steps</label><button id="mancheck">Check again</button></div></div>
-    <p class="muted" style="font-size:13px;margin:6px 0 12px">What the kit can't do through Zscaler's APIs, for this tenant only, with the clicks to do it. Steps with <b>Check</b> are verified by the kit; for the rest, click <b>Mark done</b> when you've done them. Open steps also show in Demo readiness. Menu names marked <i>not yet confirmed</i> haven't been checked against a live console: if yours differ, tell the kit owner.</p>
+    <p class="muted" style="font-size:13px;margin:6px 0 12px">Your setup path for this tenant, in order: what you do by hand (Zscaler's APIs can't) and, marked ⚙, what the kit does in between. A step marked <b>waiting</b> needs an earlier one first; <b>next</b> is the one to do now. Steps with <b>Check</b> are verified by the kit; for the rest, click <b>Mark done</b> when you've done them. Open steps also show in Demo readiness. Menu names marked <i>not yet confirmed</i> haven't been checked against a live console: if yours differ, tell the kit owner.</p>
     <div id="manlist"><div class="muted">Loading…</div></div>
   </div>
   <div class="panel danger" style="max-width:1100px">
@@ -461,19 +461,25 @@ function note(h,good){const n=$("#notice");n.innerHTML=h;n.classList.toggle("goo
 let MAN=[];
 function mdInline(t){return esc(t).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>")}
 function drawManual(){const show=$("#mandone").checked, el=$("#manlist");
-  const open=MAN.filter(i=>i.status=="todo").length, b=$("#mancount");b.style.display=open?"inline-block":"none";b.textContent=open;
-  const j=$("#manjump");j.style.display=open?"block":"none";j.textContent=`${open} manual step${open==1?"":"s"} to do ↓`;
+  const open=MAN.filter(i=>i.who=="you"&&(i.status=="todo"||i.status=="waiting")).length, b=$("#mancount");b.style.display=open?"inline-block":"none";b.textContent=open;
+  const j=$("#manjump");if(j){j.style.display=open?"block":"none";j.textContent=`${open} manual step${open==1?"":"s"} to do ↓`}
   const items=MAN.filter(i=>show||i.status!="done");
   if(!MAN.length){el.innerHTML='<div class="muted">Nothing to do by hand for this setup yet.</div>';return}
-  if(!items.length){el.innerHTML=`<div class="muted">✓ Nothing left to do by hand (${MAN.length} step${MAN.length==1?"":"s"} finished). Tick <b>Show finished steps</b> to see them.</div>`;return}
+  if(!items.length){el.innerHTML=`<div class="muted">✓ Everything is done (${MAN.length} step${MAN.length==1?"":"s"}). Tick <b>Show finished steps</b> to see them.</div>`;return}
   let stage=null;el.innerHTML=items.map(i=>{const head=i.stage_label!=stage?`<h3 style="margin:18px 0 6px;font-size:14px">${esc(stage=i.stage_label)}</h3>`:"";
-    const st=i.status=="done"?`<span class="ic ok">✓</span> done${i.how=="checked"?" (checked)":""}`:i.status=="reminder"?`<span class="ic info">·</span> each demo`:`<span class="ic warn">!</span> to do`;
-    const btn=i.status=="reminder"?"":i.can_check?`<button data-chk="${esc(i.id)}">Check</button>`:i.status=="done"?`<button data-undo="${esc(i.id)}">Undo</button>`:`<button class="primary" data-mark="${esc(i.id)}">Mark done</button>`;
-    return head+`<details class="panel" style="margin:6px 0;padding:10px 14px" ${i.status=="todo"?"open":""}><summary style="cursor:pointer"><b>${esc(i.title)}</b> <span style="font-size:12.5px;margin-left:8px">${st}</span>${i.detail?` <span class="muted" style="font-size:12px">· ${esc(i.detail)}</span>`:""}</summary>
-      <p class="muted" style="font-size:13px;margin:8px 0">${esc(i.why)}</p>
+    const kit=i.who=="kit", wait=i.status=="waiting";
+    const st=i.status=="done"?`<span class="ic ok">✓</span> done${i.how=="checked"&&!kit?" (checked)":""}`:i.status=="reminder"?`<span class="ic info">·</span> each demo`:
+      wait?`<span class="ic info">…</span> waiting`:kit?`<span class="ic info">⚙</span> the kit does this`:`<span class="ic warn">!</span> to do`;
+    const nxt=i.next?` <span class="chip" style="background:var(--warn-bg);color:var(--warn)">next</span>`:"";
+    const waitline=wait?`<div class="muted" style="font-size:12.5px;margin:6px 0">Waiting for: ${i.waiting_for.map(esc).join(" · ")}</div>`:"";
+    const body=kit?`<p class="muted" style="font-size:13px;margin:8px 0">${esc(i.why)}</p>${waitline}${i.status=="done"?"":`<div style="font-size:13.5px">Start it: ${mdInline(i.action||"")}</div>`}${i.then?`<div style="font-size:13px;margin-top:6px"><b>Then:</b> ${mdInline(i.then)}</div>`:""}`:
+      `<p class="muted" style="font-size:13px;margin:8px 0">${esc(i.why)}</p>${waitline}
       <ol style="margin:0 0 8px 18px;padding:0;font-size:13.5px;line-height:1.55">${i.steps.map(x=>`<li>${mdInline(x)}</li>`).join("")}</ol>
-      ${i.help.length?`<div style="font-size:12.5px;margin:4px 0">Zscaler Help: ${i.help.map(h=>`<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.title)} ↗</a>`).join(" · ")}</div>`:""}
-      <div class="row" style="gap:10px;margin-top:8px;align-items:center">${btn}<span class="muted" style="font-size:11.5px">${i.confirmed?`menu path checked ${esc(i.confirmed)}`:"<i>menu names not yet confirmed against a live console</i>"} · ${esc(i.id)}</span></div></details>`}).join("");
+      ${i.then?`<div style="font-size:13px;margin:4px 0 8px"><b>Then:</b> ${mdInline(i.then)}</div>`:""}
+      ${i.help.length?`<div style="font-size:12.5px;margin:4px 0">Zscaler Help: ${i.help.map(h=>`<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.title)} ↗</a>`).join(" · ")}</div>`:""}`;
+    const btn=kit||i.status=="reminder"?"":i.can_check?`<button data-chk="${esc(i.id)}">Check</button>`:i.status=="done"?`<button data-undo="${esc(i.id)}">Undo</button>`:`<button class="${wait?"":"primary"}" data-mark="${esc(i.id)}">Mark done</button>`;
+    const foot=kit?"":`<div class="row" style="gap:10px;margin-top:8px;align-items:center">${btn}<span class="muted" style="font-size:11.5px">${i.confirmed?`menu path checked ${esc(i.confirmed)}`:"<i>menu names not yet confirmed against a live console</i>"} · ${esc(i.id)}</span></div>`;
+    return head+`<details class="panel" style="margin:6px 0;padding:10px 14px;${wait||kit&&i.status!="todo"?"opacity:.7;":""}${kit?"background:transparent;":""}" ${i.next||(!kit&&i.status=="todo")?"open":""}><summary style="cursor:pointer"><b>${esc(i.title)}</b>${nxt} <span style="font-size:12.5px;margin-left:8px">${st}</span>${wait?` <span class="muted" style="font-size:12px">· for ${i.waiting_for.map(esc).join(", ")}</span>`:i.detail?` <span class="muted" style="font-size:12px">· ${esc(i.detail)}</span>`:""}</summary>${body}${foot}</details>`}).join("");
   $$("#manlist [data-mark]").forEach(b=>b.onclick=()=>markManual(b.dataset.mark,true));
   $$("#manlist [data-undo]").forEach(b=>b.onclick=()=>markManual(b.dataset.undo,false));
   $$("#manlist [data-chk]").forEach(b=>b.onclick=()=>loadManual(true))}

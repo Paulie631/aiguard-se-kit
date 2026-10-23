@@ -1654,7 +1654,8 @@ def test_manual_steps_follow_the_tenant_and_check_themselves(zenv, capsys):
     cfg = kit.load_cfg()
     items = {i["id"]: i for i in kit.manual_status(cfg, zia_tenant=lambda: fake)}
     assert {"oneapi-client", "zid-password", "zid-entitlement", "zcc-profiles", "generator-build",
-            "generator-signin"} <= set(items)
+            "generator-signin", "kit-zia-user", "kit-zia-policy"} <= set(items)
+    assert "kit-zcc" not in items              # the API refused the profiles, so they're yours to make
     assert "zcc-manual-install" not in items and "generator-connect" not in items   # docs-only / no AWS yet
     assert items["oneapi-client"]["status"] == "done" and items["oneapi-client"]["how"] == "checked"
     assert items["zid-entitlement"]["status"] == "done"            # ZIA has the user
@@ -1662,6 +1663,12 @@ def test_manual_steps_follow_the_tenant_and_check_themselves(zenv, capsys):
     assert any("se-demo-traffic@paulaiuto.zslogin.net" in s for s in items["zid-password"]["steps"])
     assert any("named exactly `SE-Demo Z-Tunnel 2.0`" in s for s in items["zcc-profiles"]["steps"])
     assert items["zid-password"]["status"] == "todo" and not items["zid-password"]["can_check"]
+    assert items["kit-zia-policy"]["status"] == "done" and items["kit-zia-policy"]["who"] == "kit"
+    # order: signing in waits for the password (and the generator); the first open step is the next one
+    assert items["generator-signin"]["status"] == "waiting"
+    assert "Set the ZIdentity test user's password" in items["generator-signin"]["waiting_for"]
+    assert items["generator-connect" if "generator-connect" in items else "generator-build"]["status"] in ("todo", "waiting")
+    assert [i["id"] for i in items.values() if i["next"]] == ["zid-password"]
     ready = {c["id"]: c for c in kit.readiness(cfg)}
     assert ready["ready-manual"]["status"] == "warn" and "Set the ZIdentity test user's password" in ready["ready-manual"]["detail"]
     # the SE marks the password done and creates the profiles by hand: both clear
@@ -1681,7 +1688,8 @@ def test_manual_steps_follow_the_tenant_and_check_themselves(zenv, capsys):
     kit.ARGS[:] = ["todo"]
     kit.cmd_todo()
     out = capsys.readouterr().out
-    assert "Sign in to Client Connector on the generator" in out and "aiguard-kit todo --done generator-signin" in out
+    assert "Sign in to Client Connector on the generator" in out and "Waiting for: Build the traffic generator machine" in out
+    assert "aiguard-kit todo --done generator-build" in out
     assert "✓ Set the ZIdentity test user's password" in out
     # diagnostics carry the list (no tenant calls)
     import io as _io
@@ -1697,9 +1705,55 @@ def test_manual_steps_file_is_complete_and_the_docs_are_in_sync():
     ids = [s["id"] for s in data["steps"]]
     assert len(ids) == len(set(ids))
     for s in data["steps"]:
-        assert s["stage"] in data["stages"] and s["steps"] and s["why"] and s["title"]
-        assert s["applies"] in ("always", "docs", "aiguard", "zia", "zia-zidentity-user", "zia-zcc-manual", "zia-aws")
-        assert s.get("check") in (None, "reminder", "oneapi-saved", "zia-entitled", "zcc-profiles")
+        assert s["stage"] in data["stages"] and (s["steps"] or s["who"] == "kit") and s["why"] and s["title"]
+        conds = ("always", "docs", "aiguard", "aiguard-kit", "zia", "zia-zidentity-user", "zia-zcc-manual",
+                 "zia-zcc-auto", "zia-aws")
+        assert s["applies"] in conds and s["who"] in ("you", "kit")
+        assert s.get("check") in (None, "reminder", "oneapi-saved", "zia-entitled", "zcc-profiles", "kit-aiguard",
+                                  "kit-zia-user", "kit-zia-policy")
+        assert s["who"] == "you" or s.get("action")          # the kit's steps say how to start them
+        for n in s["needs"]:                                  # every need names a real step and a known condition
+            nid, _, cond = n.partition("?")
+            assert nid in ids and nid != s["id"] and (not cond or cond in conds), (s["id"], n)
+    deps = {s["id"]: [n.partition("?")[0] for n in s["needs"]] for s in data["steps"]}
+
+    def cyclic(node, path):
+        return node in path or any(cyclic(d, path | {node}) for d in deps[node])
+    assert not any(cyclic(i, set()) for i in ids)
+    for s in data["steps"]:
         assert s["confirmed"] is False or re.match(r"^\d{4}-\d{2}", s["confirmed"])
     r = subprocess.run([sys.executable, str(root / "tools" / "gen_manual_doc.py"), "--check"], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_setup_path_orders_greg_s_zidentity_tenant(zenv, capsys):
+    """On a ZIdentity tenant whose API accepts the profiles, the kit's Client Connector step waits for the first
+    sign-in (ZIA only gets the group then), and the sign-in waits for the password and the generator."""
+    kit, z, fake = zenv("zia")
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"state": {"set_up": "x", "rules": 18, "client_connector": None},
+                  "users": [{"id": 1, "email": "se-demo-traffic@paulaiuto.zslogin.net"}],
+                  "created_user": {"via": "zidentity", "email": "se-demo-traffic@paulaiuto.zslogin.net",
+                                   "group": "SE-Demo: traffic generator", "zid_id": "z1"}}
+    kit.save_cfg(cfg)
+    items = {i["id"]: i for i in kit.manual_status(cfg, check=False)}
+    assert items["kit-zcc"]["status"] == "waiting"
+    assert items["kit-zcc"]["waiting_for"] == ["Sign in to Client Connector on the generator"]
+    assert items["generator-signin"]["status"] == "waiting"
+    assert set(items["generator-signin"]["waiting_for"]) == {"Build the traffic generator machine",
+                                                            "Set the ZIdentity test user's password"}
+    assert items["zid-entitlement"]["status"] == "todo" or items["zid-entitlement"]["status"] == "done"
+    # the SE does the password and builds the generator: sign-in is next, the kit's profiles still wait for it
+    for sid in ("zid-entitlement", "zid-password", "generator-build"):
+        kit.manual_mark(cfg, sid)
+    items = {i["id"]: i for i in kit.manual_status(kit.load_cfg(), check=False)}
+    assert items["generator-signin"]["status"] == "todo" and items["generator-signin"]["next"]
+    assert items["kit-zcc"]["status"] == "waiting" and "Fix drift" in items["kit-zcc"]["action"]
+    kit.manual_mark(kit.load_cfg(), "generator-signin")
+    items = {i["id"]: i for i in kit.manual_status(kit.load_cfg(), check=False)}
+    assert items["kit-zcc"]["status"] == "todo" and items["kit-zcc"]["next"]   # now: Fix drift
+    assert kit.manual_open(list(items.values())) == []                     # nothing left for the SE by hand
+    kit.ARGS[:] = ["todo"]
+    kit.cmd_todo()
+    out = capsys.readouterr().out
+    assert "(kit) Kit: create the Client Connector profiles" in out and "← next" in out and "Start it:" in out

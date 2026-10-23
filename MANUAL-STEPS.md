@@ -1,6 +1,6 @@
 # Manual steps
 
-What the kit can't do through Zscaler's APIs, and the clicks to do it. **Manual steps** on the console's Setup tab and `aiguard-kit todo` show only the steps that apply to your tenant, filled in with your names, and check the ones the kit can verify.
+Your setup path, in order: what the kit can't do through Zscaler's APIs (with the clicks to do it), and, marked *The kit*, what it does in between. Each step lists what has to be done first. **Manual steps** on the console's Setup tab and `aiguard-kit todo` show only the steps that apply to your tenant, filled in with your names, and check the ones the kit can verify.
 
 > Steps marked **menu names not yet confirmed** haven't been checked against a live console. If yours differ, tell the kit owner (or update `manual_steps.json` and regenerate this file).
 
@@ -24,6 +24,44 @@ What the kit can't do through Zscaler's APIs, and the clicks to do it. **Manual 
 
 ## During setup
 
+- *The kit:* **create the AI Guard demo**. The demo policy, the two apps, their keys and rules. Start it: Setup wizard above: Preflight checks, Choices, then Create it. Needs first: Create the OneAPI client and its roles.
+
+### Turn on Store Prompts/Responses in AI Guard
+
+**Why it's manual:** Without it, Insights shows detections but not the prompt text. The API can't read or set this, so the kit can't check it.
+
+**When:** When you use the AI Guard demo.
+
+**Needs first:** Kit: create the AI Guard demo
+
+1. In the Zscaler console, open the ≡ menu and choose **AI Security** (it opens in a new tab).
+2. Go to **AI Guard > Tenant Settings** and open the **Security** tab.
+3. Turn on **Store Prompts/Responses** and save.
+4. **Enable Data Sharing for AI Training** is on the same tab: fine in your demo tenant, but never turn it on in a customer's tenant without their agreement.
+
+**Done when:** you mark it done (`aiguard-kit todo --done store-prompts`).
+
+*Menu path checked 2026-10 · id `store-prompts`*
+
+### Give the test group the Internet & SaaS entitlement
+
+**Why it's manual:** ZIdentity only sends a user to ZIA when it has the Internet & SaaS (ZIA) service entitlement. Tenants that grant it to chosen users or groups (common with Okta or Entra ID) don't give it to the kit's user, and the API can read entitlements but not grant them.
+
+**When:** When the kit created the test user in ZIdentity (SAML or ZIdentity-managed tenants).
+
+1. In the Zscaler console, open ZIdentity's entitlements for **Internet & SaaS** (see Zscaler Help below for where it sits in your console version).
+2. Assign the entitlement to the group **`SE-Demo: traffic generator`** (or to the user **the test user (for example `se-demo-traffic@<your domain>`)**).
+
+**Then:** Run ZIA setup again (Internet Access (ZIA) > Create or update policy); it continues from the test user.
+
+Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified/assigning-entitlements-users) · [Managing entitlements](https://help.zscaler.com/unified/managing-entitlements)
+
+**Done when:** the kit checks it (Check under Setup > Manual steps).
+
+*Menu names not yet confirmed · id `zid-entitlement`*
+
+- *The kit:* **create the ZIA test user**. The dedicated user the demo rules apply to (in ZIdentity on SAML or ZIdentity-managed tenants). Start it: Internet Access (ZIA) tab > Create or update policy. Needs first: Create the OneAPI client and its roles; Give the test group the Internet & SaaS entitlement (on ZIdentity tenants).
+
 ### Set the ZIdentity test user's password
 
 **Why it's manual:** Your tenant manages users in ZIdentity, and ZIdentity's API can't set passwords. The kit created the user; you give it a password once.
@@ -35,25 +73,15 @@ What the kit can't do through Zscaler's APIs, and the clicks to do it. **Manual 
 3. Set a password and save. Keep it out of chat, email and tickets.
 4. You'll use it once, to sign in to Client Connector on the traffic generator.
 
+**Then:** Sign in to Client Connector on the generator with it.
+
 **Done when:** you mark it done (`aiguard-kit todo --done zid-password`).
 
 *Menu names not yet confirmed · id `zid-password`*
 
-### Give the test group the Internet & SaaS entitlement
+- *The kit:* **create the ZIA demo rules**. URL filtering, Cloud App Control, File Type Control, DLP, firewall, DNS and SSL inspection rules for the test user. Start it: Internet Access (ZIA) tab > Create or update policy. Needs first: Kit: create the ZIA test user.
 
-**Why it's manual:** ZIdentity only sends a user to ZIA when it has the Internet & SaaS (ZIA) service entitlement. Tenants that grant it to chosen users or groups (common with Okta or Entra ID) don't give it to the kit's user, and the API can read entitlements but not grant them.
-
-**When:** When the kit created the test user in ZIdentity (SAML or ZIdentity-managed tenants).
-
-1. In the Zscaler console, open ZIdentity's entitlements for **Internet & SaaS** (see Zscaler Help below for where it sits in your console version).
-2. Assign the entitlement to the group **`SE-Demo: traffic generator`** (or to the user **the test user (for example `se-demo-traffic@<your domain>`)**).
-3. In the kit, run ZIA setup again (console: Internet Access (ZIA) > Create or update policy). It picks up where it left off once ZIA has the user.
-
-Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified/assigning-entitlements-users) · [Managing entitlements](https://help.zscaler.com/unified/managing-entitlements)
-
-**Done when:** the kit checks it (Check under Setup > Manual steps).
-
-*Menu names not yet confirmed · id `zid-entitlement`*
+- *The kit:* **create the Client Connector profiles**. The Windows app profile and Z-Tunnel 2.0 forwarding profile for the test user's group. On a ZIdentity tenant, ZIA only gets that group after the first Client Connector sign-in. Start it: Internet Access (ZIA) tab > Check for drift, then Fix drift (or Create or update policy). Needs first: Kit: create the ZIA demo rules; Sign in to Client Connector on the generator (on ZIdentity tenants). Then: Then, on the generator: Client Connector > More > Update Policy.
 
 ### Create the two Client Connector profiles
 
@@ -61,30 +89,18 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 **When:** When the Client Connector API refused the profiles, or you chose your own test user.
 
+**Needs first:** Kit: create the ZIA demo rules
+
 1. In the Zscaler console, open the Client Connector administration area.
 2. Add a **forwarding profile** named exactly `SE-Demo Z-Tunnel 2.0`. Set the ZIA action to **Tunnel** with **Z-Tunnel 2.0** on every network type (on corporate network, off corporate network, VPN, split VPN), and save.
 3. Add a **Windows app profile** named exactly `SE-Demo traffic generator`. Assign it to the group **`SE-Demo: traffic generator`** (your own test user's group if you picked one), turn on **Install Zscaler SSL Certificate**, select the forwarding profile `SE-Demo Z-Tunnel 2.0`, and save.
 4. Make sure no broader Windows app profile (for example one for all users) sits above it in the order.
-5. In the kit, click **Check for drift**, then **Fix drift**: it finds both profiles by name and uses them as they are.
+
+**Then:** Click Check for drift, then Fix drift: the kit finds both profiles by name and uses them as they are.
 
 **Done when:** the kit checks it (Check under Setup > Manual steps).
 
 *Menu names not yet confirmed · id `zcc-profiles`*
-
-### Turn on Store Prompts/Responses in AI Guard
-
-**Why it's manual:** Without it, Insights shows detections but not the prompt text. The API can't read or set this, so the kit can't check it.
-
-**When:** When the AI Guard demo is set up.
-
-1. In the Zscaler console, open the ≡ menu and choose **AI Security** (it opens in a new tab).
-2. Go to **AI Guard > Tenant Settings** and open the **Security** tab.
-3. Turn on **Store Prompts/Responses** and save.
-4. **Enable Data Sharing for AI Training** is on the same tab: fine in your demo tenant, but never turn it on in a customer's tenant without their agreement.
-
-**Done when:** you mark it done (`aiguard-kit todo --done store-prompts`).
-
-*Menu path checked 2026-10 · id `store-prompts`*
 
 ### Create the test user in your directory (AD or LDAP tenants)
 
@@ -108,9 +124,13 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 **When:** When the ZIA demo is set up.
 
+**Needs first:** Kit: create the ZIA demo rules
+
 1. **AWS:** in the kit's ZIA tab, **Download CloudFormation template**. In the AWS console, **CloudFormation > Create stack > With new resources (standard) > Upload a template file**, choose the file, keep the parameters, tick the IAM acknowledgement and **Submit**. Wait about 15 minutes.
 2. **CloudShare or any Windows VM:** create a Windows Server 2022 VM with direct internet access. In the kit's ZIA tab, **Download setup script**, copy it to the VM, open PowerShell **as Administrator** and run `powershell -ExecutionPolicy Bypass -File .\se-demo-zia-generator-setup.ps1`. Progress: `C:\SE-Demo\setup.log`, about 10 minutes.
 3. Make the template or script after the Client Connector profiles exist, so Client Connector is installed with the kit's app profile.
+
+**Then:** Connect to the machine and sign in to Client Connector.
 
 **Done when:** you mark it done (`aiguard-kit todo --done generator-build`).
 
@@ -121,6 +141,8 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 **Why it's manual:** Fleet Manager offers single sign-on only to people signed in to AWS through IAM Identity Center, and the template sets no Windows password.
 
 **When:** When you use the AWS generator and Fleet Manager offers no single sign-on.
+
+**Needs first:** Build the traffic generator machine
 
 1. Open the stack's **Outputs** and follow **ConnectWithFleetManager**, then **Node actions > Connect > Connect with Remote Desktop**. If **Single sign-on** is offered, use it and skip the rest.
 2. Otherwise: **Systems Manager > Session Manager > Start session**, pick the instance, and run the command in the stack's **SetAdministratorPassword** output. Type a strong password at the prompt (it isn't shown).
@@ -136,9 +158,13 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 **When:** When the ZIA demo is set up.
 
+**Needs first:** Build the traffic generator machine; Set the ZIdentity test user's password (on ZIdentity tenants); Kit: create the ZIA test user
+
 1. On the generator, open Client Connector and sign in as **the test user (for example `se-demo-traffic@<your domain>`)**. Password: the one the kit generated (`aiguard-kit zia password`) or, for a ZIdentity user, the one you set in ZIdentity.
 2. Click **More > Update Policy**, then check that the status shows **Tunnel Version v2.0**.
 3. On the generator's desktop, open **SE-Demo ZIA console > Internet Access (ZIA)** and click **Check this machine**. Every row should pass; traffic rounds start on their own after that.
+
+**Then:** On a ZIdentity tenant, ZIA only receives the test group after this first sign-in: if the Client Connector profiles are still waiting, click Fix drift on your laptop now, then More > Update Policy here. Traffic rounds start by themselves.
 
 **Done when:** you mark it done (`aiguard-kit todo --done generator-signin`).
 
@@ -163,7 +189,9 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 **Why it's manual:** The Guided demo checks each policy switch with a few scans under the user kit-policy-check. Insights views can't be saved through the API.
 
-**When:** When the AI Guard demo is set up.
+**When:** When you use the AI Guard demo.
+
+**Needs first:** Kit: create the AI Guard demo
 
 1. In **AI Guard > Insights**, add a filter on the user that excludes `kit-policy-check` before you share your screen.
 
