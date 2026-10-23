@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.20
 - **The setup path, in order.** Manual steps now show what the kit does in between (marked ⚙) and what each step
   needs first. A step that can't be done yet says what it's waiting for, and the one to do now is marked **next**.
   For example, on a ZIdentity tenant: set the password, build the generator, sign in, then the kit creates the
