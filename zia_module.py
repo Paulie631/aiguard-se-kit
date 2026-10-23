@@ -1834,7 +1834,22 @@ def aws_settings(t, cfg, zcc_url=""):
     elif zcc_url.lower().startswith("s3://"):   # your own bucket: s3://bucket/key
         zcc_url, zcc_s3 = "", zcc_url[5:]
     return {"cloud": cloud_name(t) or cfg.get("cloud") or "zscalertwo", "domain": user.split("@", 1)[1],
-            "test_user": user, "zcc_url": zcc_url, "zcc_s3": zcc_s3}
+            "test_user": user, "zcc_url": zcc_url, "zcc_s3": zcc_s3, "policy_token": zcc_policy_token(t)}
+
+
+def zcc_policy_token(t):
+    """The policy token of the kit's Windows app profile (made by the kit or by hand under its name), or "". With it,
+    Client Connector downloads that profile at install, before anyone signs in."""
+    app_name, _ = zcc_names()
+    if not app_name:
+        return ""
+    try:
+        hit = next((p for p in _zcc_list(t, "zcc.web_policy", device_type="windows") if g(p, "name") == app_name), None)
+    except Exception as e:
+        K.vlog(f"policy token: {e}")
+        return ""
+    tok = str(g(hit or {}, "policyToken") or g(hit or {}, "policy_token") or "").strip()
+    return tok if re.match(r"^[A-Za-z0-9._:+=/-]{4,200}$", tok) else ""
 
 
 def zcc_source(st):
@@ -1860,7 +1875,7 @@ def cmd_aws():
     K.save_cfg(cfg)
     K.ok(f"Wrote {out}")
     K.info(f"Test user {st['test_user']} · cloud {st['cloud']} · domain {st['domain']}"
-           + " · " + zcc_source(st))
+           + " · " + zcc_source(st) + " · " + token_note(st))
     print("  Next: AWS console > CloudFormation > Create stack > With new resources > Upload a template file,")
     print("        choose that file, review the parameters, tick the IAM acknowledgement, Submit. See ZIA.md (AWS).")
 
@@ -1869,7 +1884,45 @@ def api_aws(cfg, body, tenant):
     st = aws_settings(tenant(), cfg, (body.get("zcc_url") or "").strip())
     zcfg(cfg)["aws"] = {"written": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     K.save_cfg(cfg)
-    return {"filename": "se-demo-zia-generator.cfn.json", "template": aws_module().build(**st), "settings": st}
+    tpl = aws_module().build(**st)
+    st = {k: v for k, v in st.items() if k != "policy_token"} | {"has_policy_token": bool(st.get("policy_token"))}
+    return {"filename": "se-demo-zia-generator.cfn.json", "template": tpl, "settings": st}
+
+
+def token_note(st):
+    return ("Client Connector gets the kit's app profile at install (policy token)" if st.get("policy_token") else
+            "no app profile token yet (create the Client Connector profiles first): the profile arrives at sign-in")
+
+
+SCRIPT_NAME = "se-demo-zia-generator-setup.ps1"
+
+
+def cmd_script():
+    """`zia script`: the generator setup as a PowerShell script for CloudShare or any Windows VM."""
+    cfg = K.load_cfg()
+    K.head("ZIA traffic generator on any Windows VM (CloudShare, a lab VM): setup script")
+    st = aws_settings(connect(cfg), cfg, K.opt("zcc-url", ""))
+    downloads = K.HOME / "Downloads"
+    out = Path(K.opt("out") or (downloads if downloads.is_dir() else K.CFG_DIR) / SCRIPT_NAME)
+    try:
+        aws_module().write_script(out, **st)
+    except ValueError as e:
+        raise K.KitError(str(e)) from e
+    K.ok(f"Wrote {out}")
+    K.info(f"Test user {st['test_user']} · cloud {st['cloud']} · " + zcc_source(st) + " · " + token_note(st))
+    print("  Next: copy it to the Windows VM, open PowerShell as Administrator there and run")
+    print(f"        powershell -ExecutionPolicy Bypass -File .\\{SCRIPT_NAME}")
+    print("        (or paste the file into that window). Then sign in to Client Connector as the test user. See ZIA.md.")
+
+
+def api_script(cfg, body, tenant):
+    st = aws_settings(tenant(), cfg, (body.get("zcc_url") or "").strip())
+    try:
+        text = aws_module().setup_script(**st)
+    except ValueError as e:
+        raise K.KitError(str(e)) from e
+    st = {k: v for k, v in st.items() if k != "policy_token"} | {"has_policy_token": bool(st.get("policy_token"))}
+    return {"filename": SCRIPT_NAME, "script": text, "settings": st}
 
 
 def cmd_password():
@@ -1947,7 +2000,7 @@ def cli(args):
     sub = next((a for a in args if not a.startswith("-") and a not in _values(args)), "help")
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "status": cmd_status, "teardown": cmd_teardown,
             "dashboards": cmd_dashboards, "check": cmd_check, "traffic": cmd_traffic,
-            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password, "aws": cmd_aws,
+            "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password, "aws": cmd_aws, "script": cmd_script,
             "ready": lambda: K.cmd_ready()}
     if sub not in cmds:
         print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|aws|check|traffic|schedule|ready  (see ZIA.md)")

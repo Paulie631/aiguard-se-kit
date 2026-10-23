@@ -66,14 +66,21 @@ if ($zcc -or $s3o) {
       "Client Connector installer isn't validly signed by Zscaler (" + $sig.Status + "): not installing it."; $ok = $false
     }
   }
+  # The policy token makes Client Connector download the kit's app profile at install, before anyone signs in:
+  # Z-Tunnel 2.0 and the Zscaler root certificate are in place from the start.
+  $pt = "${ZccPolicyToken}"
   if (-not $ok) {
     "Install Client Connector by hand from your demo tenant, then sign in as ${TestUser}."
   } elseif ($ext -eq "msi") {
-    Start-Process msiexec.exe -Wait -ArgumentList "/i `"$f`" /quiet /norestart CLOUDNAME=${ZccCloudName} USERDOMAIN=${ZccUserDomain}"
-    "Client Connector installed. Sign in as ${TestUser}."
+    $margs = "/i `"$f`" /quiet /norestart CLOUDNAME=${ZccCloudName} USERDOMAIN=${ZccUserDomain}"
+    if ($pt) { $margs += " POLICYTOKEN=$pt" }
+    Start-Process msiexec.exe -Wait -ArgumentList $margs
+    "Client Connector installed" + $(if ($pt) { " with the kit's app profile" } else { "" }) + ". Sign in as ${TestUser}."
   } else {
-    Start-Process $f -Wait -ArgumentList "--mode unattended --cloudName ${ZccCloudName} --userDomain ${ZccUserDomain}"
-    "Client Connector installed. Sign in as ${TestUser}."
+    $xargs = "--mode unattended --cloudName ${ZccCloudName} --userDomain ${ZccUserDomain}"
+    if ($pt) { $xargs += " --policyToken $pt" }
+    Start-Process $f -Wait -ArgumentList $xargs
+    "Client Connector installed" + $(if ($pt) { " with the kit's app profile" } else { "" }) + ". Sign in as ${TestUser}."
   }
 } else {
   "No Client Connector installer URL given: install it by hand, then sign in as ${TestUser}."
@@ -133,12 +140,17 @@ def param(type_, default, desc, **kw):
     return p
 
 
-def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@example.com", kit_zip=KIT_ZIP,
-          zcc_url="", zcc_s3="", zcc_sha256="", every=30, per_type=4, schedule=True):
+def _installer(zcc_url, zcc_s3, zcc_sha256):
     if zcc_url == "none":                                   # explicitly no installer: install by hand
-        zcc_url = ""
-    elif not zcc_url and not zcc_s3 and ZCC_DEFAULT["url"]:  # the kit's own copy, pinned by hash
-        zcc_url, zcc_sha256 = ZCC_DEFAULT["url"], ZCC_DEFAULT["sha256"]
+        return "", ""
+    if not zcc_url and not zcc_s3 and ZCC_DEFAULT["url"]:    # the kit's own copy, pinned by hash
+        return ZCC_DEFAULT["url"], ZCC_DEFAULT["sha256"]
+    return zcc_url, zcc_sha256
+
+
+def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@example.com", kit_zip=KIT_ZIP,
+          zcc_url="", zcc_s3="", zcc_sha256="", every=30, per_type=4, schedule=True, policy_token=""):
+    zcc_url, zcc_sha256 = _installer(zcc_url, zcc_s3, zcc_sha256)
     tags = [{"Key": "Name", "Value": NAME}, {"Key": "se-demo", "Value": "zia-traffic-generator"}]
     params = {
         "TestUser": param("String", test_user, "The ZIA test user (from aiguard-kit zia setup). Sign in to Client "
@@ -156,6 +168,10 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
                                                "in this region. The instance may read only that object.",
                              AllowedPattern=r"^$|^[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]/.+\.(msi|exe)$",
                              ConstraintDescription="bucket/key of an .msi or .exe, or empty"),
+        "ZccPolicyToken": param("String", policy_token, "Optional: the policy token of the kit's Client Connector app "
+                                "profile (the kit fills it in). Client Connector then has that profile's settings "
+                                "(Z-Tunnel 2.0, Zscaler certificate) before anyone signs in. Empty: picked up at sign-in. "
+                                "Not a password: Client Connector still needs the test user to sign in."),
         "KitZipUrl": param("String", kit_zip, "Where the instance downloads the kit (a GitHub zip)."),
         "TrafficEveryMinutes": param("Number", every, "Minutes between traffic rounds.", MinValue=15, MaxValue=1440),
         "RequestsPerType": param("Number", per_type, "Requests per traffic type per round.", MinValue=1, MaxValue=20),
@@ -275,7 +291,7 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
     return {"AWSTemplateFormatVersion": "2010-09-09",
             "Description": f"{NAME} for {test_user} (aiguard-kit zia aws). Delete the stack to remove everything.",
             "Metadata": {"AWS::CloudFormation::Interface": {"ParameterGroups": [
-                {"Label": {"default": "Zscaler"}, "Parameters": ["TestUser", "ZccCloudName", "ZccUserDomain", "ZccS3Object", "ZccInstallerUrl", "ZccInstallerSha256"]},
+                {"Label": {"default": "Zscaler"}, "Parameters": ["TestUser", "ZccCloudName", "ZccUserDomain", "ZccS3Object", "ZccInstallerUrl", "ZccInstallerSha256", "ZccPolicyToken"]},
                 {"Label": {"default": "Traffic"}, "Parameters": ["TrafficEveryMinutes", "RequestsPerType", "KitZipUrl"]},
                 {"Label": {"default": "AWS"}, "Parameters": ["InstanceType", "WeekdaySchedule", "NetworkMode", "ExistingVpcId",
                                                               "ExistingSubnetId", "ExistingInstanceProfile", "KeyPairName", "WindowsAmi"]}]}},
@@ -292,3 +308,43 @@ def write(path, **kw):
     from pathlib import Path
     Path(path).write_text(json.dumps(build(**kw), indent=2), encoding="utf-8")
     return path
+
+
+SAFE_VALUE = __import__("re").compile(r"^[A-Za-z0-9._:/@?=&%+~#-]*$")
+
+
+def setup_script(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@example.com", kit_zip=KIT_ZIP,
+                 zcc_url="", zcc_s3="", zcc_sha256="", every=30, per_type=4, policy_token="", **_):
+    """The same first-boot setup as the AWS template, as a PowerShell script for any Windows VM with direct internet
+    access (CloudShare, a lab VM, another cloud). Run it once in PowerShell as Administrator."""
+    if zcc_s3:
+        raise ValueError("An s3:// installer only works on AWS. Leave the installer field empty (the kit's verified "
+                         "copy), give an https URL, or 'none'.")
+    zcc_url, zcc_sha256 = _installer(zcc_url, zcc_s3, zcc_sha256)
+    values = {"TestUser": test_user, "ZccCloudName": cloud, "ZccUserDomain": domain, "ZccInstallerUrl": zcc_url,
+              "ZccS3Object": "", "ZccInstallerSha256": zcc_sha256, "ZccPolicyToken": policy_token,
+              "KitZipUrl": kit_zip, "TrafficEveryMinutes": str(int(every)), "RequestsPerType": str(int(per_type)),
+              "AWS::Region": ""}
+    for k, v in values.items():   # every value lands inside a PowerShell string: allow plain URL/name characters only
+        if not SAFE_VALUE.match(str(v)):
+            raise ValueError(f"{k} has characters the setup script can't take safely: {v!r}")
+    body = USER_DATA.replace("<powershell>\n", "").replace("</powershell>\n<persist>false</persist>\n", "")
+    body = body.replace("first-boot setup for test user", "setup for test user")
+    for k, v in values.items():
+        body = body.replace("${" + k + "}", str(v))
+    head = (f"# {NAME}: setup script for a Windows VM (CloudShare, a lab VM or another cloud).\n"
+            f"# Made by the SE demo kit for test user {test_user}, cloud {cloud}.\n"
+            "# Needs: Windows Server 2022 or Windows 10/11, direct internet access (no corporate proxy or another\n"
+            "#   tenant's Client Connector), and PowerShell run as Administrator.\n"
+            "# Run:  powershell -ExecutionPolicy Bypass -File .\\se-demo-zia-generator-setup.ps1\n"
+            "#   or paste this whole file into an Administrator PowerShell window.\n"
+            "# Then sign in to Client Connector as the test user. Progress: C:\\SE-Demo\\setup.log\n"
+            "# It holds your app profile's policy token: keep it within your team, like the AWS template.\n")
+    return head + body
+
+
+def write_script(path, **kw):
+    from pathlib import Path
+    Path(path).write_text(setup_script(**kw), encoding="utf-8-sig", newline="\r\n")
+    return path
+

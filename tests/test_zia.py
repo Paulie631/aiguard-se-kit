@@ -5,6 +5,7 @@ import importlib.util
 import io
 import itertools
 import json
+import os
 import pathlib
 import re
 import sys
@@ -1594,3 +1595,49 @@ def test_missing_entitlement_gets_its_own_fix_line(zenv):
     err = kit.KitError(z.ENTITLE_FIX.format(email="u@acme.zslogin.net", group="SE-Demo: traffic generator"))
     fix = z.zhint(err)
     assert "Internet & SaaS (ZIA) service entitlement" in fix and "'SE-Demo: traffic generator'" in fix
+
+
+def test_generator_gets_the_app_profile_at_install_and_a_script_for_other_vms(zenv, aws):
+    """The policy token of the kit's app profile goes to the Client Connector installer (AWS template and the
+    CloudShare/any-VM script), so Z-Tunnel 2.0 and the certificate are in place before sign-in. The script is the
+    same setup as the template, with every value filled in and nothing left for CloudFormation."""
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    app = next(p for p in fake.web if p["name"] == "SE-Demo traffic generator")
+    app["policyToken"] = "a1b2c3d4e5"
+    cfg = kit.load_cfg()
+    st = z.aws_settings(fake, cfg)
+    assert st["policy_token"] == "a1b2c3d4e5"
+    t = aws.build(**st)
+    assert t["Parameters"]["ZccPolicyToken"]["Default"] == "a1b2c3d4e5"
+    assert "POLICYTOKEN=$pt" in aws.USER_DATA and "--policyToken $pt" in aws.USER_DATA
+    script = aws.setup_script(**st)
+    assert "${" not in script and '$pt = "a1b2c3d4e5"' in script and "<powershell>" not in script
+    assert st["test_user"] in script and aws.ZCC_DEFAULT["sha256"] in script and "Get-AuthenticodeSignature" in script
+    with pytest.raises(ValueError, match="only works on AWS"):
+        aws.setup_script(**dict(st, zcc_s3="bucket/zcc.msi"))
+    with pytest.raises(ValueError, match="characters"):
+        aws.setup_script(**dict(st, test_user='x"; Remove-Item C:\\ -Recurse; "@y.com'))
+    # the console never shows the token itself
+    r = z.api_script(cfg, {}, lambda: fake)
+    assert r["settings"]["has_policy_token"] and "policy_token" not in r["settings"] and r["filename"].endswith(".ps1")
+    # no app profile yet: no token, nothing breaks
+    fake.web.clear()
+    assert z.aws_settings(fake, cfg)["policy_token"] == ""
+
+
+def test_generator_setup_script_is_valid_powershell(aws, tmp_path):
+    """Parsed by real PowerShell when the machine has it (GitHub's CI runners do), so a syntax slip can't reach a VM."""
+    import shutil
+    import subprocess
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell isn't installed here")
+    for name, kw in (("token.ps1", {"policy_token": "a1b2c3d4e5"}), ("plain.ps1", {}), ("none.ps1", {"zcc_url": "none"})):
+        f = tmp_path / name
+        aws.write_script(f, **kw)
+        r = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command",
+                            "$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($env:KIT_PS1,[ref]$null,[ref]$e);"
+                            " if ($e) { $e | ForEach-Object { $_.ToString() }; exit 1 }"],
+                           capture_output=True, text=True, timeout=120, env={**os.environ, "KIT_PS1": str(f)})
+        assert r.returncode == 0, r.stdout + r.stderr

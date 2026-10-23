@@ -132,7 +132,7 @@ Prefer a terminal? `aiguard-kit zia preflight`, then `aiguard-kit zia setup`, th
 
 ## Part 5: Build the traffic generator (20 minutes)
 
-ZIA dashboards fill only from real traffic, so a separate Windows machine browses as the test user through Client Connector. Use AWS (option A) unless you already have a lab VM (option B).
+ZIA dashboards fill only from real traffic, so a separate Windows machine browses as the test user through Client Connector. Use AWS (option A), or CloudShare / a lab VM (option B).
 
 ### Option A: AWS CloudFormation
 
@@ -158,16 +158,17 @@ ZIA dashboards fill only from real traffic, so a separate Windows machine browse
 
 > Account won't let stacks create a VPC or IAM roles? Set `NetworkMode` to `ExistingSubnet` (with a subnet that doesn't route through corporate inspection) and/or `ExistingInstanceProfile` to a profile with `AmazonSSMManagedInstanceCore`, plus `WeekdaySchedule` = `false`.
 
-### Option B: your own Windows VM
+### Option B: CloudShare or your own Windows VM
 
-1. Use Windows 10/11 or Server 2022, with direct internet access and no other tenant's Client Connector.
-2. Download the latest **Zscaler ZIA SE Demo Kit** (`zscaler-zia-kit-<version>.zip`) from the repo's Releases page, extract it and double-click **Install ZIA Kit**. No API keys or setup are needed on this machine.
-3. Continue below, then run `zia-kit zia schedule install --every 30` to send a round every 30 minutes while you're signed in.
+1. Create a Windows Server 2022 (or Windows 10/11) VM with direct internet access and no other tenant's Client Connector. In CloudShare, start an environment from a Windows Server template.
+2. On your laptop, in the console's ZIA tab, section **2 · Traffic generator**, click **Download setup script (CloudShare / any Windows VM)**. It saves `se-demo-zia-generator-setup.ps1`, filled in for your tenant. (Terminal: `aiguard-kit zia script`.)
+3. Copy the file to the VM (in CloudShare, drag it into the VM window or use its file transfer). Open PowerShell **as Administrator** on the VM and run `powershell -ExecutionPolicy Bypass -File .\se-demo-zia-generator-setup.ps1`. It installs the verified Client Connector (with the kit's app profile), the kit and the 30-minute traffic schedule, like the AWS stack. Progress: `C:\SE-Demo\setup.log`, about 10 minutes.
+4. Continue below. Traffic only runs while the VM is running, so check CloudShare's suspend policy before a demo.
 
 ### Sign in to Client Connector (both options)
 
 1. **Get Client Connector onto the machine.**
-   - **AWS (kit 1.8.4 or later):** it's already installed. The stack downloads Client Connector 4.10.0.477 from the kit's `zcc-installer` release and installs it only if the file's SHA-256 matches and it's signed by Zscaler. If `C:\SE-Demo\setup.log` (the **SE-Demo setup log** shortcut) says it was skipped, install by hand as below.
+   - **AWS or the setup script (kit 1.8.18 or later):** it's already installed, with the kit's app profile (Z-Tunnel 2.0 and the Zscaler certificate) loaded before you sign in. The stack downloads Client Connector 4.10.0.477 from the kit's `zcc-installer` release and installs it only if the file's SHA-256 matches and it's signed by Zscaler. If `C:\SE-Demo\setup.log` (the **SE-Demo setup log** shortcut) says it was skipped, install by hand as below.
    - **Your own VM, or the AWS install was skipped:** in Edge, sign in to your **demo tenant's** admin console, download the latest Windows 64-bit .msi from the Client Connector App Store and run it with the defaults. Never use an installer from the corporate tenant.
 2. Sign in to Client Connector as the test user (`se-demo-traffic@<your user domain>`) with the password from Part 4. On a ZIdentity tenant, sign in as `se-demo-traffic@<vanity>.zslogin.net` with the password you set in ZIdentity.
 3. Open Client Connector > **More > Update Policy**. This picks up the kit's app profile: the Zscaler certificate and **Z-Tunnel 2.0**.
