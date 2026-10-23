@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+- **Manual steps, in one place.** Everything the kit can't do through Zscaler's APIs (setting a ZIdentity
+  password, the Internet & SaaS entitlement, Client Connector profiles when the API refuses them, Store
+  Prompts/Responses, building and signing in to the generator, and more) now lives in `manual_steps.json`. A new
+  **Manual steps** tab, and `aiguard-kit todo`, show only the steps that apply to your tenant, with your names and
+  the clicks to do them. The kit checks the ones it can; you mark the rest done. Open steps show in Demo readiness
+  and in the diagnostics zip. `MANUAL-STEPS.md` and the deployment guide's new appendix are generated from the same
+  file, and setup's own warnings point to the tab.
+
 ## 1.8.18
 - **ZIA traffic generator on CloudShare (or any Windows VM).** `zia script`, or **Download setup script** on the ZIA
   tab, writes a PowerShell script with the same setup as the AWS template: the verified Client Connector, the kit and

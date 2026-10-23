@@ -19,6 +19,7 @@
   ./aiguard-kit repair     check this computer's demo setup in the tenant and fix anything missing (--force: rerun)
   ./aiguard-kit logs       show recent activity (--errors, --follow); files are in ~/.aiguard-se-kit/logs
   ./aiguard-kit ready      demo readiness: policy in Monitor, keys, ZIA drift, dashboards, generator, AWS schedule
+  ./aiguard-kit todo       what to do by hand (the API can't), step by step (--done <id> / --undo <id>)
   ./aiguard-kit update     install the latest release from GitHub (--check: only check, --rollback: previous version)
   ./aiguard-kit install    copy the kit to ~/.aiguard-se-kit/app, add a desktop shortcut and the `aiguard-kit` command
                            (what the double-click installers run); uninstall removes them
@@ -310,6 +311,11 @@ def diagnostics_zip():
              "state": redact(cfg.get("state", {})), "answers": redact(cfg.get("answers", {}))}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("about.json", json.dumps(info_, indent=2))
+        try:
+            z.writestr("manual-steps.json", json.dumps([{k: i[k] for k in ("id", "status", "how", "detail")}
+                                                        for i in manual_status(cfg, check=False)], indent=2))
+        except Exception as e:
+            vlog(f"diagnostics manual steps: {e}")
         # newest entries, line by line (redact() caps each string, so a whole file passed at once lost all but its start)
         for f in sorted(LOG_DIR.glob("kit-*.jsonl"))[-LOG_KEEP_DAYS:] if LOG_DIR.exists() else []:
             lines = f.read_text(encoding="utf-8", errors="replace").splitlines()[-DIAG_LINES:]
@@ -1305,7 +1311,7 @@ APP_NAME = "AI Guard Demo Console"
 CLI_NAME = "aiguard-kit"                        # the command install puts on PATH (Mac/Linux wrapper name)
 UNINSTALL_LNK = "Uninstall AI Guard Demo Kit.lnk"
 INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "packs", "policy_template.json",
-                 "preflight_help.json", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
+                 "preflight_help.json", "manual_steps.json", "MANUAL-STEPS.md", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
                  "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command",
                  "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md",
                  "CHANGELOG-ZIA.md", "edition.json", "zia-kit", "zia-kit.cmd", "assets"]
@@ -2290,6 +2296,154 @@ def cmd_teardown():
 
 
 # ---------------------------------------------------------------- status
+# ---------------------------------------------------------------- manual steps
+# What the kit can't do through Zscaler's APIs, from manual_steps.json: shown in the console's Manual steps tab, by
+# `aiguard-kit todo`, in demo readiness, in diagnostics and in MANUAL-STEPS.md / the deployment guide.
+MANUAL_FILE = "manual_steps.json"
+
+
+def load_manual():
+    return json.loads((HERE / MANUAL_FILE).read_text(encoding="utf-8"))
+
+
+def manual_context(cfg):
+    """The tenant's own names, filled into the steps' {placeholders}."""
+    z = cfg.get("zia") or {}
+    made = z.get("created_user") or {}
+    user = made.get("email") or ((z.get("users") or [{}])[0].get("email")) or "your test user"
+    app_name, fwd_name = "SE-Demo traffic generator", "SE-Demo Z-Tunnel 2.0"
+    try:
+        app_name, fwd_name = product("zia").zcc_names()
+    except Exception as e:  # the ZIA module or its template missing: keep the defaults
+        vlog(f"manual steps: {e}")
+    pw = {"zidentity": "the one you set in ZIdentity (step 'Set the ZIdentity test user's password')",
+          "zia": "Show password on the console's ZIA tab, or `aiguard-kit zia password`"}.get(
+        made.get("via"), "your test user's password")
+    return {"test_user": user, "group": made.get("group") or f"{PREFIX}: traffic generator",
+            "app_profile": app_name, "fwd_profile": fwd_name, "password_source": pw}
+
+
+def manual_applies(cond, cfg):
+    z = cfg.get("zia") or {}
+    made = z.get("created_user") or {}
+    zia_on = bool(z.get("state") or z.get("users") or made)
+    return {"always": True, "docs": False,
+            "aiguard": bool(cfg.get("state", {}).get("apps")),
+            "zia": zia_on,
+            "zia-zidentity-user": made.get("via") == "zidentity",
+            "zia-zcc-manual": zia_on and (bool(z.get("zcc_api_refused")) or (bool(z.get("users")) and not made)),
+            "zia-aws": bool(z.get("aws"))}.get(cond, False)
+
+
+def manual_check(cid, cfg, zia_tenant=None):
+    """('done' | 'todo' | None, detail). None: the kit can't tell, so the SE's own mark decides."""
+    z = cfg.get("zia") or {}
+    made = z.get("created_user") or {}
+    if cid == "oneapi-saved":
+        saved = bool(cfg.get("client_id")) and kc_has("oneapi-client-secret")
+        return ("done" if saved else "todo"), ("client and secret saved on this computer" if saved else "not saved yet")
+    if cid not in ("zia-entitled", "zcc-profiles") or zia_tenant is None:
+        return None, ""
+    zm = product("zia")
+    try:
+        t = zia_tenant()
+        if cid == "zia-entitled":
+            if z.get("users"):
+                return "done", "ZIA has the test user"
+            names = zm.zid_services(t, made.get("zid_id")) if made.get("zid_id") else None
+            if names is None:
+                return None, "couldn't read the user's entitlements"
+            return ("done", "entitled") if zm.zia_entitled(names) else ("todo", "no Internet & SaaS entitlement yet")
+        checks = {c["id"]: c for c in zm.zcc_drift(t, cfg)}
+        bad = [c["label"] + ": " + c["detail"] for k, c in checks.items() if k.startswith("drift-zcc") and c["status"] != "ok"]
+        if not checks:
+            return "todo", "no test-user group in ZIA yet"
+        return ("todo", "; ".join(bad)) if bad else ("done", "both profiles found and set up correctly")
+    except Exception as e:
+        return None, f"couldn't check: {str(e)[:120]}"
+
+
+def manual_status(cfg, check=True, zia_tenant=None):
+    """The manual steps that apply to this tenant, each with its status: done, todo or reminder."""
+    data = load_manual()
+    ctx = manual_context(cfg)
+    marks = cfg.get("manual_done") or {}
+
+    class Keep(dict):
+        def __missing__(self, k):
+            return "{" + k + "}"
+    out = []
+    for st in data["steps"]:
+        if not manual_applies(st["applies"], cfg):
+            continue
+        item = {k: st[k] for k in ("id", "stage", "title", "why", "help", "confirmed")}
+        item["stage_label"] = data["stages"].get(st["stage"], st["stage"])
+        item["steps"] = [x.format_map(Keep(ctx)) for x in st["steps"]]
+        item["can_check"] = st.get("check") not in (None, "reminder")
+        if st.get("check") == "reminder":
+            item.update(status="reminder", how="", detail="each demo")
+            out.append(item)
+            continue
+        state, detail = manual_check(st.get("check"), cfg, zia_tenant) if check and st.get("check") else (None, "")
+        if state is None:
+            state = "done" if st["id"] in marks else "todo"
+            how = "marked" if st["id"] in marks else ""
+            detail = detail or (f"marked done {marks[st['id']][:10]}" if st["id"] in marks else "")
+        else:
+            how = "checked"
+        item.update(status=state, how=how, detail=detail, marked=st["id"] in marks)
+        out.append(item)
+    return out
+
+
+def manual_mark(cfg, sid, done=True):
+    if sid not in {s["id"] for s in load_manual()["steps"]}:
+        raise KitError(f"No manual step '{sid}'. See: aiguard-kit todo")
+    marks = cfg.setdefault("manual_done", {})
+    if done:
+        marks[sid] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    else:
+        marks.pop(sid, None)
+    save_cfg(cfg)
+
+
+def zia_tenant_for(cfg):
+    if cfg.get("client_id") and kc_has("oneapi-client-secret"):
+        return lambda: product("zia").connect(cfg)
+    return None
+
+
+def cmd_todo():
+    """`aiguard-kit todo`: what to do by hand (the API can't), with step-by-step instructions.
+    --done <id> / --undo <id> marks a step the kit can't check itself."""
+    cfg = load_cfg()
+    for flag, done in (("done", True), ("undo", False)):
+        if opt(flag):
+            manual_mark(cfg, opt(flag), done)
+            ok(f"{'Marked' if done else 'Unmarked'} '{opt(flag)}'")
+    head("Manual steps (what the kit can't do through the API)")
+    items = manual_status(cfg, zia_tenant=zia_tenant_for(cfg))
+    stage = None
+    for it in items:
+        if it["stage_label"] != stage:
+            stage = it["stage_label"]
+            print(f"\n  {C['b']}{stage}{C['x']}")
+        mark = {"done": f"{C['g']}✓{C['x']}", "todo": f"{C['y']}!{C['x']}", "reminder": "·"}[it["status"]]
+        print(f"  {mark} {it['title']}  {C['d']}[{it['id']}]{(' ' + it['detail']) if it['detail'] else ''}{C['x']}")
+        if it["status"] != "done":
+            print(f"      {C['d']}{it['why']}{C['x']}")
+            for n, line in enumerate(it["steps"], 1):
+                print(f"      {n}. {re.sub(r'[*`]', '', line)}")
+            for h in it["help"]:
+                print(f"      Zscaler Help: {h['title']} - {h['url']}")
+            if not it["confirmed"]:
+                print(f"      {C['d']}(menu names not yet confirmed against a live console: tell the kit owner if they differ){C['x']}")
+            if not it["can_check"] and it["status"] == "todo":
+                print(f"      When it's done: aiguard-kit todo --done {it['id']}")
+    open_ = [i for i in items if i["status"] == "todo"]
+    head("Nothing left to do by hand" if not open_ else f"{len(open_)} step{'s' if len(open_) > 1 else ''} to do by hand")
+
+
 def readiness(cfg):
     """Morning-of-a-demo check across products. Each item says what to do; nothing is changed."""
     out = []
@@ -2315,6 +2469,14 @@ def readiness(cfg):
         zm = product("zia")
         creds = bool(cfg.get("client_id")) and kc_has("oneapi-client-secret")
         out += zm.ready_checks(cfg, (lambda: zm.connect(cfg)) if creds else None)
+    try:
+        open_ = [i["title"] for i in manual_status(cfg, zia_tenant=zia_tenant_for(cfg)) if i["status"] == "todo"]
+        if out or open_:
+            out.append({"id": "ready-manual", "label": "Manual steps", "status": "warn" if open_ else "ok",
+                        "detail": "; ".join(open_) if open_ else "nothing left to do by hand",
+                        "fix": "Console: Manual steps tab, or aiguard-kit todo." if open_ else ""})
+    except Exception as e:
+        vlog(f"manual steps in readiness: {e}")
     if not out:
         out.append({"id": "ready-setup", "label": "Demo set up", "status": "fail", "detail": "nothing set up yet",
                     "fix": "Run ./aiguard-kit setup (or the console's Setup tab)."})
@@ -2634,6 +2796,11 @@ def cmd_gui():
             if path in ("/", "/index.html"):
                 html = (HERE / "gui.html").read_text(encoding="utf-8").replace("__KIT_TOKEN__", token)
                 return self._send(200, raw=html.encode(), ctype="text/html; charset=utf-8")
+            if path == "/api/manual":
+                c = load_cfg()
+                check = "check=1" in (self.path.split("?", 1) + [""])[1]
+                return self._send(200, {"steps": manual_status(c, check=check, zia_tenant=(lambda: zia_tenant(c))
+                                                               if check and zia_tenant_for(c) else None)})
             if path == "/api/ready":
                 c = load_cfg()
                 try:
@@ -2719,6 +2886,12 @@ def cmd_gui():
             body = self._body()
             c = load_cfg()
             lib = load_tests()
+            if path == "/api/manual/mark":
+                try:
+                    manual_mark(c, body.get("id", ""), bool(body.get("done", True)))
+                except KitError as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, {"ok": True})
             if path == "/api/quit":   # the Quit button: the console may have no terminal window to close
                 activity("setup", "Console stopped from its Quit button", "info")
                 threading.Timer(0.3, SERVER["srv"].shutdown).start()
@@ -3048,7 +3221,8 @@ def main():
         cmd = product_
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
-            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia, "ready": cmd_ready}
+            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia, "ready": cmd_ready,
+            "todo": cmd_todo}
     if cmd not in cmds:
         print(__doc__)
         return
