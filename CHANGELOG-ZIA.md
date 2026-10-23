@@ -3,7 +3,7 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
-## Unreleased
+## 0.2.13
 - Generator setup script for CloudShare or any Windows VM; Client Connector installed with the kit's app profile
   (policy token). See AI Guard kit CHANGELOG.
 
