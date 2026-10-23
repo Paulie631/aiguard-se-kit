@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.14"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.15"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -259,7 +259,7 @@ def test_user_names():
 NOT_TENANT_DOMAINS = re.compile(r"zscaler|zslogin|zscloud", re.I)
 PW_KEY = "zia-test-user-password"   # keychain entry for the password of a test user the kit created
 CONSOLE_USERS = "Administration > Internet & SaaS Authentication > Internet & SaaS Users"
-MANUAL_TAB = " Step by step: the console's Manual steps tab, or aiguard-kit todo."
+MANUAL_TAB = " Step by step: Manual steps on the console's Setup tab, or aiguard-kit todo."
 ZID_NOTE = ("ZIdentity's API can't set passwords, so set one yourself, once: Administration > Authentication > "
             "Directory > Users, click {email}, and set a password. Then sign in to Client Connector on the traffic "
             "generator as {email}. Never paste the password into chat or email." + MANUAL_TAB)

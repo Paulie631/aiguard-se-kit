@@ -26,7 +26,7 @@ def versions():
 
 def stamped(text, kit, zia):
     """The title, a line naming the versions this copy describes, and the manual steps as an appendix (generated
-    from manual_steps.json, like the console's Manual steps tab)."""
+    from manual_steps.json, like Manual steps on the console's Setup tab)."""
     title, _, rest = text.partition("\n")
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_manual_doc

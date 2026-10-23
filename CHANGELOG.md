@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.20
+- **The setup path, in order.** Manual steps now show what the kit does in between (marked ⚙) and what each step
+  needs first. A step that can't be done yet says what it's waiting for, and the one to do now is marked **next**.
+  For example, on a ZIdentity tenant: set the password, build the generator, sign in, then the kit creates the
+  Client Connector profiles (Fix drift). `aiguard-kit todo` shows the same path.
+- **Manual steps moved under Setup.** They're part of getting set up, so they now sit on the Setup tab below the
+  wizard (the Setup tab shows how many are open, and the wizard links to them) instead of a tab of their own. Step 1
+  also names the current OneAPI menu path.
+
 ## 1.8.19
 - **Manual steps, in one place.** Everything the kit can't do through Zscaler's APIs (setting a ZIdentity
   password, the Internet & SaaS entitlement, Client Connector profiles when the API refuses them, Store

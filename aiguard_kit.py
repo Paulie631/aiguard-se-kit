@@ -55,7 +55,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.19"
+VERSION = "1.8.20"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -2297,7 +2297,7 @@ def cmd_teardown():
 
 # ---------------------------------------------------------------- status
 # ---------------------------------------------------------------- manual steps
-# What the kit can't do through Zscaler's APIs, from manual_steps.json: shown in the console's Manual steps tab, by
+# What the kit can't do through Zscaler's APIs, from manual_steps.json: shown in Manual steps on the console's Setup tab, by
 # `aiguard-kit todo`, in demo readiness, in diagnostics and in MANUAL-STEPS.md / the deployment guide.
 MANUAL_FILE = "manual_steps.json"
 
@@ -2327,11 +2327,15 @@ def manual_applies(cond, cfg):
     z = cfg.get("zia") or {}
     made = z.get("created_user") or {}
     zia_on = bool(z.get("state") or z.get("users") or made)
+    zcc_manual = zia_on and (bool(z.get("zcc_api_refused")) or (bool(z.get("users")) and not made))
     return {"always": True, "docs": False,
             "aiguard": bool(cfg.get("state", {}).get("apps")),
+            # the AI Guard path: in the AI Guard kit, unless only the ZIA demo is being set up
+            "aiguard-kit": not EDITION and (bool(cfg.get("state", {}).get("apps")) or not zia_on),
             "zia": zia_on,
             "zia-zidentity-user": made.get("via") == "zidentity",
-            "zia-zcc-manual": zia_on and (bool(z.get("zcc_api_refused")) or (bool(z.get("users")) and not made)),
+            "zia-zcc-manual": zcc_manual,
+            "zia-zcc-auto": zia_on and not zcc_manual,
             "zia-aws": bool(z.get("aws"))}.get(cond, False)
 
 
@@ -2342,7 +2346,20 @@ def manual_check(cid, cfg, zia_tenant=None):
     if cid == "oneapi-saved":
         saved = bool(cfg.get("client_id")) and kc_has("oneapi-client-secret")
         return ("done" if saved else "todo"), ("client and secret saved on this computer" if saved else "not saved yet")
-    if cid not in ("zia-entitled", "zcc-profiles") or zia_tenant is None:
+    if cid == "kit-aiguard":
+        st = cfg.get("state", {})
+        return ("done", f"{len(st.get('apps', {}))} apps") if st.get("apps") and st.get("policy_id") else ("todo", "")
+    if cid == "kit-zia-user":
+        users = z.get("users") or []
+        return ("done", ", ".join(u.get("email") or u.get("name", "") for u in users)) if users else ("todo", "")
+    if cid == "kit-zia-policy":
+        state = z.get("state") or {}
+        return ("done", f"{state.get('rules', 0)} rules") if state.get("set_up") else ("todo", "")
+    if cid not in ("zia-entitled", "zcc-profiles"):
+        return None, ""
+    if zia_tenant is None:   # offline: what the last setup recorded
+        if cid == "zcc-profiles" and ((z.get("state") or {}).get("client_connector") or {}).get("app_profile"):
+            return "done", "created by setup"
         return None, ""
     zm = product("zia")
     try:
@@ -2364,7 +2381,8 @@ def manual_check(cid, cfg, zia_tenant=None):
 
 
 def manual_status(cfg, check=True, zia_tenant=None):
-    """The manual steps that apply to this tenant, each with its status: done, todo or reminder."""
+    """The steps that apply to this tenant, in order: yours (manual) and the kit's, each with a status:
+    done, todo, waiting (a step it needs isn't done yet) or reminder. The first step that can be done now is next."""
     data = load_manual()
     ctx = manual_context(cfg)
     marks = cfg.get("manual_done") or {}
@@ -2376,15 +2394,20 @@ def manual_status(cfg, check=True, zia_tenant=None):
     for st in data["steps"]:
         if not manual_applies(st["applies"], cfg):
             continue
-        item = {k: st[k] for k in ("id", "stage", "title", "why", "help", "confirmed")}
+        item = {k: st.get(k) for k in ("id", "stage", "title", "why", "help", "confirmed", "who", "action")}
         item["stage_label"] = data["stages"].get(st["stage"], st["stage"])
         item["steps"] = [x.format_map(Keep(ctx)) for x in st["steps"]]
-        item["can_check"] = st.get("check") not in (None, "reminder")
+        item["then"] = st.get("then", "").format_map(Keep(ctx))
+        item["needs"] = st.get("needs", [])
+        item["can_check"] = st["who"] == "you" and st.get("check") not in (None, "reminder")
+        item["waiting_for"], item["next"] = [], False
         if st.get("check") == "reminder":
-            item.update(status="reminder", how="", detail="each demo")
+            item.update(status="reminder", how="", detail="each demo", marked=False)
             out.append(item)
             continue
-        state, detail = manual_check(st.get("check"), cfg, zia_tenant) if check and st.get("check") else (None, "")
+        state, detail = manual_check(st.get("check"), cfg, zia_tenant if check else None) if st.get("check") else (None, "")
+        if state is None and st["who"] == "kit":
+            state = "todo"
         if state is None:
             state = "done" if st["id"] in marks else "todo"
             how = "marked" if st["id"] in marks else ""
@@ -2393,7 +2416,31 @@ def manual_status(cfg, check=True, zia_tenant=None):
             how = "checked"
         item.update(status=state, how=how, detail=detail, marked=st["id"] in marks)
         out.append(item)
+    by_id = {i["id"]: i for i in out}
+    defs = {st["id"]: st for st in data["steps"]}
+    for i in out:   # a step waits for what it needs; a need that doesn't apply here counts as done
+        if i["status"] != "todo":
+            continue
+        for need in i["needs"]:
+            nid, _, cond = need.partition("?")
+            if cond and not manual_applies(cond, cfg):
+                continue
+            dep = by_id.get(nid)
+            if dep and dep["status"] not in ("done", "reminder"):
+                i["waiting_for"].append(dep["title"])
+            elif not dep and nid in defs and manual_applies(defs[nid]["applies"], cfg):
+                i["waiting_for"].append(defs[nid]["title"])
+        if i["waiting_for"]:
+            i["status"] = "waiting"
+    nxt = next((i for i in out if i["status"] == "todo"), None)
+    if nxt:
+        nxt["next"] = True
     return out
+
+
+def manual_open(items):
+    """Your own (manual) steps still to do, ready or waiting."""
+    return [i for i in items if i["who"] == "you" and i["status"] in ("todo", "waiting")]
 
 
 def manual_mark(cfg, sid, done=True):
@@ -2421,27 +2468,40 @@ def cmd_todo():
         if opt(flag):
             manual_mark(cfg, opt(flag), done)
             ok(f"{'Marked' if done else 'Unmarked'} '{opt(flag)}'")
-    head("Manual steps (what the kit can't do through the API)")
+    head("Setup path: your manual steps and what the kit does")
     items = manual_status(cfg, zia_tenant=zia_tenant_for(cfg))
     stage = None
     for it in items:
         if it["stage_label"] != stage:
             stage = it["stage_label"]
             print(f"\n  {C['b']}{stage}{C['x']}")
-        mark = {"done": f"{C['g']}✓{C['x']}", "todo": f"{C['y']}!{C['x']}", "reminder": "·"}[it["status"]]
-        print(f"  {mark} {it['title']}  {C['d']}[{it['id']}]{(' ' + it['detail']) if it['detail'] else ''}{C['x']}")
-        if it["status"] != "done":
+        mark = {"done": f"{C['g']}✓{C['x']}", "todo": f"{C['y']}!{C['x']}", "waiting": f"{C['d']}…{C['x']}",
+                "reminder": "·"}[it["status"]]
+        who = "" if it["who"] == "you" else f"{C['d']}(kit){C['x']} "
+        nxt = f"  {C['y']}← next{C['x']}" if it["next"] else ""
+        print(f"  {mark} {who}{it['title']}  {C['d']}[{it['id']}]{(' ' + it['detail']) if it['detail'] else ''}{C['x']}{nxt}")
+        if it["status"] == "waiting":
+            print(f"      {C['d']}Waiting for: {'; '.join(it['waiting_for'])}{C['x']}")
+            continue
+        if it["status"] == "done":
+            continue
+        if it["who"] == "kit":
             print(f"      {C['d']}{it['why']}{C['x']}")
-            for n, line in enumerate(it["steps"], 1):
-                print(f"      {n}. {re.sub(r'[*`]', '', line)}")
-            for h in it["help"]:
-                print(f"      Zscaler Help: {h['title']} - {h['url']}")
-            if not it["confirmed"]:
-                print(f"      {C['d']}(menu names not yet confirmed against a live console: tell the kit owner if they differ){C['x']}")
-            if not it["can_check"] and it["status"] == "todo":
-                print(f"      When it's done: aiguard-kit todo --done {it['id']}")
-    open_ = [i for i in items if i["status"] == "todo"]
-    head("Nothing left to do by hand" if not open_ else f"{len(open_)} step{'s' if len(open_) > 1 else ''} to do by hand")
+            print(f"      Start it: {re.sub(r'[*`]', '', it['action'] or '')}")
+            continue
+        print(f"      {C['d']}{it['why']}{C['x']}")
+        for n, line in enumerate(it["steps"], 1):
+            print(f"      {n}. {re.sub(r'[*`]', '', line)}")
+        if it["then"]:
+            print(f"      Then: {re.sub(r'[*`]', '', it['then'])}")
+        for h in it["help"]:
+            print(f"      Zscaler Help: {h['title']} - {h['url']}")
+        if not it["confirmed"]:
+            print(f"      {C['d']}(menu names not yet confirmed against a live console: tell the kit owner if they differ){C['x']}")
+        if not it["can_check"] and it["status"] == "todo":
+            print(f"      When it's done: aiguard-kit todo --done {it['id']}")
+    open_ = manual_open(items)
+    head("Nothing left to do by hand" if not open_ else f"{len(open_)} manual step{'s' if len(open_) > 1 else ''} to do")
 
 
 def readiness(cfg):
@@ -2470,11 +2530,11 @@ def readiness(cfg):
         creds = bool(cfg.get("client_id")) and kc_has("oneapi-client-secret")
         out += zm.ready_checks(cfg, (lambda: zm.connect(cfg)) if creds else None)
     try:
-        open_ = [i["title"] for i in manual_status(cfg, zia_tenant=zia_tenant_for(cfg)) if i["status"] == "todo"]
+        open_ = [i["title"] for i in manual_open(manual_status(cfg, zia_tenant=zia_tenant_for(cfg)))]
         if out or open_:
             out.append({"id": "ready-manual", "label": "Manual steps", "status": "warn" if open_ else "ok",
                         "detail": "; ".join(open_) if open_ else "nothing left to do by hand",
-                        "fix": "Console: Manual steps tab, or aiguard-kit todo." if open_ else ""})
+                        "fix": "Console: Setup tab > Manual steps, or aiguard-kit todo." if open_ else ""})
     except Exception as e:
         vlog(f"manual steps in readiness: {e}")
     if not out:
