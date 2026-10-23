@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.17
 - **No terminal window.** The desktop shortcut now starts the console in the background and opens it in the
   browser (Mac: no Terminal; Windows: no command window). Clicking it again brings back the running console instead
   of starting a second one, and the new **Quit** button stops it. `aiguard-kit gui` in a terminal works as before.
