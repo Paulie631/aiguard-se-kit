@@ -1,6 +1,6 @@
 # Manual steps
 
-What the kit can't do through Zscaler's APIs, and the clicks to do it. The console's **Manual steps** tab and `aiguard-kit todo` show only the steps that apply to your tenant, filled in with your names, and check the ones the kit can verify.
+What the kit can't do through Zscaler's APIs, and the clicks to do it. **Manual steps** on the console's Setup tab and `aiguard-kit todo` show only the steps that apply to your tenant, filled in with your names, and check the ones the kit can verify.
 
 > Steps marked **menu names not yet confirmed** haven't been checked against a live console. If yours differ, tell the kit owner (or update `manual_steps.json` and regenerate this file).
 
@@ -18,7 +18,7 @@ What the kit can't do through Zscaler's APIs, and the clicks to do it. The conso
 4. Copy the **Client ID** from the list, and note your vanity domain: the `acme` in `acme.zslogin.net`.
 5. In the kit's console, **Setup > Connect**: enter the vanity domain, client ID and secret, then **Save and test**.
 
-**Done when:** the kit checks it (Check in the Manual steps tab).
+**Done when:** the kit checks it (Check under Setup > Manual steps).
 
 *Menu path checked 2026-10 · id `oneapi-client`*
 
@@ -51,7 +51,7 @@ What the kit can't do through Zscaler's APIs, and the clicks to do it. The conso
 
 Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified/assigning-entitlements-users) · [Managing entitlements](https://help.zscaler.com/unified/managing-entitlements)
 
-**Done when:** the kit checks it (Check in the Manual steps tab).
+**Done when:** the kit checks it (Check under Setup > Manual steps).
 
 *Menu names not yet confirmed · id `zid-entitlement`*
 
@@ -67,7 +67,7 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 4. Make sure no broader Windows app profile (for example one for all users) sits above it in the order.
 5. In the kit, click **Check for drift**, then **Fix drift**: it finds both profiles by name and uses them as they are.
 
-**Done when:** the kit checks it (Check in the Manual steps tab).
+**Done when:** the kit checks it (Check under Setup > Manual steps).
 
 *Menu names not yet confirmed · id `zcc-profiles`*
 

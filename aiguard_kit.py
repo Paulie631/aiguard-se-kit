@@ -2297,7 +2297,7 @@ def cmd_teardown():
 
 # ---------------------------------------------------------------- status
 # ---------------------------------------------------------------- manual steps
-# What the kit can't do through Zscaler's APIs, from manual_steps.json: shown in the console's Manual steps tab, by
+# What the kit can't do through Zscaler's APIs, from manual_steps.json: shown in Manual steps on the console's Setup tab, by
 # `aiguard-kit todo`, in demo readiness, in diagnostics and in MANUAL-STEPS.md / the deployment guide.
 MANUAL_FILE = "manual_steps.json"
 
@@ -2474,7 +2474,7 @@ def readiness(cfg):
         if out or open_:
             out.append({"id": "ready-manual", "label": "Manual steps", "status": "warn" if open_ else "ok",
                         "detail": "; ".join(open_) if open_ else "nothing left to do by hand",
-                        "fix": "Console: Manual steps tab, or aiguard-kit todo." if open_ else ""})
+                        "fix": "Console: Setup tab > Manual steps, or aiguard-kit todo." if open_ else ""})
     except Exception as e:
         vlog(f"manual steps in readiness: {e}")
     if not out:

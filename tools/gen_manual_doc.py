@@ -1,4 +1,4 @@
-"""Generates MANUAL-STEPS.md from manual_steps.json (the console's Manual steps tab and `aiguard-kit todo` use the
+"""Generates MANUAL-STEPS.md from manual_steps.json (Manual steps on the console's Setup tab and `aiguard-kit todo` use the
 same file), and the deployment guide's appendix (tools/build_guide.py calls render()).
 
   python tools/gen_manual_doc.py          write MANUAL-STEPS.md
@@ -25,7 +25,7 @@ def render(level=1):
     h = json.loads((ROOT / "manual_steps.json").read_text(encoding="utf-8"))
     hd = "#" * level
     out = [f"{hd} Manual steps", "",
-           "What the kit can't do through Zscaler's APIs, and the clicks to do it. The console's **Manual steps** tab "
+           "What the kit can't do through Zscaler's APIs, and the clicks to do it. **Manual steps** on the console's Setup tab "
            "and `aiguard-kit todo` show only the steps that apply to your tenant, filled in with your names, and check "
            "the ones the kit can verify.", "",
            "> Steps marked **menu names not yet confirmed** haven't been checked against a live console. If yours "
@@ -43,7 +43,7 @@ def render(level=1):
             if s["help"]:
                 out += ["Zscaler Help: " + " · ".join(f"[{x['title']}]({x['url']})" for x in s["help"]), ""]
             check = s.get("check")
-            out += [("**Done when:** the kit checks it (Check in the Manual steps tab)." if check not in (None, "reminder")
+            out += [("**Done when:** the kit checks it (Check under Setup > Manual steps)." if check not in (None, "reminder")
                      else "**Each demo.**" if check == "reminder"
                      else f"**Done when:** you mark it done (`aiguard-kit todo --done {s['id']}`)."),
                     "", f"*{'Menu path checked ' + s['confirmed'] if s['confirmed'] else 'Menu names not yet confirmed'}"

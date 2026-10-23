@@ -195,11 +195,10 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <button class="upd" id="quit" title="Stop the console on this computer (open it again from the desktop shortcut)">Quit</button>
 </header>
 <nav class="tabs" id="tabs">
-  <button data-t="setup">Setup</button>
+  <button data-t="setup">Setup<span class="tabcount" id="mancount" style="display:none;background:var(--warn)" title="Manual steps to do"></span></button>
   <button data-t="runner" class="on">Test runner</button>
   <button data-t="demo">Guided demo</button>
   <button data-t="packs">Test packs</button>
-  <button data-t="manual" title="What the kit can't do through the API, step by step">Manual steps<span class="tabcount" id="mancount" style="display:none;background:var(--warn)"></span></button>
   <button data-t="logs">Logs<span class="tabcount" id="logerr" style="display:none"></span></button>
   <button data-t="zia">Internet Access (ZIA)</button>
 </nav>
@@ -214,8 +213,15 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 <div class="wrap stack">
   <div class="wiz">
     <div class="panel"><ol class="steps" id="wsteps"></ol>
-      <div class="hint">Nothing changes in your tenant until step 5. Everything created is named <code id="wprefix">SE-Demo:</code> and can be removed below.</div></div>
+      <div class="hint">Nothing changes in your tenant until step 5. Everything created is named <code id="wprefix">SE-Demo:</code> and can be removed below.</div>
+      <a href="#manpanel" id="manjump" class="hint" style="display:none;color:var(--warn);text-decoration:none;font-weight:600"></a></div>
     <div class="panel stage" id="wstage"></div>
+  </div>
+<div class="panel" id="manpanel" style="max-width:1100px">
+    <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px"><h2 style="margin:0">Manual steps</h2>
+      <div class="row" style="gap:10px"><label class="muted" style="font-size:13px"><input type="checkbox" id="mandone"> Show finished steps</label><button id="mancheck">Check again</button></div></div>
+    <p class="muted" style="font-size:13px;margin:6px 0 12px">What the kit can't do through Zscaler's APIs, for this tenant only, with the clicks to do it. Steps with <b>Check</b> are verified by the kit; for the rest, click <b>Mark done</b> when you've done them. Open steps also show in Demo readiness. Menu names marked <i>not yet confirmed</i> haven't been checked against a live console: if yours differ, tell the kit owner.</p>
+    <div id="manlist"><div class="muted">Loading…</div></div>
   </div>
   <div class="panel danger" style="max-width:1100px">
     <h2>Remove the demo</h2>
@@ -388,17 +394,6 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   </div>
 </div>
 </div>
-<div class="view" id="v-manual">
-<div class="wrap stack">
-  <div class="panel">
-    <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px"><h2 style="margin:0">Manual steps</h2>
-      <div class="row" style="gap:10px"><label class="muted" style="font-size:13px"><input type="checkbox" id="mandone"> Show finished steps</label><button id="mancheck">Check again</button></div></div>
-    <p class="muted" style="font-size:13px;margin:6px 0 12px">What the kit can't do through Zscaler's APIs, for this tenant only, with the clicks to do it. Steps with <b>Check</b> are verified by the kit; for the rest, click <b>Mark done</b> when you've done them. Open steps also show in Demo readiness. Menu names marked <i>not yet confirmed</i> haven't been checked against a live console: if yours differ, tell the kit owner.</p>
-    <div id="manlist"><div class="muted">Loading…</div></div>
-  </div>
-</div>
-</div>
-
 <div class="view" id="v-logs">
 <div class="wrap stack">
   <div class="panel">
@@ -467,6 +462,7 @@ let MAN=[];
 function mdInline(t){return esc(t).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>")}
 function drawManual(){const show=$("#mandone").checked, el=$("#manlist");
   const open=MAN.filter(i=>i.status=="todo").length, b=$("#mancount");b.style.display=open?"inline-block":"none";b.textContent=open;
+  const j=$("#manjump");j.style.display=open?"block":"none";j.textContent=`${open} manual step${open==1?"":"s"} to do ↓`;
   const items=MAN.filter(i=>show||i.status!="done");
   if(!MAN.length){el.innerHTML='<div class="muted">Nothing to do by hand for this setup yet.</div>';return}
   if(!items.length){el.innerHTML=`<div class="muted">✓ Nothing left to do by hand (${MAN.length} step${MAN.length==1?"":"s"} finished). Tick <b>Show finished steps</b> to see them.</div>`;return}
@@ -485,7 +481,7 @@ async function loadManual(check){if(check)$("#manlist").insertAdjacentHTML("afte
   try{MAN=(await api("/api/manual"+(check?"?check=1":""))).steps||[];drawManual()}catch(e){$("#manlist").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}}
 async function markManual(id,done){try{await api("/api/manual/mark",{id,done});await loadManual(false)}catch(e){alert(e.message)}}
 $("#mandone").onchange=drawManual;$("#mancheck").onclick=()=>loadManual(true);
-$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup")wizard();if(b.dataset.t=="zia")zia();if(b.dataset.t=="manual")loadManual(true)});
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup"){wizard();loadManual(true)}if(b.dataset.t=="zia")zia()});
 
 /* ---------- state ---------- */
 async function loadState(){
@@ -1061,7 +1057,7 @@ async function wizard(){
   if(W.step==0){
     W.setup=await api("/api/setup/state");$("#wprefix").textContent=W.setup.prefix+":";
     st.innerHTML=`<div class="kicker">STEP 1 OF 5</div><h3>Connect to your tenant</h3>
-      <p class="muted">Use a OneAPI client from ZIdentity → Integration → API Clients with full AI Guard access. The secret goes straight to your keychain.</p>
+      <p class="muted">Use a OneAPI client from <b>Administration &gt; API &gt; OneAPI &gt; API Clients</b> (step by step: <a href="#manpanel">Manual steps</a> below). The secret goes straight to your keychain.</p>
       ${W.setup.saved?`<div class="notice good" style="display:block">Saved: client ${esc(W.setup.client_id)} on <b>${esc(W.setup.vanity)}</b></div><div class="row" style="gap:10px;margin-bottom:18px"><button class="primary" id="wuse">Continue with these</button><button id="wchange">Use different credentials</button></div>`:""}
       <div id="wform" style="${W.setup.saved?"display:none":""}">
         ${W.setup.claude_desktop?`<div class="row" style="gap:10px;margin-bottom:14px"><button id="wcd">Use the credentials in Claude Desktop</button><span class="muted" style="font-size:12px">found on this computer</span></div>`:""}

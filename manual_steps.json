@@ -1,5 +1,5 @@
 {
- "_comment": "Everything the kit can't do through Zscaler's APIs, in one place. Source for the console's Manual steps tab, `aiguard-kit todo`, MANUAL-STEPS.md and the deployment guide's appendix (tools/gen_manual_doc.py). 'applies' says when a step shows for a tenant (docs: only in the docs). 'check' names a test the kit runs to see whether it's done; without one, the SE marks it done. 'confirmed': the click path was checked against a real console on that date; false means it hasn't been yet.",
+ "_comment": "Everything the kit can't do through Zscaler's APIs, in one place. Source for Manual steps on the console's Setup tab, `aiguard-kit todo`, MANUAL-STEPS.md and the deployment guide's appendix (tools/gen_manual_doc.py). 'applies' says when a step shows for a tenant (docs: only in the docs). 'check' names a test the kit runs to see whether it's done; without one, the SE marks it done. 'confirmed': the click path was checked against a real console on that date; false means it hasn't been yet.",
  "stages": {
   "before": "Before you start",
   "setup": "During setup",
