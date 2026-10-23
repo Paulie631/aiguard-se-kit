@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.19
 - **Manual steps, in one place.** Everything the kit can't do through Zscaler's APIs (setting a ZIdentity
   password, the Internet & SaaS entitlement, Client Connector profiles when the API refuses them, Store
   Prompts/Responses, building and signing in to the generator, and more) now lives in `manual_steps.json`. A new
