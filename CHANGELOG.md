@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.17
+- **No terminal window.** The desktop shortcut now starts the console in the background and opens it in the
+  browser (Mac: no Terminal; Windows: no command window). Clicking it again brings back the running console instead
+  of starting a second one, and the new **Quit** button stops it. `aiguard-kit gui` in a terminal works as before.
+- **Setup repair on a Mac: "Can't store password on keychain (-25244)".** macOS won't let the kit update a keychain
+  entry saved by an earlier Python (uv moves it on updates). The kit now replaces its own stale entry instead of
+  failing, and if even that fails, says exactly which entry to delete.
+- **Guided demo: Monitor / Block no longer disappears silently.** If the console couldn't read the AI Guard policy
+  (for example, no network when it started), the steps showed no switch and ran without changing the policy. The
+  step now says so with a **Retry** link, and opening the Guided demo tab reads the policy again.
+
 ## 1.8.16
 - **Missing ZIA entitlement:** the console's Fix line under the error now gives the entitlement steps instead of
   a generic hint.

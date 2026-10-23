@@ -591,10 +591,10 @@ def test_install_and_uninstall_mac_linux(env, monkeypatch, tmp_path, capsys):
     info = plistlib.loads((shortcut / "Contents/Info.plist").read_bytes())
     assert info["CFBundleName"] == "AI Guard Demo Console" and info["CFBundleIconFile"] == "icon"
     assert (shortcut / "Contents/Resources/icon.icns").read_bytes() == (ROOT / "assets/aiguard-icon.icns").read_bytes()
-    console = shortcut / "Contents/Resources/console.command"
-    assert f'exec "{app / "aiguard-kit"}" gui' in console.read_text() and console.stat().st_mode & 0o111
-    launch = shortcut / "Contents/MacOS/launch"
-    assert f'open -a Terminal "{console}"' in launch.read_text() and launch.stat().st_mode & 0o111
+    launch = shortcut / "Contents/MacOS/launch"   # starts the console in the background: no Terminal window
+    text = launch.read_text()
+    assert f'nohup "{app / "aiguard-kit"}" gui --background' in text and text.rstrip().endswith("&")
+    assert "open -a Terminal" not in text and launch.stat().st_mode & 0o111
     assert not legacy.exists()
     assert f'exec "{app / "aiguard-kit"}" "$@"' in (home / ".local/bin/aiguard-kit").read_text()
     # reinstalling keeps the previous copy for rollback
@@ -655,7 +655,8 @@ def test_install_windows_shortcuts_path_and_schedule(env, monkeypatch, tmp_path)
     app = home / ".aiguard-se-kit" / "app"
     assert (app / "aiguard-kit.cmd").exists() and not (app / "aiguard-kit").exists()
     assert (app / "Uninstall AI Guard Kit.cmd").exists() and not (app / "Uninstall AI Guard Kit.command").exists()
-    assert ("AI Guard Demo Console.lnk", "aiguard-kit.cmd", "gui", "aiguard-icon.ico") in shortcuts
+    assert ("AI Guard Demo Console.lnk", "conhost.exe", f'--headless "{app / "aiguard-kit.cmd"}" gui --background',
+            "aiguard-icon.ico") in shortcuts   # no terminal window
     assert ("Uninstall AI Guard Demo Kit.lnk", "Uninstall AI Guard Kit.cmd", "", None) in shortcuts
     assert path == [(str(app), None)]
     # the existing schedule now runs the installed copy
@@ -978,3 +979,67 @@ def test_deployment_guide_ships_and_is_stamped_with_the_version(tmp_path, monkey
     pkg = (root / "tools" / "package.py").read_text(encoding="utf-8")
     assert '"docs"]' in pkg
     assert "zslogin.net" in text and "SE-Demo Z-Tunnel 2.0" in text
+
+
+def test_keychain_entry_owned_by_an_older_python_is_replaced(monkeypatch, tmp_path):
+    """macOS -25244: the entry was saved by a previous Python (uv moved it), so it can't be updated in place. The kit
+    deletes its own stale entry and saves the new value instead of failing setup's repair."""
+    monkeypatch.setattr(sys, "argv", ["aiguard_kit.py", "setup"])
+    spec = importlib.util.spec_from_file_location("aiguard_kit_kc_test", ROOT / "aiguard_kit.py")
+    kit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kit)   # the real kc_set (load_kit swaps in a dict)
+    import keyring
+    store = {("aiguard-se-kit", "SE-Demo: Anthropic App:proxy"): "old"}
+    locked = {"on": True}
+
+    def set_pw(svc, user, pw):
+        if (svc, user) in store and locked["on"]:
+            raise Exception("Can't store password on keychain: (-25244, 'Unknown Error')")
+        store[(svc, user)] = pw
+
+    def del_pw(svc, user):
+        store.pop((svc, user), None)
+    monkeypatch.setattr(keyring, "set_password", set_pw)
+    monkeypatch.setattr(keyring, "delete_password", del_pw)
+    monkeypatch.setattr(keyring, "get_password", lambda s, u: store.get((s, u)))
+    kit.kc_set("SE-Demo: Anthropic App:proxy", "new-key-123")
+    assert store[("aiguard-se-kit", "SE-Demo: Anthropic App:proxy")] == "new-key-123"
+    # if even a fresh entry can't be saved, the error says exactly which entry to delete
+    monkeypatch.setattr(keyring, "set_password", lambda *a: (_ for _ in ()).throw(Exception("(-25244, 'Unknown Error')")))
+    with pytest.raises(kit.KitError, match="delete-generic-password -s aiguard-se-kit"):
+        kit.kc_set("SE-Demo: Anthropic App:proxy", "x")
+
+
+def test_background_console_reuses_a_running_one_and_quits_from_the_button(monkeypatch, tmp_path):
+    """The shortcut starts the console with no terminal window. Clicking it again opens the running console instead
+    of starting a second one, and the Quit button stops it (there is no window to close)."""
+    import socket
+    import threading
+    import time
+    import urllib.request
+    kit = load_kit(monkeypatch, tmp_path, ["gui", "--background", "--no-browser"])
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    monkeypatch.setattr(kit, "ARGS", ["gui", "--background", "--no-browser", "--port", str(port)])
+    monkeypatch.setattr(kit, "update_check", lambda: None)
+    t = threading.Thread(target=kit.cmd_gui, daemon=True)
+    t.start()
+    for _ in range(50):
+        if kit.console_file().exists():
+            break
+        time.sleep(0.1)
+    assert json.loads(kit.console_file().read_text())["port"] == port
+    assert kit.running_console() == f"http://127.0.0.1:{port}/"
+    opened = []
+    import webbrowser
+    monkeypatch.setattr(webbrowser, "open", lambda u: opened.append(u))
+    kit.cmd_gui()                       # second click: no new server, just the browser
+    assert opened == [f"http://127.0.0.1:{port}/"]
+    html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+    token = re.search(r'TOKEN\s*=\s*"([^"]+)"', html) or re.search(r'TOKEN="([^"]+)"', html)
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/quit", data=b"{}", method="POST",
+                                 headers={"X-Kit-Token": token.group(1), "Content-Type": "application/json"})
+    assert json.loads(urllib.request.urlopen(req).read())["ok"]
+    t.join(5)
+    assert not t.is_alive() and not kit.console_file().exists() and kit.running_console() is None

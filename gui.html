@@ -192,6 +192,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
     <span class="state" id="polstate">checking…</span>
   </div>
   <a id="console" target="_blank" rel="noopener">Insights ↗</a>
+  <button class="upd" id="quit" title="Stop the console on this computer (open it again from the desktop shortcut)">Quit</button>
 </header>
 <nav class="tabs" id="tabs">
   <button data-t="setup">Setup</button>
@@ -434,6 +435,10 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 <script>
 const TOKEN="__KIT_TOKEN__";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+document.addEventListener("DOMContentLoaded",()=>{const q=document.getElementById("quit");if(q)q.onclick=async()=>{
+  if(!confirm("Stop the console? Scheduled traffic keeps running. Open it again from the desktop shortcut."))return;
+  try{await api("/api/quit",{})}catch(e){}
+  document.body.innerHTML='<div style="padding:60px;font:16px system-ui;text-align:center">The console is stopped. Open it again from the desktop shortcut (or run <code>aiguard-kit gui</code>). You can close this tab.</div>'}});
 const api=(p,b)=>fetch(p,{method:b?"POST":"GET",headers:{"X-Kit-Token":TOKEN,"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error||r.statusText)+(j.fix?" — "+j.fix:""));return j});
 let S={lib:null,apps:[],sel:new Set(),results:[],job:null,mode:"detect",panels:{},policy:null,story:null,step:0,done:new Set(),choice:{}};
 const clean=t=>String(t??"").replace(/\{_\}/g,"").replace(/\{COMPETITOR\}/g,S.competitor||"Palo Alto");
@@ -444,7 +449,7 @@ const segVal=id=>($(`#${id} button.on`)||{}).dataset?.v;
 function note(h,good){const n=$("#notice");n.innerHTML=h;n.classList.toggle("good",!!good);n.style.display=h?"block":"none"}
 
 /* ---------- tabs ---------- */
-$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo")drawStage();if(b.dataset.t=="setup")wizard();if(b.dataset.t=="zia")zia()});
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup")wizard();if(b.dataset.t=="zia")zia()});
 
 /* ---------- state ---------- */
 async function loadState(){
@@ -794,6 +799,8 @@ function drawStage(){
   if(last)$("#srecap").onclick=drawRecap;
   if(show&&s.link)$("#slink").onclick=()=>window.open(s.link,"_blank","noopener");
   $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=show?markShown:runStep;
+  if($("#polretry"))$("#polretry").onclick=async e=>{e.preventDefault();$("#polwarn").firstChild.textContent="Reading the policy… ";
+    await loadPolicy();drawStage();if(S.policy!=null)preApply(0)};
   $$("#smode button").forEach(b=>b.onclick=()=>{S.choice[S.step]=b.dataset.v;
     $$("#smode button").forEach(x=>x.classList.toggle("on",x===b));$("#skpol").innerHTML=kickPol();drawSteps();applyNote();preApply(0)});
   applyNote();preApply();
@@ -817,7 +824,10 @@ function drawSteps(){
   $("#steps").innerHTML=S.story.steps.map((s,i)=>{const m=stepMode(i);return `<li data-i="${i}" class="${i==S.step?"on":""} ${S.done.has(i)?"done":""}"><span class="num">${S.done.has(i)?"✓":i+1}</span><span>${esc(s.title)}${m?`<span class="polchip ${m=="monitor"?"detect":"block"}">${PLABEL[m]}</span>`:""}</span></li>`}).join("");
   $$("#steps li").forEach(li=>li.onclick=()=>{S.step=+li.dataset.i;drawStage()})}
 function canSwitch(){return S.policy!=null&&S.pol?.switchable!==false}
-function modeSwitch(s){const bl=blockLevel(s);if(!canSwitch()||!bl)return"";const cur=stepMode(S.step)||S.policy;
+function modeSwitch(s){const bl=blockLevel(s);
+  if(bl&&S.policy==null)   // the policy couldn't be read (e.g. no network when the console started): say so, offer a retry
+    return `<span class="muted" id="polwarn" style="font-size:12px">Monitor / Block unavailable: couldn't read the AI Guard policy. <a href="#" id="polretry">Retry</a></span>`;
+  if(!canSwitch()||!bl)return"";const cur=stepMode(S.step)||S.policy;
   return `<div class="seg" id="smode" title="The policy for this step. Run it in Monitor, flip to Block, and run it again."><button data-v="monitor" class="${cur=="monitor"?"on":""}">Monitor</button><button data-v="${bl}" class="${cur&&cur!="monitor"?"on":""}" title="Switches the policy to ${esc(PLABEL[bl])}">Block</button></div>`}
 function applyLeft(){return Math.max(0,Math.ceil(((S.polChanged||0)+APPLY_MS-Date.now())/1000))}
 function applyNote(){   // the countdown lives on the Run button: "Run step · 13s" while the policy applies
