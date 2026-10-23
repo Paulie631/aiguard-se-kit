@@ -18,13 +18,13 @@ KIT_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "te
 
 
 def check():
-    manifest = json.loads((SRC / ".claude-plugin" / "plugin.json").read_text())
+    manifest = json.loads((SRC / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert re.fullmatch(r"[a-z0-9-]+", manifest["name"]), "plugin name must be kebab-case"
     skills = list((SRC / "skills").glob("*/SKILL.md"))
     assert skills, "no skills found"
     for s in skills:
-        assert s.read_text().startswith("---\nname: "), f"{s} needs YAML frontmatter"
-    kit_version = re.search(r'VERSION = "([^"]+)"', (ROOT / "aiguard_kit.py").read_text()).group(1)
+        assert s.read_text(encoding="utf-8").startswith("---\nname: "), f"{s} needs YAML frontmatter"
+    kit_version = re.search(r'VERSION = "([^"]+)"', (ROOT / "aiguard_kit.py").read_text(encoding="utf-8")).group(1)
     assert manifest["version"] == kit_version, f"plugin {manifest['version']} != kit {kit_version}"
     return manifest
 
