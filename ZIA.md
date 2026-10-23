@@ -160,6 +160,21 @@ The simplest generator is a Windows instance in an AWS account you can use for d
 
 **Cost:** roughly what a Windows t3.medium costs in your region. The weekday schedule keeps it to working hours.
 
+### On CloudShare or any other Windows VM: one setup script
+
+If you build generators in CloudShare (or a lab VM, or another cloud), the kit gives you the same setup as the AWS template as a PowerShell script. The kit can't create the CloudShare machine for you (that would need CloudShare API access); you create the VM, the script does the rest.
+
+1. **Create the VM.** Windows Server 2022 (or Windows 10/11), with direct internet access: no corporate proxy in front of it and no other tenant's Client Connector on it.
+2. **Write the script.** On your admin machine, after `zia setup` (and after the Client Connector profiles exist), run `./aiguard-kit zia script`, or use **Download setup script (CloudShare / any Windows VM)** on the console's ZIA tab. It's saved to `~/Downloads/se-demo-zia-generator-setup.ps1`, filled in for your tenant. The installer field works as for AWS (the kit's verified copy by default, an https URL, or `none`); `s3://` only works on AWS.
+3. **Run it on the VM.** Copy the file to the VM (in CloudShare, drag it into the VM window or use its file transfer), open PowerShell **as Administrator** and run `powershell -ExecutionPolicy Bypass -File .\se-demo-zia-generator-setup.ps1`, or paste the whole file into that window. Progress goes to `C:\SE-Demo\setup.log`; it takes about 10 minutes.
+4. **Sign in once** to Client Connector as the test user, as in step 3 of the AWS steps. Traffic rounds start every 30 minutes once Client Connector is signed in, and only while the VM is running (CloudShare suspends idle environments by its own policy).
+
+**Removing it:** delete the CloudShare environment (or the VM). `zia teardown` removes the ZIA side.
+
+### Client Connector's app profile at install (policy token)
+
+When the kit's Windows app profile exists (`SE-Demo traffic generator`, made by setup or by hand under that name), both the AWS template and the setup script pass its **policy token** to the Client Connector installer. Client Connector then downloads that profile at install, so Z-Tunnel 2.0 and the Zscaler root certificate are in place before anyone signs in. You still sign in once as the test user: the token picks the profile, it doesn't sign anyone in. Write the template or script **after** the profiles exist; if they don't yet, the profile arrives at sign-in as before.
+
 ### What `zia check` proves
 
 | Check | How | If it fails |

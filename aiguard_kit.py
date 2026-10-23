@@ -30,6 +30,7 @@ Internet Access (ZIA), see ZIA.md:
   ./aiguard-kit zia status     list the kit's ZIA objects;  zia teardown removes them and activates
   ./aiguard-kit zia password   show the test user's sign-in for Client Connector (this computer only)
   ./aiguard-kit zia aws        write a CloudFormation template for a generator instance on AWS (--zcc-url s3://bucket/key or URL)
+  ./aiguard-kit zia script     write a PowerShell setup script for a generator on CloudShare or any Windows VM
   ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
   ./aiguard-kit zia check      on the traffic generator machine: is traffic reaching the demo tenant? (no keys needed)
   ./aiguard-kit zia traffic    on the generator: one round of demo traffic (--types web,saas,genai,threats,dlp,files,dns,ports
@@ -53,7 +54,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.17"
+VERSION = "1.8.18"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -2843,6 +2844,11 @@ def cmd_gui():
                 return self._send(200, {"id": jid})
             if path == "/api/zia/password":   # answered directly, never through a job log
                 return self._send(200, product("zia").api_password(c))
+            if path == "/api/zia/script":
+                try:
+                    return self._send(200, product("zia").api_script(c, body, lambda: zia_tenant(c)))
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": product("zia").zhint(e)})
             if path == "/api/zia/aws":
                 try:
                     return self._send(200, product("zia").api_aws(c, body, lambda: zia_tenant(c)))
@@ -2956,7 +2962,7 @@ def cmd_gui():
 # version, install folder, shortcut, command name and update channel, so editions never replace each other.
 # Credentials, keychain and settings stay shared in ~/.aiguard-se-kit.
 EDITION = None
-EDITION_COMMANDS = {"zia": {"setup", "preflight", "status", "teardown", "dashboards", "password", "aws", "check",
+EDITION_COMMANDS = {"zia": {"setup", "preflight", "status", "teardown", "dashboards", "password", "aws", "script", "check",
                             "traffic", "schedule", "ready"}}
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.18
+- **ZIA traffic generator on CloudShare (or any Windows VM).** `zia script`, or **Download setup script** on the ZIA
+  tab, writes a PowerShell script with the same setup as the AWS template: the verified Client Connector, the kit and
+  the traffic schedule. Run it once as Administrator on the VM, then sign in to Client Connector.
+- **Client Connector arrives with the kit's app profile.** The AWS template and the script pass the app profile's
+  policy token to the installer, so Z-Tunnel 2.0 and the Zscaler certificate are in place before anyone signs in.
+  You still sign in once as the test user.
+
 ## 1.8.17
 - **No terminal window.** The desktop shortcut now starts the console in the background and opens it in the
   browser (Mac: no Terminal; Windows: no command window). Clicking it again brings back the running console instead
