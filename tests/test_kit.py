@@ -978,3 +978,32 @@ def test_deployment_guide_ships_and_is_stamped_with_the_version(tmp_path, monkey
     pkg = (root / "tools" / "package.py").read_text(encoding="utf-8")
     assert '"docs"]' in pkg
     assert "zslogin.net" in text and "SE-Demo Z-Tunnel 2.0" in text
+
+
+def test_keychain_entry_owned_by_an_older_python_is_replaced(monkeypatch, tmp_path):
+    """macOS -25244: the entry was saved by a previous Python (uv moved it), so it can't be updated in place. The kit
+    deletes its own stale entry and saves the new value instead of failing setup's repair."""
+    monkeypatch.setattr(sys, "argv", ["aiguard_kit.py", "setup"])
+    spec = importlib.util.spec_from_file_location("aiguard_kit_kc_test", ROOT / "aiguard_kit.py")
+    kit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kit)   # the real kc_set (load_kit swaps in a dict)
+    import keyring
+    store = {("aiguard-se-kit", "SE-Demo: Anthropic App:proxy"): "old"}
+    locked = {"on": True}
+
+    def set_pw(svc, user, pw):
+        if (svc, user) in store and locked["on"]:
+            raise Exception("Can't store password on keychain: (-25244, 'Unknown Error')")
+        store[(svc, user)] = pw
+
+    def del_pw(svc, user):
+        store.pop((svc, user), None)
+    monkeypatch.setattr(keyring, "set_password", set_pw)
+    monkeypatch.setattr(keyring, "delete_password", del_pw)
+    monkeypatch.setattr(keyring, "get_password", lambda s, u: store.get((s, u)))
+    kit.kc_set("SE-Demo: Anthropic App:proxy", "new-key-123")
+    assert store[("aiguard-se-kit", "SE-Demo: Anthropic App:proxy")] == "new-key-123"
+    # if even a fresh entry can't be saved, the error says exactly which entry to delete
+    monkeypatch.setattr(keyring, "set_password", lambda *a: (_ for _ in ()).throw(Exception("(-25244, 'Unknown Error')")))
+    with pytest.raises(kit.KitError, match="delete-generic-password -s aiguard-se-kit"):
+        kit.kc_set("SE-Demo: Anthropic App:proxy", "x")

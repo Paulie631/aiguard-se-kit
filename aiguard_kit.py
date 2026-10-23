@@ -353,8 +353,27 @@ def kc_has(name):
 
 
 def kc_set(name, value):
+    """Saves a secret. macOS refuses to overwrite an entry another program created (-25244, errSecInvalidOwnerEdit):
+    the kit's Python changes path when uv updates it, so an entry saved by the old one can't be updated. The kit
+    then deletes its own stale entry and saves it fresh."""
     import keyring
-    keyring.set_password(KC, KC_NS + name, remember_secret(value))
+    try:
+        keyring.set_password(KC, KC_NS + name, remember_secret(value))
+        return
+    except Exception as e:
+        first = e
+    vlog(f"keychain: couldn't update '{name}' ({first}); replacing the entry")
+    try:
+        keyring.delete_password(KC, KC_NS + name)
+    except Exception as e:
+        vlog(f"keychain: delete '{name}': {e}")
+    try:
+        keyring.set_password(KC, KC_NS + name, remember_secret(value))
+    except Exception as e:
+        raise KitError(f"Couldn't save '{name}' to the keychain: {first}. " + (
+            f"In Keychain Access, search for '{KC}', delete the entry '{KC_NS + name}', then retry (or run: "
+            f"security delete-generic-password -s {KC} -a '{KC_NS + name}')." if not WINDOWS else
+            "Check Credential Manager > Windows Credentials, then retry.")) from e
 
 
 def kc_del(name):
