@@ -988,6 +988,7 @@ def test_keychain_entry_owned_by_an_older_python_is_replaced(monkeypatch, tmp_pa
     spec = importlib.util.spec_from_file_location("aiguard_kit_kc_test", ROOT / "aiguard_kit.py")
     kit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(kit)   # the real kc_set (load_kit swaps in a dict)
+    monkeypatch.setattr(kit, "WINDOWS", False)   # the Mac case (Windows shows Credential Manager advice instead)
     import keyring
     store = {("aiguard-se-kit", "SE-Demo: Anthropic App:proxy"): "old"}
     locked = {"on": True}
@@ -1025,10 +1026,11 @@ def test_background_console_reuses_a_running_one_and_quits_from_the_button(monke
     monkeypatch.setattr(kit, "update_check", lambda: None)
     t = threading.Thread(target=kit.cmd_gui, daemon=True)
     t.start()
-    for _ in range(50):
-        if kit.console_file().exists():
+    for _ in range(300):   # CI machines can be slow to start the server
+        if kit.console_file().exists() or not t.is_alive():
             break
         time.sleep(0.1)
+    assert t.is_alive(), "the console stopped on its own"
     assert json.loads(kit.console_file().read_text())["port"] == port
     assert kit.running_console() == f"http://127.0.0.1:{port}/"
     opened = []
