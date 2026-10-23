@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **No terminal window.** The desktop shortcut now starts the console in the background and opens it in the
+  browser (Mac: no Terminal; Windows: no command window). Clicking it again brings back the running console instead
+  of starting a second one, and the new **Quit** button stops it. `aiguard-kit gui` in a terminal works as before.
 - **Setup repair on a Mac: "Can't store password on keychain (-25244)".** macOS won't let the kit update a keychain
   entry saved by an earlier Python (uv moves it on updates). The kit now replaces its own stale entry instead of
   failing, and if even that fails, says exactly which entry to delete.

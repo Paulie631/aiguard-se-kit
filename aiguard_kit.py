@@ -1390,8 +1390,8 @@ def shortcut_paths():
 
 
 def _mac_app(app):
-    """A small app bundle on the desktop: shows the kit's icon and no file extension, and opens the console in a
-    Terminal window (closing that window stops the console, as before). Built locally, so Gatekeeper doesn't block it."""
+    """A small app bundle on the desktop: shows the kit's icon and no file extension, and starts the console in the
+    background with no Terminal window (Quit in the console stops it). Built locally, so Gatekeeper doesn't block it."""
     import plistlib
     shutil.rmtree(app, ignore_errors=True)
     (app / "Contents/MacOS").mkdir(parents=True)
@@ -1406,12 +1406,12 @@ def _mac_app(app):
         info["CFBundleIconFile"] = "icon"
     with open(app / "Contents/Info.plist", "wb") as f:
         plistlib.dump(info, f)
-    console = app / "Contents/Resources/console.command"
-    console.write_text(f'#!/bin/bash\n# Opens the {APP_NAME}. Close this window to stop it.\n'
-                       f'exec "{APP_DIR / "aiguard-kit"}" gui\n', encoding="utf-8")
-    os.chmod(console, 0o755)
     launch = app / "Contents/MacOS/launch"
-    launch.write_text(f'#!/bin/bash\nexec open -a Terminal "{console}"\n', encoding="utf-8")
+    out = LOG_DIR / "console-output.log"
+    launch.write_text(f'#!/bin/bash\n# Starts the {APP_NAME} in the background (no Terminal window) and opens it in '
+                      f'the browser.\n# Stop it with Quit in the console. If nothing opens, run: aiguard-kit gui\n'
+                      f'mkdir -p "{LOG_DIR}"\n'
+                      f'nohup "{APP_DIR / "aiguard-kit"}" gui --background >>"{out}" 2>&1 &\n', encoding="utf-8")
     os.chmod(launch, 0o755)
     os.utime(app)   # nudges Finder to pick up the icon
 
@@ -1474,11 +1474,12 @@ def cmd_install():
     sp = shortcut_paths()
     if WINDOWS:
         launcher = APP_DIR / "aiguard-kit.cmd"
-        for key, args, desc in (("desktop", "gui", "Open the AI Guard demo console"),
-                                ("start", "gui", "Open the AI Guard demo console")):
+        hidden = f'--headless "{launcher}" gui --background'   # conhost --headless: no terminal window
+        for key, args, desc in (("desktop", hidden, "Open the AI Guard demo console"),
+                                ("start", hidden, "Open the AI Guard demo console")):
             try:
                 sp[key].parent.mkdir(parents=True, exist_ok=True)
-                _win_shortcut(sp[key], launcher, args, HOME, desc, icon_path("ico"))
+                _win_shortcut(sp[key], WIN_CONHOST, args, HOME, desc, icon_path("ico"))
                 ok(f"Shortcut: {sp[key]}")
             except KitError as e:
                 warn(str(e))
@@ -2506,17 +2507,64 @@ JOBS: dict = {}
 SERVER: dict = {}
 
 
+CONSOLE_FILE_NAME = "console.json"
+
+
+def console_file():
+    return CFG_DIR / CONSOLE_FILE_NAME
+
+
+def write_console_file(port):
+    try:
+        CFG_DIR.mkdir(parents=True, exist_ok=True)
+        console_file().write_text(json.dumps({"port": port, "pid": os.getpid(), "version": VERSION}), encoding="utf-8")
+    except OSError as e:
+        vlog(f"console file: {e}")
+
+
+def clear_console_file(port):
+    try:
+        if json.loads(console_file().read_text(encoding="utf-8")).get("port") == port:
+            console_file().unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def running_console():
+    """The URL of a console this profile already has running (it answers on the port it recorded), else None."""
+    import urllib.request
+    try:
+        port = int(json.loads(console_file().read_text(encoding="utf-8"))["port"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            body = r.read(4000).decode("utf-8", "replace")
+        return url if r.status == 200 and "Console" in body else None
+    except Exception:
+        return None
+
+
+WIN_CONHOST = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "conhost.exe"
+
+
 def restart_console(srv, port):
     """Reopen the console from the installed copy (after an update), on the same port when possible."""
     import subprocess
     launcher = APP_DIR / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
-    args = ["gui", "--port", str(port), "--restarted"] + (["--profile", PROFILE] if PROFILE != "default" else [])
+    background = "--background" in ARGS
+    args = (["gui", "--port", str(port), "--restarted"] + (["--background"] if background else [])
+            + (["--profile", PROFILE] if PROFILE != "default" else []))
     try:
         srv.socket.close()  # free the port for the new console
     except OSError:
         pass
     if WINDOWS:
-        subprocess.Popen(["cmd", "/c", "start", APP_NAME, str(launcher), *args], cwd=str(HOME))
+        if background:   # no window, like the desktop shortcut
+            subprocess.Popen([str(WIN_CONHOST), "--headless", str(launcher), *args], cwd=str(HOME))
+        else:
+            subprocess.Popen(["cmd", "/c", "start", APP_NAME, str(launcher), *args], cwd=str(HOME))
         os._exit(0)
     os.execv("/bin/bash", ["bash", str(launcher), *args])
 
@@ -2670,6 +2718,10 @@ def cmd_gui():
             body = self._body()
             c = load_cfg()
             lib = load_tests()
+            if path == "/api/quit":   # the Quit button: the console may have no terminal window to close
+                activity("setup", "Console stopped from its Quit button", "info")
+                threading.Timer(0.3, SERVER["srv"].shutdown).start()
+                return self._send(200, {"ok": True})
             if path == "/api/repair":
                 try:
                     t = tenant(c)
@@ -2862,6 +2914,12 @@ def cmd_gui():
                                                body.get("mode", "detect"), tags=bool(body.get("tags"))))
             self._send(404, {"error": "not found"})
 
+    background = "--background" in ARGS
+    if background and "--restarted" not in ARGS:
+        running = running_console()
+        if running:   # the shortcut was clicked again: show the console that's already running
+            webbrowser.open(running)
+            return
     srv = None
     for p in range(port, port + 20):
         try:
@@ -2884,10 +2942,13 @@ def cmd_gui():
     reconnects = "--restarted" in ARGS and str(port) == opt("port", "")
     if "--no-browser" not in ARGS and not reconnects:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    write_console_file(port)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\n  Stopped.")
+    finally:
+        clear_console_file(port)
 
 
 # ---------------------------------------------------------------- editions

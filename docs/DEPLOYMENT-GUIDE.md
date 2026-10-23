@@ -91,7 +91,7 @@ One install gives you the console, the AI Guard demo and the ZIA admin commands.
    - Windows: **Run**, or **More info > Run anyway**.
    - Mac: right-click the installer > **Open > Open**, or **System Settings > Privacy & Security > Open Anyway**.
 5. Press a key (Windows) or Return (Mac). The installer fetches uv and Python (1–2 minutes the first time), copies the kit to `~/.aiguard-se-kit/app`, adds an **AI Guard Demo Console** desktop shortcut and the `aiguard-kit` command, then opens the console.
-6. From now on, start it from the **AI Guard Demo Console** shortcut. Keep the terminal window that opens with it; closing it stops the console.
+6. From now on, start it from the **AI Guard Demo Console** shortcut. It runs in the background (no terminal window) and opens in your browser; the first start after an install or update can take up to a minute. Click the shortcut again to bring it back, and **Quit** (top right) to stop it. If nothing opens, run `aiguard-kit gui` in a terminal to see why.
 
 The console runs at `http://127.0.0.1:8765` and only on your machine. You can delete the extracted folder afterwards.
 
