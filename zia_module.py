@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.13"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.14"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -259,9 +259,10 @@ def test_user_names():
 NOT_TENANT_DOMAINS = re.compile(r"zscaler|zslogin|zscloud", re.I)
 PW_KEY = "zia-test-user-password"   # keychain entry for the password of a test user the kit created
 CONSOLE_USERS = "Administration > Internet & SaaS Authentication > Internet & SaaS Users"
+MANUAL_TAB = " Step by step: the console's Manual steps tab, or aiguard-kit todo."
 ZID_NOTE = ("ZIdentity's API can't set passwords, so set one yourself, once: Administration > Authentication > "
             "Directory > Users, click {email}, and set a password. Then sign in to Client Connector on the traffic "
-            "generator as {email}. Never paste the password into chat or email.")
+            "generator as {email}. Never paste the password into chat or email." + MANUAL_TAB)
 MANUAL_PW = ("Set or reset its password in the console: " + CONSOLE_USERS + ", click the pencil (Edit) on {email}, "
              "fill Change Password > Password and Confirm Password, then Save.")
 
@@ -330,7 +331,7 @@ ZIA_SERVICE = re.compile(r"\bZIA\b|internet\s*(&|and)\s*saas|internet access", r
 ENTITLE_FIX = ("ZIdentity created {email}, but hasn't given it the Internet & SaaS (ZIA) service entitlement, so ZIA "
                "never receives it (your tenant grants entitlements to chosen users or groups, not to everyone). In "
                "ZIdentity, assign the Internet & SaaS entitlement to the group '{group}' (or to the user), then run "
-               "setup again; it picks up where it left off. Zscaler Help: 'Assigning entitlements to users'.")
+               "setup again; it picks up where it left off. Zscaler Help: 'Assigning entitlements to users'." + MANUAL_TAB)
 
 
 def zid_services(t, user_id):
@@ -914,7 +915,7 @@ ZCC_BY_HAND = ("Create them by hand in the Client Connector portal, then run Fix
                "1) Forwarding profile named exactly '{fwd}': ZIA action Tunnel with Z-Tunnel 2.0 on every network type "
                "(on corporate network, off corporate network, VPN, split VPN). "
                "2) Windows app profile named exactly '{app}': group '{group}', Install Zscaler SSL Certificate on, "
-               "forwarding profile '{fwd}', and no broader profile above it in the order.")
+               "forwarding profile '{fwd}', and no broader profile above it in the order." + MANUAL_TAB)
 
 
 def zcc_by_hand(cfg):

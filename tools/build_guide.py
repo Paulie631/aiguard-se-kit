@@ -25,9 +25,13 @@ def versions():
 
 
 def stamped(text, kit, zia):
-    """The title, then a line naming the versions this copy describes."""
+    """The title, a line naming the versions this copy describes, and the manual steps as an appendix (generated
+    from manual_steps.json, like the console's Manual steps tab)."""
     title, _, rest = text.partition("\n")
-    return f"{title}\n\n**AI Guard SE Demo Kit {kit} · ZIA SE Demo Kit {zia}**\n{rest}"
+    sys.path.insert(0, str(ROOT / "tools"))
+    import gen_manual_doc
+    appendix = gen_manual_doc.render(level=2).replace("## Manual steps", "## Appendix: manual steps", 1)
+    return f"{title}\n\n**AI Guard SE Demo Kit {kit} · ZIA SE Demo Kit {zia}**\n{rest.rstrip()}\n\n{appendix}\n"
 
 
 def build(require=False):

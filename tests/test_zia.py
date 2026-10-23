@@ -1641,3 +1641,65 @@ def test_generator_setup_script_is_valid_powershell(aws, tmp_path):
                             " if ($e) { $e | ForEach-Object { $_.ToString() }; exit 1 }"],
                            capture_output=True, text=True, timeout=120, env={**os.environ, "KIT_PS1": str(f)})
         assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_manual_steps_follow_the_tenant_and_check_themselves(zenv, capsys):
+    """A ZIdentity tenant whose Client Connector API refuses profiles (Greg's): the Manual steps list shows the
+    password, entitlement and profile steps with the tenant's own names; the kit checks what it can, the SE marks the
+    rest, open steps show in demo readiness, and the diagnostics zip lists them."""
+    kit, z, fake = zenv("zia", "setup", "--via", "zidentity", "--yes")
+    fake.fwd_rejects = lambda body: True
+    kit.cmd_zia()
+    capsys.readouterr()
+    cfg = kit.load_cfg()
+    items = {i["id"]: i for i in kit.manual_status(cfg, zia_tenant=lambda: fake)}
+    assert {"oneapi-client", "zid-password", "zid-entitlement", "zcc-profiles", "generator-build",
+            "generator-signin"} <= set(items)
+    assert "zcc-manual-install" not in items and "generator-connect" not in items   # docs-only / no AWS yet
+    assert items["oneapi-client"]["status"] == "done" and items["oneapi-client"]["how"] == "checked"
+    assert items["zid-entitlement"]["status"] == "done"            # ZIA has the user
+    assert items["zcc-profiles"]["status"] == "todo" and items["zcc-profiles"]["can_check"]
+    assert any("se-demo-traffic@paulaiuto.zslogin.net" in s for s in items["zid-password"]["steps"])
+    assert any("named exactly `SE-Demo Z-Tunnel 2.0`" in s for s in items["zcc-profiles"]["steps"])
+    assert items["zid-password"]["status"] == "todo" and not items["zid-password"]["can_check"]
+    ready = {c["id"]: c for c in kit.readiness(cfg)}
+    assert ready["ready-manual"]["status"] == "warn" and "Set the ZIdentity test user's password" in ready["ready-manual"]["detail"]
+    # the SE marks the password done and creates the profiles by hand: both clear
+    kit.manual_mark(cfg, "zid-password")
+    gid = kit.load_cfg()["zia"]["created_user"]["zia_group_id"]
+    fake.fwd.append({"id": 9001, "name": "SE-Demo Z-Tunnel 2.0", "forwardingProfileActions": [
+        {"networkType": n, "actionType": 1, "enablePacketTunnel": 1} for n in range(4)]})
+    fake.web.append({"id": 9002, "name": "SE-Demo traffic generator", "active": 1, "ruleOrder": 1,
+                     "groups": [{"id": gid}], "forwardingProfileId": 9001, "windowsPolicy": {"installSslCerts": 1}})
+    cfg = kit.load_cfg()
+    items = {i["id"]: i for i in kit.manual_status(cfg, zia_tenant=lambda: fake)}
+    assert items["zid-password"]["status"] == "done" and items["zid-password"]["how"] == "marked"
+    assert items["zcc-profiles"]["status"] == "done" and items["zcc-profiles"]["how"] == "checked"
+    with pytest.raises(kit.KitError, match="No manual step"):
+        kit.manual_mark(cfg, "nope")
+    # terminal view: open steps with their clicks, finished ones in one line
+    kit.ARGS[:] = ["todo"]
+    kit.cmd_todo()
+    out = capsys.readouterr().out
+    assert "Sign in to Client Connector on the generator" in out and "aiguard-kit todo --done generator-signin" in out
+    assert "✓ Set the ZIdentity test user's password" in out
+    # diagnostics carry the list (no tenant calls)
+    import io as _io
+    zf = zipfile.ZipFile(_io.BytesIO(kit.diagnostics_zip()))
+    listed = {i["id"]: i["status"] for i in json.loads(zf.read("manual-steps.json"))}
+    assert listed["zid-password"] == "done" and "generator-signin" in listed
+
+
+def test_manual_steps_file_is_complete_and_the_docs_are_in_sync():
+    import subprocess
+    root = pathlib.Path(__file__).resolve().parents[1]
+    data = json.loads((root / "manual_steps.json").read_text(encoding="utf-8"))
+    ids = [s["id"] for s in data["steps"]]
+    assert len(ids) == len(set(ids))
+    for s in data["steps"]:
+        assert s["stage"] in data["stages"] and s["steps"] and s["why"] and s["title"]
+        assert s["applies"] in ("always", "docs", "aiguard", "zia", "zia-zidentity-user", "zia-zcc-manual", "zia-aws")
+        assert s.get("check") in (None, "reminder", "oneapi-saved", "zia-entitled", "zcc-profiles")
+        assert s["confirmed"] is False or re.match(r"^\d{4}-\d{2}", s["confirmed"])
+    r = subprocess.run([sys.executable, str(root / "tools" / "gen_manual_doc.py"), "--check"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
