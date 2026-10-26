@@ -65,5 +65,8 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo   Opening the console. Keep this window open while you use it; close it to stop the console.
-call "%USERPROFILE%\.aiguard-se-kit\app\aiguard-kit.cmd" gui
+echo   Opening the console in your browser. It runs in the background, like the desktop shortcut:
+echo   use Quit in the console to stop it. This window closes by itself.
+start "" "%SystemRoot%\System32\conhost.exe" --headless "%USERPROFILE%\.aiguard-se-kit\app\aiguard-kit.cmd" gui --background
+timeout /t 5 >nul
+exit /b 0

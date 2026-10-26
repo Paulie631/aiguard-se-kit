@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- **No terminal window, from the installer and after updates too.** The desktop shortcut already started the console
+  in the background, but the installer still opened it in its own Terminal or command window, and an update
+  restarted a console in the window it was started from. Both now start it in the background (Quit in the console
+  stops it); the installer window can be closed (on Windows it closes by itself).
+
 ## 1.8.20
 - **The setup path, in order.** Manual steps now show what the kit does in between (marked ⚙) and what each step
   needs first. A step that can't be done yet says what it's waiting for, and the one to do now is marked **next**.
