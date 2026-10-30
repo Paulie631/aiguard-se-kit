@@ -364,8 +364,15 @@ def _device_users(d):
 
 
 def host_key(h):
-    """'Pauls-Mac.local', 'pauls-mac' and 'PAULS-MAC' are the same machine to the kit."""
-    return str(h or "").strip().lower().split(".")[0]
+    """For comparing only: 'Pauls-MacBook-Pro.local', 'PAULS-MACBOOK-PRO' and Client Connector's "Paul's MacBook Pro"
+    are the same machine to the kit (case, domain suffix, spaces and punctuation ignored)."""
+    return re.sub(r"[^a-z0-9]", "", str(h or "").strip().lower().split(".")[0])
+
+
+def host_spellings(h):
+    """What to ask an API's exact hostname filter for: as typed, short, upper-case, and the Mac's name.local."""
+    short = str(h).strip().split(".")[0]
+    return [h, short, short.lower(), short.upper(), f"{short}.local"]
 
 
 ZCC_PAGES = 10   # 500 devices a page: enough for a demo tenant
@@ -396,17 +403,44 @@ def zcc_signins(cfg, hosts):
     return out
 
 
+def serials_from_events(t, want_h, hours=72):
+    """Serial numbers Endpoint AI reported for these hostnames in recent events (Endpoint AI shows the serial on each)."""
+    out = []
+    try:
+        body = t.get("/v1/events", since=_since(hours), limit=200)
+    except EaiError as e:
+        K.vlog(f"events for serial: {e}")
+        return out
+    for ev in _items(body, "events"):
+        data = ev.get("data") or {}
+        if host_key(ev.get("hostname")) in want_h:
+            sn = ev.get("serial") or ev.get("serial_number") or data.get("serial") or data.get("serial_number")
+            if sn and sn not in out:
+                out.append(str(sn))
+    return out[:MAX_GENERATORS]
+
+
 def find_devices(t, cfg):
     """The generator's devices. Each one the API returns is checked against what was asked for, so a filter the
     API ignored can never pull other devices into the kit's group."""
     hosts, emails = generator_identities(cfg)
     want_h, want_m = {host_key(h) for h in hosts}, {m.lower() for m in emails}
     found = {}
-    asks = list(dict.fromkeys(x for h in hosts for x in (h, host_key(h), host_key(h).upper())))   # as typed, short, Windows-style
+    asks = list(dict.fromkeys(x for h in hosts for x in host_spellings(h)))
     for h in asks:
         for d in _items(t.get("/v1/devices", host=h, limit=50), "devices"):
             if host_key(d.get("hostname")) in want_h:
                 found[d["id"]] = d
+    if hosts and not found:   # the exact filter missed: free-text search, then the serial number its events carry
+        for h in hosts:
+            for d in _items(t.get("/v1/devices", q=str(h).split(".")[0], limit=50), "devices"):
+                if host_key(d.get("hostname")) in want_h:
+                    found[d["id"]] = d
+        if not found:
+            for serial in serials_from_events(t, want_h):
+                for d in _items(t.get("/v1/devices", serial=serial, limit=5), "devices"):
+                    if str(d.get("serial_number") or d.get("serial") or "") == serial:
+                        found[d["id"]] = d
     for m in emails:
         for d in _items(t.get("/v1/devices", email=m, limit=50), "devices"):
             if want_m & set(_device_users(d)):
@@ -503,8 +537,8 @@ def setup(t, cfg, log, mode=None):
         if h in signed:
             log("ok", f"{h}: Client Connector signed in as {signed[h]}")
         elif cfg.get("client_id"):
-            log("warn", f"{h}: not registered in this tenant's Client Connector. Check the hostname, and that Client "
-                        "Connector on it is signed in to this tenant.")
+            log("info", f"{h}: not found in this tenant's Client Connector devices (it may be listed under another name, "
+                        "or signed in to a different tenant). That's fine: Endpoint AI finds the machine on its own.")
     if devices:
         add_members(t, gid, [d["id"] for d in devices], log)
         e["state"]["devices"] = [{"id": d["id"], "hostname": d.get("hostname")} for d in devices]
@@ -635,8 +669,7 @@ def evidence(t, cfg, hours=24, limit=50):
         return {"items": [], "matched": 0, "total": 0, "hosts": [], "patterns": {}}
     q = {"since": _since(hours), "limit": limit}
     if hosts:   # as typed, short and upper-case: Endpoint AI may record "EC2AMAZ-GEN1" for "ec2amaz-gen1.ec2.internal"
-        q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for k in [host_key(h)]
-                                              for x in (h, k, k.upper(), f"{h.split('.')[0]}.local")))   # Macs: name.local
+        q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for x in host_spellings(h)))
     elif emails:
         q["ef_user"] = ",".join(emails)
     body = t.get("/v1/events", **q)
