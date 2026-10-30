@@ -1309,7 +1309,7 @@ async function eai(){
     $("#eaipath").textContent=e.console_path;$("#eaigroup").textContent=e.group;$("#eaipol").textContent=e.policy;
     $("#eaihosts").value=(e.hosts||[]).join(", ");$("#eailock").checked=!!e.shell_lock;
     const c=e.credential||{};
-    $("#eaicred").textContent=e.saved?`Saved: ${e.client_id}`+(c.name?` (${c.name}${c.roles?", "+c.roles.filter(Boolean).join(", "):""}${c.expires_at?", expires "+String(c.expires_at).slice(0,10):""})`:"")+(e.state&&e.state.set_up?` · set up ${e.state.set_up}, ${(e.state.mode||"monitor")} mode`:" · not set up yet"):"Not connected yet.";
+    $("#eaicred").textContent=e.saved?`Saved: ${e.client_id}`+(c.name?` (${c.name}${c.roles?", "+c.roles.filter(Boolean).join(", "):""}${c.expires_at?", expires "+String(c.expires_at).slice(0,10):""})`:"")+(e.state&&e.state.set_up?` · demo policy set up ${e.state.set_up}, ${(e.state.mode||"monitor")} mode`:" · connected; demo policy not created yet (step 2)"):"Not connected yet.";
     if(e.state&&e.state.mode)$("#eaimode").value=e.state.mode;
     if(!$("#eaiscenes").children.length)$("#eaiscenes").innerHTML=e.scenes.map(s=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-es="${s.id}" checked>${esc(s.title)}</label>`).join("");
     $("#eailastrep").innerHTML=e.last_report?`Last: <a href="#" data-rep="${esc(e.last_report.file)}">${esc(e.last_report.file)}</a>`:"";

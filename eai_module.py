@@ -88,10 +88,11 @@ def normalize_region(s):
 class EaiError(Exception):
     """An API error: HTTP status, the stable `error` code, the message and the request_id support traces."""
 
-    def __init__(self, status, code, message, request_id=""):
+    def __init__(self, status, code, message, request_id="", call=""):
         self.status, self.code, self.message, self.request_id = status, code or "", message or "", request_id or ""
         rid = f" (request_id {request_id})" if request_id else ""
-        super().__init__(f"Endpoint AI API {status} {code}: {message}{rid}")
+        where = f" on {call}" if call else ""
+        super().__init__(f"Endpoint AI API {status} {code}{where}: {message}{rid}")
 
 
 HINTS = {
@@ -176,7 +177,7 @@ class EaiTenant:
             if retry:
                 time.sleep(min(2 ** attempt, 8) + random.random())
                 continue
-            err = EaiError(r.status_code, code, data.get("message") or r.reason, data.get("request_id"))
+            err = EaiError(r.status_code, code, data.get("message") or r.reason, data.get("request_id"), f"{method} {path}")
             K.activity("api", f"Endpoint AI {method} {path} failed", "error", request=body, error=str(err), ms=ms)
             raise err
         raise EaiError(0, "retries", f"{method} {path} kept failing")
@@ -298,8 +299,7 @@ def ensure_group(t, cfg, log):
         log("ok", f"Device group '{name}' already exists")
     else:
         try:
-            g = t.req("POST", "/v1/device-groups", body={"name": name, "description": "The SE demo kit's traffic "
-                      "generator. Only the kit's demo policy is assigned here."})
+            g = t.req("POST", "/v1/device-groups", body={"name": name})   # name only: the API rejects unknown fields
             log("ok", f"Created device group '{name}'")
         except EaiError as err:
             if err.code != "conflict":

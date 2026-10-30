@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.22
+- **Endpoint AI setup fix.** Creating the `SE-Demo: traffic generator` device group failed with `400
+  validation_failed: invalid request body`: the kit sent a description the API doesn't accept. It now sends the
+  name only. Endpoint AI errors now name the call that failed (for example `on POST /v1/device-groups`), and the
+  Endpoint AI tab says "connected; demo policy not created yet" instead of "not set up yet".
+
 ## 1.8.21
 - **Endpoint AI Security demo (new).** A third module beside AI Guard and ZIA, on its own **Endpoint AI** tab and
   `aiguard-kit eai`. With an Endpoint AI API credential (Administration > API Access, Admin role), the kit creates a
