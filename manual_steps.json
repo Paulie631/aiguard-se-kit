@@ -28,6 +28,25 @@
    "confirmed": "2026-10"
   },
   {
+   "id": "eai-credential",
+   "stage": "before",
+   "who": "you",
+   "title": "Create the Endpoint AI API credential",
+   "why": "Endpoint AI Security has its own API, separate from OneAPI, and an API credential can't create credentials: only the console can.",
+   "applies": "eai",
+   "needs": [],
+   "check": "eai-saved",
+   "steps": [
+    "In the Endpoint AI Security console (for example console.zsai.sqrx.io), open **Administration > API Access**.",
+    "Under **Create a credential**, name it `se-demo-kit`, choose the **Admin** role (roles can't be changed later) and an expiry such as **90 days**, then click **Create credential**.",
+    "Copy the **client_id** and the **client_secret** now: the secret (it starts with `sqrx_sk_`) is shown once. Note the **API host** on the same page: the `use2` in `https://use2.api.<domain>` is your region.",
+    "In the kit's console, open the **Endpoint AI** tab: enter the console domain, region, client_id and secret, then **Save and test**. Never paste the secret into chat, email or tickets."
+   ],
+   "then": "",
+   "help": [],
+   "confirmed": "2026-10-30"
+  },
+  {
    "id": "kit-aiguard",
    "stage": "setup",
    "who": "kit",
@@ -185,6 +204,24 @@
    "confirmed": false
   },
   {
+   "id": "kit-eai",
+   "stage": "setup",
+   "who": "kit",
+   "title": "Kit: create the Endpoint AI demo policy",
+   "why": "A device group holding only the generator, and the SE-Demo policy assigned to that group alone, in Monitor or Block mode.",
+   "applies": "eai",
+   "needs": [
+    "eai-credential",
+    "eai-agent"
+   ],
+   "check": "kit-eai",
+   "action": "Endpoint AI tab > Create or update.",
+   "steps": [],
+   "then": "",
+   "help": [],
+   "confirmed": "2026-10-30"
+  },
+  {
    "id": "generator-build",
    "stage": "generator",
    "who": "you",
@@ -247,6 +284,48 @@
    "confirmed": "2026-10"
   },
   {
+   "id": "eai-agent",
+   "stage": "generator",
+   "who": "you",
+   "title": "Get the Endpoint AI agent onto the generator",
+   "why": "Client Connector delivers the Endpoint AI agent. Turning that on for the generator's app profile is a Client Connector setting the kit can't change through the API.",
+   "applies": "eai",
+   "needs": [
+    "generator-signin?zia",
+    "eai-credential"
+   ],
+   "check": "eai-device",
+   "steps": [
+    "In the Client Connector portal, open the app profile the generator uses ({app_profile}) and turn on the Endpoint AI agent for it.",
+    "On the generator, open Client Connector (signed in as {test_user}) and update its policy, or restart it, so the agent installs.",
+    "In the Endpoint AI console, check the generator appears under **Administration > Devices** (its hostname, online). If it doesn't after 15 minutes, restart the generator."
+   ],
+   "then": "Run Endpoint AI setup again (Endpoint AI tab > Create or update) so the kit adds the generator to its device group.",
+   "help": [],
+   "confirmed": false
+  },
+  {
+   "id": "eai-claude",
+   "stage": "generator",
+   "who": "you",
+   "title": "Install Claude Code on the generator and sign it in",
+   "why": "Endpoint AI records what AI coding agents do, so the generator needs one to run the scenes. Signing in needs your Claude account or an API key, which only you can provide.",
+   "applies": "eai",
+   "needs": [
+    "eai-agent"
+   ],
+   "check": null,
+   "steps": [
+    "On the generator, signed in to Windows as the user who will run the demo, double-click **SE-Demo Endpoint AI scenes** on the desktop once to check it starts (or run `C:\\SE-Demo\\eai.cmd demo` in a Command Prompt).",
+    "Install Claude Code for that user: `C:\\SE-Demo\\eai.cmd demo --install` (Anthropic's installer; no admin needed; the kit checks the signature).",
+    "Sign it in: run `claude` once and follow the browser sign-in, **or** save an Anthropic API key in that user's Credential Manager with `C:\\SE-Demo\\eai.cmd demo --set-key`.",
+    "Run the scenes once: double-click **SE-Demo Endpoint AI scenes**. Events show on the kit's Endpoint AI tab (Generator activity) within a few minutes."
+   ],
+   "then": "",
+   "help": [],
+   "confirmed": false
+  },
+  {
    "id": "zcc-manual-install",
    "stage": "generator",
    "who": "you",
@@ -294,6 +373,26 @@
    "check": "reminder",
    "steps": [
     "In **AI Guard > Insights**, add a filter on the user that excludes `kit-policy-check` before you share your screen."
+   ],
+   "then": "",
+   "help": [],
+   "confirmed": false
+  },
+  {
+   "id": "eai-before-demo",
+   "stage": "demo",
+   "who": "you",
+   "title": "Endpoint AI: start in Monitor and run the scenes once",
+   "why": "The story is 'see it, then stop it': Monitor shows the agent's risky actions running and recorded, Block shows them stopped.",
+   "applies": "eai",
+   "needs": [
+    "kit-eai",
+    "eai-claude"
+   ],
+   "check": "reminder",
+   "steps": [
+    "On the Endpoint AI tab set **Mode** to **Monitor**, and run the scenes on the generator once so there's recent activity to show.",
+    "During the demo, switch **Mode** to **Block** and run the scenes again: the same commands are stopped before they run."
    ],
    "then": "",
    "help": [],

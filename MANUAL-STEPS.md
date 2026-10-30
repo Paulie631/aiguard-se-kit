@@ -22,6 +22,21 @@ Your setup path, in order: what the kit can't do through Zscaler's APIs (with th
 
 *Menu path checked 2026-10 · id `oneapi-client`*
 
+### Create the Endpoint AI API credential
+
+**Why it's manual:** Endpoint AI Security has its own API, separate from OneAPI, and an API credential can't create credentials: only the console can.
+
+**When:** When you use the Endpoint AI Security demo.
+
+1. In the Endpoint AI Security console (for example console.zsai.sqrx.io), open **Administration > API Access**.
+2. Under **Create a credential**, name it `se-demo-kit`, choose the **Admin** role (roles can't be changed later) and an expiry such as **90 days**, then click **Create credential**.
+3. Copy the **client_id** and the **client_secret** now: the secret (it starts with `sqrx_sk_`) is shown once. Note the **API host** on the same page: the `use2` in `https://use2.api.<domain>` is your region.
+4. In the kit's console, open the **Endpoint AI** tab: enter the console domain, region, client_id and secret, then **Save and test**. Never paste the secret into chat, email or tickets.
+
+**Done when:** the kit checks it (Check under Setup > Manual steps).
+
+*Menu path checked 2026-10-30 · id `eai-credential`*
+
 ## During setup
 
 - *The kit:* **create the AI Guard demo**. The demo policy, the two apps, their keys and rules. Start it: Setup wizard above: Preflight checks, Choices, then Create it. Needs first: Create the OneAPI client and its roles.
@@ -102,6 +117,8 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 *Menu names not yet confirmed · id `zcc-profiles`*
 
+- *The kit:* **create the Endpoint AI demo policy**. A device group holding only the generator, and the SE-Demo policy assigned to that group alone, in Monitor or Block mode. Start it: Endpoint AI tab > Create or update. Needs first: Create the Endpoint AI API credential; Get the Endpoint AI agent onto the generator.
+
 ### Create the test user in your directory (AD or LDAP tenants)
 
 **Why it's manual:** When ZIA signs users in from Active Directory or LDAP, the user has to exist there; the kit can't create it.
@@ -170,6 +187,41 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 *Menu path checked 2026-10 · id `generator-signin`*
 
+### Get the Endpoint AI agent onto the generator
+
+**Why it's manual:** Client Connector delivers the Endpoint AI agent. Turning that on for the generator's app profile is a Client Connector setting the kit can't change through the API.
+
+**When:** When you use the Endpoint AI Security demo.
+
+**Needs first:** Sign in to Client Connector on the generator (with the ZIA demo); Create the Endpoint AI API credential
+
+1. In the Client Connector portal, open the app profile the generator uses (SE-Demo traffic generator) and turn on the Endpoint AI agent for it.
+2. On the generator, open Client Connector (signed in as the test user (for example `se-demo-traffic@<your domain>`)) and update its policy, or restart it, so the agent installs.
+3. In the Endpoint AI console, check the generator appears under **Administration > Devices** (its hostname, online). If it doesn't after 15 minutes, restart the generator.
+
+**Then:** Run Endpoint AI setup again (Endpoint AI tab > Create or update) so the kit adds the generator to its device group.
+
+**Done when:** the kit checks it (Check under Setup > Manual steps).
+
+*Menu names not yet confirmed · id `eai-agent`*
+
+### Install Claude Code on the generator and sign it in
+
+**Why it's manual:** Endpoint AI records what AI coding agents do, so the generator needs one to run the scenes. Signing in needs your Claude account or an API key, which only you can provide.
+
+**When:** When you use the Endpoint AI Security demo.
+
+**Needs first:** Get the Endpoint AI agent onto the generator
+
+1. On the generator, signed in to Windows as the user who will run the demo, double-click **SE-Demo Endpoint AI scenes** on the desktop once to check it starts (or run `C:\SE-Demo\eai.cmd demo` in a Command Prompt).
+2. Install Claude Code for that user: `C:\SE-Demo\eai.cmd demo --install` (Anthropic's installer; no admin needed; the kit checks the signature).
+3. Sign it in: run `claude` once and follow the browser sign-in, **or** save an Anthropic API key in that user's Credential Manager with `C:\SE-Demo\eai.cmd demo --set-key`.
+4. Run the scenes once: double-click **SE-Demo Endpoint AI scenes**. Events show on the kit's Endpoint AI tab (Generator activity) within a few minutes.
+
+**Done when:** you mark it done (`aiguard-kit todo --done eai-claude`).
+
+*Menu names not yet confirmed · id `eai-claude`*
+
 ### Install Client Connector by hand
 
 **Why it's manual:** Only when the generator's setup log says the installer was skipped (its download failed, or it didn't match the pinned hash or Zscaler's signature).
@@ -198,3 +250,18 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 **Each demo.**
 
 *Menu names not yet confirmed · id `insights-filter`*
+
+### Endpoint AI: start in Monitor and run the scenes once
+
+**Why it's manual:** The story is 'see it, then stop it': Monitor shows the agent's risky actions running and recorded, Block shows them stopped.
+
+**When:** When you use the Endpoint AI Security demo.
+
+**Needs first:** Kit: create the Endpoint AI demo policy; Install Claude Code on the generator and sign it in
+
+1. On the Endpoint AI tab set **Mode** to **Monitor**, and run the scenes on the generator once so there's recent activity to show.
+2. During the demo, switch **Mode** to **Block** and run the scenes again: the same commands are stopped before they run.
+
+**Each demo.**
+
+*Menu names not yet confirmed · id `eai-before-demo`*

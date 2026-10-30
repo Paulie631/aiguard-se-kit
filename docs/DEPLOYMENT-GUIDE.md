@@ -90,7 +90,7 @@ One install gives you the console, the AI Guard demo and the ZIA admin commands.
 4. Answer the one-time security prompt:
    - Windows: **Run**, or **More info > Run anyway**.
    - Mac: right-click the installer > **Open > Open**, or **System Settings > Privacy & Security > Open Anyway**.
-5. Press a key (Windows) or Return (Mac). The installer fetches uv and Python (1–2 minutes the first time), copies the kit to `~/.aiguard-se-kit/app`, adds an **AI Guard Demo Console** desktop shortcut and the `aiguard-kit` command, then opens the console.
+5. Press a key (Windows) or Return (Mac). The installer fetches uv and Python (1–2 minutes the first time), copies the kit to `~/.aiguard-se-kit/app`, adds an **AI Guard Demo Console** desktop shortcut and the `aiguard-kit` command, then opens the console in your browser. The console runs in the background, so you can close the installer window.
 6. From now on, start it from the **AI Guard Demo Console** shortcut. It runs in the background (no terminal window) and opens in your browser; the first start after an install or update can take up to a minute. Click the shortcut again to bring it back, and **Quit** (top right) to stop it. If nothing opens, run `aiguard-kit gui` in a terminal to see why.
 
 The console runs at `http://127.0.0.1:8765` and only on your machine. You can delete the extracted folder afterwards.
@@ -200,6 +200,18 @@ On the generator, run the machine check first; traffic rounds only start once it
    - **Analytics > Data Security > Inline DLP** and **Inline CASB**: DLP blocks and AI app usage. For AI apps specifically, **≡ > Data Security > Inline CASB > Shadow IT** and **GenAI Security Report**.
 5. **Insights takes about 2 days.** Back on your laptop, the ZIA tab's **Check Insights** button lists which Insights panels are still empty.
 
+## Optional: Endpoint AI Security (20 minutes)
+
+Shows an AI coding agent on the generator trying something risky: Endpoint AI records it in **Monitor** and stops it in **Block**. Full runbook: ENDPOINT-AI.md.
+
+1. **Create the API credential** (Endpoint AI console, **Administration > API Access**): name `se-demo-kit`, role **Admin**, expiry 90 days. Copy the client_id and the secret (`sqrx_sk_…`, shown once). Note the region in the API host: the `use2` in `https://use2.api.<domain>`.
+2. **Connect** on the kit's **Endpoint AI** tab: console domain, region, client_id, secret, then **Save and test**.
+3. **Turn on the Endpoint AI agent** for the generator's app profile in the Client Connector portal, and check the generator shows under **Administration > Devices**.
+4. **Create the demo policy**: **Create or update** on the Endpoint AI tab. The kit makes the device group `SE-Demo: traffic generator` (only the generator) and the policy `SE-Demo: Agentic Guardrails`, assigned to that group only.
+5. **On the generator**, as the Windows user who'll run the demo: `C:\SE-Demo\eai.cmd demo --install`, then sign in with `claude` (or `C:\SE-Demo\eai.cmd demo --set-key` for an API key). Double-click **SE-Demo Endpoint AI scenes** once and check **Generator activity** on the Endpoint AI tab a few minutes later.
+
+The scenes use only AWS's published example key (`AKIAIOSFODNN7EXAMPLE`) and a decoy folder the kit creates. **Build PDF** on the tab gives you the Executive Brief as a leave-behind.
+
 ## Part 7: Before every demo (5 minutes)
 
 Run the readiness check the morning of the demo, and give yourself time to fix what it finds.
@@ -211,6 +223,8 @@ Run the readiness check the morning of the demo, and give yourself time to fix w
   - ZIA drift: kit rules missing, disabled or out of order, or Client Connector profiles off Z-Tunnel 2.0;
   - recent traffic rounds and Insights panels with data;
   - the AWS start/stop schedule, so the generator isn't asleep during the demo.
+  - Endpoint AI (if set up): the credential isn't about to expire, the generator is online, the policy is assigned, and demo events arrived in the last 24 hours.
+- [ ] **Endpoint AI:** set **Mode** to **Monitor** and run the scenes once, so there's recent activity to show.
 - [ ] **Drift found?** On the ZIA tab, click **Check for drift**, then **Fix drift**. It only changes the kit's own objects.
 - [ ] **Demo after 9pm New York or on a weekend?** Start the AWS instance by hand in the EC2 console.
 - [ ] **Clean up the screen.** Close tabs with secrets, turn off **Show talk track** if you'll share the whole screen, and update the kit (**Updates** button).

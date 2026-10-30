@@ -107,6 +107,10 @@ set PYTHONUTF8=1
 "@
 Set-Content -Encoding ascii -Path "$root\zia.cmd" -Value ($envs + "`r`nset NO_COLOR=1`r`n`"$root\uv\uv.exe`" run --quiet --python 3.12 --script `"$root\kit\aiguard_kit.py`" zia %* --yes >> `"$root\traffic.log`" 2>&1`r`n")
 Set-Content -Encoding ascii -Path "$root\console.cmd" -Value ($envs + "`r`n`"$root\uv\uv.exe`" run --quiet --python 3.12 --script `"$root\kit\aiguard_kit.py`" gui`r`n")
+# Endpoint AI demo scenes run as whoever signs in (Claude Code and the Endpoint AI agent's hooks are per Windows
+# user), so this wrapper keeps that user's own profile instead of C:\SE-Demo\home.
+$eaienv = "@echo off`r`nset UV_CACHE_DIR=$root\uv-cache`r`nset UV_PYTHON_INSTALL_DIR=$root\python`r`nset UV_SYSTEM_CERTS=1`r`nset UV_NATIVE_TLS=1`r`nset PYTHONUTF8=1`r`n"
+Set-Content -Encoding ascii -Path "$root\eai.cmd" -Value ($eaienv + "`"$root\uv\uv.exe`" run --quiet --python 3.12 --script `"$root\kit\aiguard_kit.py`" eai %*`r`n")
 & "$root\zia.cmd" help
 
 # 4. Scheduled tasks (as SYSTEM, so they run with nobody signed in to Windows)
@@ -123,6 +127,8 @@ foreach ($s in @(@("SE-Demo ZIA console", "$root\console.cmd"), @("SE-Demo traff
   if ($s[1] -like "*console.cmd" -and (Test-Path "$root\kit\assets\zia-icon.ico")) { $l.IconLocation = "$root\kit\assets\zia-icon.ico,0" }
   $l.Save()
 }
+$l = $sh.CreateShortcut("C:\Users\Public\Desktop\SE-Demo Endpoint AI scenes.lnk"); $l.TargetPath = "$env:ComSpec"
+$l.Arguments = "/k `"$root\eai.cmd`" demo"; $l.Save()
 # 6. Let whoever signs in run the console too. Setup ran as SYSTEM, so C:\SE-Demo (uv cache, Python, settings)
 #    is otherwise read-only to a remote desktop user's non-elevated session. This box is single-purpose and only
 #    administrators can sign in to it, so giving local Users modify rights here is acceptable.

@@ -1707,10 +1707,10 @@ def test_manual_steps_file_is_complete_and_the_docs_are_in_sync():
     for s in data["steps"]:
         assert s["stage"] in data["stages"] and (s["steps"] or s["who"] == "kit") and s["why"] and s["title"]
         conds = ("always", "docs", "aiguard", "aiguard-kit", "zia", "zia-zidentity-user", "zia-zcc-manual",
-                 "zia-zcc-auto", "zia-aws")
+                 "zia-zcc-auto", "zia-aws", "eai")
         assert s["applies"] in conds and s["who"] in ("you", "kit")
         assert s.get("check") in (None, "reminder", "oneapi-saved", "zia-entitled", "zcc-profiles", "kit-aiguard",
-                                  "kit-zia-user", "kit-zia-policy")
+                                  "kit-zia-user", "kit-zia-policy", "eai-saved", "kit-eai", "eai-device")
         assert s["who"] == "you" or s.get("action")          # the kit's steps say how to start them
         for n in s["needs"]:                                  # every need names a real step and a known condition
             nid, _, cond = n.partition("?")

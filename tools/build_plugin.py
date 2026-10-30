@@ -14,7 +14,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "plugin" / "aiguard-se-demo"
 KIT_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json", "policy_template.json",
              "README.md", "SECURITY.md", "CHANGELOG.md", "PREFLIGHT.md", "preflight_help.json", "WINDOWS.md",
-             "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md"]
+             "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md",
+             "eai_module.py", "eai_policy_template.json", "ENDPOINT-AI.md"]
 
 
 def check():

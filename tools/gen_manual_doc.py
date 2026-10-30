@@ -20,8 +20,9 @@ WHEN = {"always": "Every tenant.", "aiguard": "When the AI Guard demo is set up.
         "zia-aws": "When you use the AWS generator and Fleet Manager offers no single sign-on.",
         "docs": "Only when the situation described applies (the console doesn't list it).",
         "aiguard-kit": "When you use the AI Guard demo.",
-        "zia-zcc-auto": "When the ZIA demo is set up and the Client Connector API accepts the profiles."}
-COND = {"zia-zidentity-user": "on ZIdentity tenants"}
+        "zia-zcc-auto": "When the ZIA demo is set up and the Client Connector API accepts the profiles.",
+        "eai": "When you use the Endpoint AI Security demo."}
+COND = {"zia-zidentity-user": "on ZIdentity tenants", "zia": "with the ZIA demo"}
 
 
 def render(level=1):

@@ -45,5 +45,10 @@ fi
 export UV_SYSTEM_CERTS=1 UV_NATIVE_TLS=1
 echo; echo "  Preparing Python 3.12 and the kit's libraries (the first time takes a minute or two)..."
 "$UV" run --quiet --python 3.12 --script ./aiguard_kit.py install || fail "Install failed. The message above says why."
-echo; echo "  Opening the console. Keep this window open while you use it; close it to stop the console."
-exec "$HOME/.aiguard-se-kit/app/aiguard-kit" gui
+echo; echo "  Opening the console in your browser. It runs in the background, like the desktop shortcut:"
+echo "  use Quit in the console to stop it. You can close this window."
+mkdir -p "$HOME/.aiguard-se-kit/logs"
+nohup "$HOME/.aiguard-se-kit/app/aiguard-kit" gui --background >>"$HOME/.aiguard-se-kit/logs/console-output.log" 2>&1 </dev/null &
+disown 2>/dev/null
+sleep 2
+exit 0

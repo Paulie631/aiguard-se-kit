@@ -13,7 +13,7 @@
    - adds an **AI Guard Demo Console** shortcut to your desktop (and the Start menu on Windows)
    - adds the `aiguard-kit` command, so `aiguard-kit gui` works from any folder in a new terminal
    - re-points scheduled traffic at the installed copy, if you'd set it up
-   - opens the console on its Setup tab
+   - opens the console on its Setup tab, in your browser and in the background: you can close the installer window
 4. From then on, double-click **AI Guard Demo Console** on your desktop. It runs in the background (no terminal window) and opens in your browser; the first start after an install or update can take up to a minute. Click the shortcut again to bring the console back, and **Quit** (top right) to stop it. If nothing opens, run `aiguard-kit gui` in a terminal to see why.
 
 You can delete the unzipped folder afterwards. Your settings, keys and test results stay in `~/.aiguard-se-kit` and the system keychain, so reinstalling or upgrading never asks you to set up again.

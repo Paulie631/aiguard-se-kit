@@ -107,6 +107,8 @@ Keys are saved in your OS keychain. Settings that aren't secret are in `~/.aigua
 ./aiguard-kit install | uninstall        desktop shortcut + `aiguard-kit` on PATH (what the double-click installers run)
 
 ./aiguard-kit zia setup|preflight|status|teardown|dashboards   ZIA demo policy (admin machine; see ZIA.md)
+./aiguard-kit eai connect|setup|mode|status|events|report|teardown   Endpoint AI demo (see ENDPOINT-AI.md)
+./aiguard-kit eai demo        on the generator: Claude Code runs the Endpoint AI scenes
 ./aiguard-kit zia status --fix                                 repair drift in the kit's own ZIA objects
 ./aiguard-kit zia check|traffic|schedule                       ZIA traffic generator (the generator VM, no keys)
 
@@ -121,6 +123,15 @@ Any command: --profile NAME (separate tenants), --prefix NAME, --verbose, --yes
 
 The kit can also fill ZIA and Insights dashboards in the same demo tenant: `zia setup` creates `SE-Demo:` URL filtering, Cloud App Control, File Type Control, DLP, firewall and DNS rules **for one test user only**, and a separate Windows VM or cloud machine running Client Connector as that user sends real traffic (`zia traffic`, `zia schedule install`). The generator needs no API keys and uses only safe test data (EICAR, Google Safe Browsing test pages, generated fake card numbers and SSNs). Never run it on a corporate laptop. It ships as its own **Zscaler ZIA SE Demo Kit** release (`zscaler-zia-kit-*.zip`, tags `zia-v*`, pre-release) that installs beside this kit with a `zia-kit` command and its own update channel. Steps, what's created and what each check proves: [ZIA.md](ZIA.md). For a start-to-finish walkthrough of both (API client, install, AI Guard, ZIA, traffic generator, demo day), see the **SE deployment guide**: [docs/DEPLOYMENT-GUIDE.md](docs/DEPLOYMENT-GUIDE.md), attached to every release as a Word file stamped with that version. The console's **Internet Access (ZIA)** tab does the same.
 
+
+## Endpoint AI Security
+
+The kit can also demo Endpoint AI Security on the same traffic generator: an AI coding agent (Claude Code) tries to
+write a cloud access key to disk and to force-delete a folder; Endpoint AI records it in **Monitor** and stops it in
+**Block**. It uses its own API credential (Endpoint AI console > Administration > API Access, Admin role), creates
+one device group holding only the generator and one `SE-Demo:` policy assigned to that group, and uses only safe test
+data (AWS's published example key, a decoy folder). The **Endpoint AI** tab shows the generator's events and builds
+the Executive Brief PDF as a leave-behind. Steps and what each check proves: [ENDPOINT-AI.md](ENDPOINT-AI.md).
 ## Rolling back
 
 Every release stays on the GitHub Releases page, and nothing is lost by going back.
@@ -172,4 +183,4 @@ Attach `~/.aiguard-se-kit/runs.jsonl` (results, no keys) when asking for help.
 
 ## Files
 
-`Install AI Guard Kit.cmd` / `.command`: double-click installers (see INSTALL.md) · `aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `zia_module.py`, `zia_policy_template.json`: ZIA demo policy · `zia_traffic.py`, `zia_traffic.json`: ZIA traffic generator · `ZIA.md`: ZIA runbook · `docs/DEPLOYMENT-GUIDE.md`: SE deployment guide · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.
+`Install AI Guard Kit.cmd` / `.command`: double-click installers (see INSTALL.md) · `aiguard-kit`, `aiguard-kit.cmd`: launchers (Mac/Linux, Windows; see WINDOWS.md) · `aiguard_kit.py`: the kit · `gui.html`: the console · `tests.json`: core tests and storylines · `packs/`: industry packs · `policy_template.json`: the demo policy · `zia_module.py`, `zia_policy_template.json`: ZIA demo policy · `zia_traffic.py`, `zia_traffic.json`: ZIA traffic generator · `ZIA.md`: ZIA runbook · `eai_module.py`, `eai_policy_template.json`, `ENDPOINT-AI.md`: Endpoint AI demo · `docs/DEPLOYMENT-GUIDE.md`: SE deployment guide · `preflight_help.json`, `PREFLIGHT.md`: preflight runbook · `TESTPLAN.md`: validation plan · `tests/`: offline tests · `plugin/`, `tools/`: Claude plugin.

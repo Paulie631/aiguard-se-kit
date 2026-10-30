@@ -33,6 +33,12 @@ Internet Access (ZIA), see ZIA.md:
   ./aiguard-kit zia aws        write a CloudFormation template for a generator instance on AWS (--zcc-url s3://bucket/key or URL)
   ./aiguard-kit zia script     write a PowerShell setup script for a generator on CloudShare or any Windows VM
   ./aiguard-kit zia dashboards which ZIA / Insights dashboards still look empty (Insights lags about 2 days)
+
+Endpoint AI Security, see ENDPOINT-AI.md:
+  ./aiguard-kit eai connect    save the Endpoint AI API credential (Administration > API Access, Admin role)
+  ./aiguard-kit eai setup      the generator's device group and the SE-Demo policy (--host NAME adds a generator)
+  ./aiguard-kit eai mode monitor|block   switch what the demo policy does;  eai status / events / report / teardown
+  ./aiguard-kit eai demo       on the generator: Claude Code runs the demo scenes (--install, --set-key)
   ./aiguard-kit zia check      on the traffic generator machine: is traffic reaching the demo tenant? (no keys needed)
   ./aiguard-kit zia traffic    on the generator: one round of demo traffic (--types web,saas,genai,threats,dlp,files,dns,ports
                                --count N); zia schedule install|remove|status [--every 30] repeats it
@@ -55,7 +61,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.20"
+VERSION = "1.8.21"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -91,7 +97,8 @@ YES = "--yes" in ARGS or "-y" in ARGS
 FORCE = "--force" in ARGS
 VERBOSE = "--verbose" in ARGS or "-v" in ARGS
 VALUE_OPTS = ("--prefix", "--preset", "--mode", "--rounds", "--tests", "--port", "--profile", "--count", "--every",
-              "--user", "--types", "--domain", "--via", "--zcc-url", "--out")
+              "--user", "--types", "--domain", "--via", "--zcc-url", "--out", "--region", "--client-id", "--host",
+              "--hours", "--edition", "--days", "--scene")
 
 
 def opt(name, default=None):
@@ -227,7 +234,10 @@ _ACT_SEQ = [0]
 _ACT_LOCK = threading.Lock()
 _SECRETS: set = set()
 _SECRET_FIELDS = re.compile(r"^(key|secret|clientsecret|client_secret|token|apikey|api_key|password|authorization|"
-                            r"x-apikey|x-api-key|bearer)$", re.I)
+                            r"x-apikey|x-api-key|bearer|access_token)$", re.I)
+# Secrets with a recognisable shape, masked wherever they appear even if the kit never loaded them: Endpoint AI
+# client secrets and enrollment tokens, Anthropic API keys.
+_SECRET_SHAPES = re.compile(r"\b(sqrx_sk_|ZTK-|sk-ant-)[A-Za-z0-9._-]{6,}")
 
 
 def remember_secret(v):
@@ -255,6 +265,7 @@ def redact(o, depth=0):
         for sec in _SECRETS:
             if sec in o:
                 o = o.replace(sec, sec[:4] + "…")
+        o = _SECRET_SHAPES.sub(lambda m: m.group(1) + "…", o)
         return o[:20000]
     return o
 
@@ -1314,7 +1325,8 @@ INSTALL_FILES = ["aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html",
                  "preflight_help.json", "manual_steps.json", "MANUAL-STEPS.md", "README.md", "PREFLIGHT.md", "SECURITY.md", "CHANGELOG.md", "WINDOWS.md",
                  "INSTALL.md", "Uninstall AI Guard Kit.cmd", "Uninstall AI Guard Kit.command",
                  "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md",
-                 "CHANGELOG-ZIA.md", "edition.json", "zia-kit", "zia-kit.cmd", "assets"]
+                 "CHANGELOG-ZIA.md", "edition.json", "zia-kit", "zia-kit.cmd", "assets",
+                 "eai_module.py", "eai_policy_template.json", "ENDPOINT-AI.md"]
 
 
 def _install_files():
@@ -2336,7 +2348,8 @@ def manual_applies(cond, cfg):
             "zia-zidentity-user": made.get("via") == "zidentity",
             "zia-zcc-manual": zcc_manual,
             "zia-zcc-auto": zia_on and not zcc_manual,
-            "zia-aws": bool(z.get("aws"))}.get(cond, False)
+            "zia-aws": bool(z.get("aws")),
+            "eai": bool(cfg.get("eai"))}.get(cond, False)
 
 
 def manual_check(cid, cfg, zia_tenant=None):
@@ -2355,6 +2368,17 @@ def manual_check(cid, cfg, zia_tenant=None):
     if cid == "kit-zia-policy":
         state = z.get("state") or {}
         return ("done", f"{state.get('rules', 0)} rules") if state.get("set_up") else ("todo", "")
+    e = cfg.get("eai") or {}
+    if cid == "eai-saved":
+        saved = bool(e.get("client_id")) and kc_has("eai-client-secret")
+        return ("done" if saved else "todo"), ("credential saved on this computer" if saved else "not saved yet")
+    if cid == "kit-eai":
+        st = e.get("state") or {}
+        return ("done", f"{st.get('mode', 'monitor').title()} mode") if st.get("policy_id") else ("todo", "")
+    if cid == "eai-device":   # what the last Endpoint AI setup found; setup runs again once the agent is on
+        devs = (e.get("state") or {}).get("devices") or []
+        return ("done", ", ".join(d.get("hostname") or d.get("id", "")[:8] for d in devs)) if devs else \
+            ("todo", "no generator in Endpoint AI yet (run Endpoint AI setup again once the agent is on)")
     if cid not in ("zia-entitled", "zcc-profiles"):
         return None, ""
     if zia_tenant is None:   # offline: what the last setup recorded
@@ -2529,6 +2553,14 @@ def readiness(cfg):
         zm = product("zia")
         creds = bool(cfg.get("client_id")) and kc_has("oneapi-client-secret")
         out += zm.ready_checks(cfg, (lambda: zm.connect(cfg)) if creds else None)
+    if (cfg.get("eai") or {}).get("client_id"):
+        try:
+            em = product("eai")
+            out += em.status(em.connect(cfg), cfg)
+        except Exception as e:
+            out.append({"id": "ready-eai-credential", "label": "Endpoint AI Security", "status": "fail",
+                        "detail": str(e)[:200], "fix": "Check the credential on the console's Endpoint AI tab "
+                                                       "(./aiguard-kit eai connect)."})
     try:
         open_ = [i["title"] for i in manual_open(manual_status(cfg, zia_tenant=zia_tenant_for(cfg)))]
         if out or open_:
@@ -2773,23 +2805,27 @@ WIN_CONHOST = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "
 
 
 def restart_console(srv, port):
-    """Reopen the console from the installed copy (after an update), on the same port when possible."""
+    """Reopen the console from the installed copy (after an update), on the same port when possible. Always in the
+    background, like the desktop shortcut: a console that was started in a terminal (by the installer, or by an older
+    shortcut) doesn't come back in that terminal."""
     import subprocess
     launcher = APP_DIR / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
-    background = "--background" in ARGS
-    args = (["gui", "--port", str(port), "--restarted"] + (["--background"] if background else [])
+    args = (["gui", "--port", str(port), "--restarted", "--background"]
             + (["--profile", PROFILE] if PROFILE != "default" else []))
     try:
         srv.socket.close()  # free the port for the new console
     except OSError:
         pass
+    if sys.stdout and sys.stdout.isatty():
+        print("\n  The console restarted in the background (Quit in the console stops it). You can close this window.")
     if WINDOWS:
-        if background:   # no window, like the desktop shortcut
-            subprocess.Popen([str(WIN_CONHOST), "--headless", str(launcher), *args], cwd=str(HOME))
-        else:
-            subprocess.Popen(["cmd", "/c", "start", APP_NAME, str(launcher), *args], cwd=str(HOME))
+        subprocess.Popen([str(WIN_CONHOST), "--headless", str(launcher), *args], cwd=str(HOME))
         os._exit(0)
-    os.execv("/bin/bash", ["bash", str(launcher), *args])
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_DIR / "console-output.log", "ab") as out:
+        subprocess.Popen(["nohup", "bash", str(launcher), *args], cwd=str(HOME), stdin=subprocess.DEVNULL,
+                         stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    os._exit(0)
 
 
 def cmd_gui():
@@ -2816,6 +2852,15 @@ def cmd_gui():
             zia_cache.clear()
             zia_cache[key] = product("zia").connect(c)
         return zia_cache[key]
+    eai_cache = {}
+
+    def eai_tenant(c):   # its own credential (Administration > API Access), not the OneAPI client
+        e = c.get("eai") or {}
+        key = (e.get("domain"), e.get("region"), e.get("client_id"))
+        if key not in eai_cache:
+            eai_cache.clear()
+            eai_cache[key] = product("eai").connect(c)
+        return eai_cache[key]
     port = int(opt("port", "8765"))
 
     if WINDOWS:  # on Windows SO_REUSEADDR lets a second console silently share the port
@@ -2915,6 +2960,27 @@ def cmd_gui():
                 self.wfile.write(data)
                 activity("setup", "Diagnostics downloaded", "info")
                 return
+            if path.startswith("/api/eai/report-file"):
+                name = (self.path.split("name=", 1)[1:] or [""])[0].split("&")[0]
+                f = product("eai").report_file(name)
+                if not f:
+                    return self._send(404, {"error": "no such report"})
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf" if f.suffix == ".pdf" else "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{f.name}"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if path.startswith("/api/eai/"):
+                c = load_cfg()
+                em = product("eai")
+                try:
+                    out = em.api_get(path if not path.startswith("/api/eai/events") else self.path, c, lambda: eai_tenant(c))
+                except Exception as e:
+                    return self._send(200, {"error": str(e), "fix": em.ehint(e)})
+                return self._send(200, out) if out is not None else self._send(404, {"error": "not found"})
             if path.startswith("/api/zia/"):
                 c = load_cfg()
                 try:
@@ -3087,6 +3153,35 @@ def cmd_gui():
                     return self._send(200, product("zia").api_aws(c, body, lambda: zia_tenant(c)))
                 except Exception as e:
                     return self._send(400, {"error": str(e), "fix": product("zia").zhint(e)})
+            if path.startswith("/api/eai/"):
+                em = product("eai")
+                try:
+                    out = em.api_post(path, body, c)
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": em.ehint(e)})
+                if out is not None:
+                    eai_cache.clear()
+                    return self._send(200, out)
+                if path.endswith("teardown") and body.get("confirm") != "DELETE":
+                    return self._send(400, {"error": "Type DELETE to confirm."})
+                jid = uuid.uuid4().hex[:8]
+                job = JOBS[jid] = {"done": False, "stop": False, "total": 0, "results": []}
+
+                def elog(level, msg):
+                    job["results"].append({"level": level, "msg": msg})
+                    em.record(level, msg)
+
+                def eai_work():
+                    try:
+                        if not em.api_job(path, body, load_cfg(), lambda: eai_tenant(load_cfg()), elog, job):
+                            job["error"] = {"error": "not found", "fix": ""}
+                    except Exception as e:
+                        job["error"] = {"error": str(e), "fix": em.ehint(e)}
+                        elog("fail", f"{e}")
+                    job["done"] = True
+
+                threading.Thread(target=eai_work, daemon=True).start()
+                return self._send(200, {"id": jid})
             if path.startswith("/api/zia/"):
                 if path.endswith("teardown") and body.get("confirm") != "DELETE":
                     return self._send(400, {"error": "Type DELETE to confirm."})
@@ -3229,6 +3324,7 @@ apply_edition(HERE / "edition.json")
 PRODUCTS = {
     "aiguard": {"label": "AI Guard", "module": None},
     "zia": {"label": "Internet Access (ZIA)", "module": "zia_module.py"},
+    "eai": {"label": "Endpoint AI Security", "module": "eai_module.py"},
 }
 _PRODUCT_MODULES: dict = {}
 
@@ -3269,6 +3365,11 @@ def cmd_zia():
     product("zia").cli([a for a in ARGS[i + 1:]])
 
 
+def cmd_eai():
+    i = ARGS.index("eai")
+    product("eai").cli([a for a in ARGS[i + 1:]])
+
+
 # ---------------------------------------------------------------- main
 def main():
     tls_setup()
@@ -3281,7 +3382,7 @@ def main():
         cmd = product_
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "gui": cmd_gui, "run": cmd_run, "status": cmd_status, "teardown": cmd_teardown,
             "policy": cmd_policy, "schedule": cmd_schedule, "install": cmd_install, "uninstall": cmd_uninstall,
-            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia, "ready": cmd_ready,
+            "update": cmd_update, "repair": cmd_repair, "logs": cmd_logs, "zia": cmd_zia, "eai": cmd_eai, "ready": cmd_ready,
             "todo": cmd_todo}
     if cmd not in cmds:
         print(__doc__)

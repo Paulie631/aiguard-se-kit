@@ -201,6 +201,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   <button data-t="packs">Test packs</button>
   <button data-t="logs">Logs<span class="tabcount" id="logerr" style="display:none"></span></button>
   <button data-t="zia">Internet Access (ZIA)</button>
+  <button data-t="eai">Endpoint AI</button>
 </nav>
 <div class="healthbar" id="healthbar">
   <div><b>This computer's demo setup needs a repair.</b><ul id="healthlist"></ul></div>
@@ -276,6 +277,61 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
     <div class="row" style="gap:10px"><span class="muted" style="font-size:13px">Deletes every <code>SE-Demo:</code> ZIA object and activates. AI Guard objects are not touched.</span>
       <input type="text" id="ziatdc" placeholder="Type DELETE" style="width:130px"><button id="ziatd">Remove ZIA demo</button></div>
     <div class="log" id="ziatdlog" style="display:none;margin-top:12px"></div>
+  </div>
+</div>
+</div>
+
+<!-- ============ ENDPOINT AI ============ -->
+<div class="view" id="v-eai">
+<div class="wrap stack" style="max-width:1100px">
+  <div class="panel">
+    <h2>1 · Connect <span class="muted" style="font-weight:400;font-size:13px">· your admin machine</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Endpoint AI Security has its own API credential, not the OneAPI client. In the Endpoint AI console open <b id="eaipath">Administration &gt; API Access</b>, create a credential named <code>se-demo-kit</code> with the <b>Admin</b> role and an expiry, and copy the client_id and client_secret (shown once). The secret is kept in this computer's keychain. Never paste it into chat, email or tickets.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap">
+      <span class="lbl">Console domain</span><input type="text" id="eaidomain" placeholder="zsai.sqrx.io" style="width:170px">
+      <span class="lbl">Region</span><input type="text" id="eairegion" placeholder="use2" style="width:70px" title="From the API host on API Access: https://<region>.api.<domain>">
+      <span class="lbl">client_id</span><input type="text" id="eaicid" style="width:280px">
+      <span class="lbl">client_secret</span><input type="password" id="eaisecret" placeholder="sqrx_sk_…" style="width:200px" autocomplete="off">
+      <button class="primary" id="eaiconnect">Save and test</button>
+    </div>
+    <div class="hint" id="eaicred" style="margin-top:8px"></div>
+  </div>
+  <div class="panel">
+    <h2>2 · Demo policy <span class="muted" style="font-weight:400;font-size:13px">· scoped to the traffic generator only</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Creates the device group <code id="eaigroup">SE-Demo: traffic generator</code> holding only the generator, and the policy <code id="eaipol">SE-Demo: Agentic Guardrails</code> assigned to that group alone: an agent writing a cloud access key to disk, and an agent running a recursive force-delete. The generator is found by the test user the kit created for ZIA, or by the hostnames below (enter one if you chose your own test user). Nothing else in the tenant changes.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap">
+      <span class="lbl">Generator hostnames</span><input type="text" id="eaihosts" placeholder="optional, e.g. EC2AMAZ-1A2B3C" style="width:240px">
+      <label class="chk" title="Adds a rule that blocks every shell command from AI agents on the generator"><input type="checkbox" id="eailock">Shell lock rule</label>
+      <button class="primary" id="eaisetup">Create or update</button>
+      <button id="eaistatus">Check status</button>
+      <span class="lbl" style="margin-left:8px">Mode</span>
+      <select id="eaimode"><option value="monitor">Monitor (record, let it run)</option><option value="block">Block</option></select>
+    </div>
+    <div id="eaiout"></div>
+    <div class="log" id="eailog" style="display:none;margin-top:12px"></div>
+  </div>
+  <div class="panel">
+    <h2>3 · Run the scenes <span class="muted" style="font-weight:400;font-size:13px">· on the generator VM, never a corporate laptop</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Client Connector delivers the Endpoint AI agent. Claude Code on the generator then runs each scene with a fixed prompt. Only safe test data is used: AWS's published example key <code>AKIAIOSFODNN7EXAMPLE</code> and a throwaway <code>decoy-project</code> folder the kit creates. First time on the generator: <code>eai demo --install</code>, then sign in with <code>claude</code> or save an API key with <code>eai demo --set-key</code>.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><span id="eaiscenes" class="row" style="gap:10px"></span><button class="primary" id="eaidemo">Run scenes on this machine</button></div>
+    <div id="eaidemoout"></div>
+    <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
+  </div>
+  <div class="panel">
+    <h2>4 · Show what happened</h2>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><button id="eaievents">Generator activity</button>
+      <select id="eaihours"><option value="1">Last hour</option><option value="24" selected>Last 24 hours</option><option value="168">Last 7 days</option></select>
+      <span class="lbl" style="margin-left:8px">Leave-behind</span><select id="eaiedition"><option value="executive">AI Security Executive Brief</option><option value="ai-asset">AI Asset Report</option></select>
+      <button id="eaireport">Build PDF (last 7 days)</button><span id="eailastrep" class="muted" style="font-size:12px"></span></div>
+    <div id="eaievout" style="margin-top:10px"></div>
+    <div class="log" id="eairepl" style="display:none;margin-top:12px"></div>
+  </div>
+  <div class="panel danger">
+    <h2>Remove the Endpoint AI demo</h2>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><span class="muted" style="font-size:13px">Deletes the kit's policy and device group (only those, matched by exact name).</span>
+      <label class="chk"><input type="checkbox" id="eaitddev">Also remove the generator's devices from Endpoint AI</label>
+      <input type="text" id="eaitdc" placeholder="Type DELETE" style="width:130px"><button id="eaitd">Remove Endpoint AI demo</button></div>
+    <div class="log" id="eaitdlog" style="display:none;margin-top:12px"></div>
   </div>
 </div>
 </div>
@@ -487,7 +543,7 @@ async function loadManual(check){if(check)$("#manlist").insertAdjacentHTML("afte
   try{MAN=(await api("/api/manual"+(check?"?check=1":""))).steps||[];drawManual()}catch(e){$("#manlist").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}}
 async function markManual(id,done){try{await api("/api/manual/mark",{id,done});await loadManual(false)}catch(e){alert(e.message)}}
 $("#mandone").onchange=drawManual;$("#mancheck").onclick=()=>loadManual(true);
-$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup"){wizard();loadManual(true)}if(b.dataset.t=="zia")zia()});
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup"){wizard();loadManual(true)}if(b.dataset.t=="zia")zia();if(b.dataset.t=="eai")eai()});
 
 /* ---------- state ---------- */
 async function loadState(){
@@ -1244,6 +1300,48 @@ $("#ziadash").onclick=async()=>{$("#ziadashout").innerHTML='<div class="muted">A
   const lab={ok:"has data",partial:"traffic, no blocks yet",empty:"empty",error:"error"};
   $("#ziadashout").innerHTML=`<div class="tablewrap"><table><tr><th>Panel</th><th>State</th><th>Total</th><th>Top</th></tr>${r.panels.map(p=>`<tr><td>${esc(p.label)}</td><td><span class="ic ${p.status=="ok"?"ok":p.status=="empty"?"fail":"warn"}">${ICON[p.status=="ok"?"ok":p.status=="empty"?"fail":"warn"]}</span> ${lab[p.status]}</td><td>${p.total!=null?p.total.toLocaleString():""}</td><td>${esc((p.top||[]).join(", ")||p.error||"")}</td></tr>`).join("")}</table></div>`}catch(e){$("#ziadashout").innerHTML=`<div class="fail">${esc(e.message)}</div>`}};
 $("#ziatd").onclick=()=>{if($("#ziatdc").value!="DELETE")return alert("Type DELETE to confirm.");runJob("/api/zia/teardown",{confirm:"DELETE"},$("#ziatdlog"),()=>{$("#ziatdc").value="";zia()})};
+
+/* ---------- Endpoint AI ---------- */
+let EAI=null;
+async function eai(){
+  try{const e=EAI=await api("/api/eai/state");if(e.error)throw new Error(e.error);
+    $("#eaidomain").value=$("#eaidomain").value||e.domain;$("#eairegion").value=$("#eairegion").value||e.region;$("#eaicid").value=$("#eaicid").value||e.client_id;
+    $("#eaipath").textContent=e.console_path;$("#eaigroup").textContent=e.group;$("#eaipol").textContent=e.policy;
+    $("#eaihosts").value=(e.hosts||[]).join(", ");$("#eailock").checked=!!e.shell_lock;
+    const c=e.credential||{};
+    $("#eaicred").textContent=e.saved?`Saved: ${e.client_id}`+(c.name?` (${c.name}${c.roles?", "+c.roles.filter(Boolean).join(", "):""}${c.expires_at?", expires "+String(c.expires_at).slice(0,10):""})`:"")+(e.state&&e.state.set_up?` · set up ${e.state.set_up}, ${(e.state.mode||"monitor")} mode`:" · not set up yet"):"Not connected yet.";
+    if(e.state&&e.state.mode)$("#eaimode").value=e.state.mode;
+    if(!$("#eaiscenes").children.length)$("#eaiscenes").innerHTML=e.scenes.map(s=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-es="${s.id}" checked>${esc(s.title)}</label>`).join("");
+    $("#eailastrep").innerHTML=e.last_report?`Last: <a href="#" data-rep="${esc(e.last_report.file)}">${esc(e.last_report.file)}</a>`:"";
+  }catch(err){$("#eaicred").textContent=err.message}
+}
+const eaiHosts=()=>$("#eaihosts").value.split(",").map(x=>x.trim()).filter(Boolean);
+$("#eaiconnect").onclick=async()=>{const b=$("#eaiconnect");b.disabled=true;$("#eaicred").textContent="Checking the credential…";
+  try{const r=await api("/api/eai/connect",{domain:$("#eaidomain").value,region:$("#eairegion").value,client_id:$("#eaicid").value.trim(),client_secret:$("#eaisecret").value});
+    $("#eaisecret").value="";if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));await eai();loadManual&&loadManual(true)}
+  catch(err){$("#eaicred").innerHTML=`<span class="fail">✗ ${esc(err.message)}</span>`}finally{b.disabled=false}};
+$("#eaisetup").onclick=async()=>{
+  if(!confirm(`Create or update the device group and the policy '${(EAI||{}).policy||"SE-Demo: Agentic Guardrails"}' (assigned to that group only) in ${$("#eaimode").value} mode? Demo/eval tenants only.`))return;
+  try{const r=await api("/api/eai/hosts",{hosts:eaiHosts(),shell_lock:$("#eailock").checked});if(r.error)throw new Error(r.error)}catch(err){return alert(err.message)}
+  $("#eaiout").innerHTML="";runJob("/api/eai/setup",{mode:$("#eaimode").value},$("#eailog"),j=>{eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+$("#eaistatus").onclick=async()=>{$("#eaiout").innerHTML='<div class="muted">Checking…</div>';
+  try{const r=await api("/api/eai/status");if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));$("#eaiout").innerHTML=checksHTML(r.checks);eai()}catch(err){$("#eaiout").innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
+$("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
+  $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+$("#eaidemo").onclick=()=>{const scenes=$$("[data-es]").filter(x=>x.checked).map(x=>x.dataset.es);if(!scenes.length)return;
+  if(!confirm("Run the scenes on THIS machine? Only on the traffic generator VM, never a corporate laptop: Claude Code will try to write AWS's example key to a file and delete the kit's decoy folder."))return;
+  $("#eaidemoout").innerHTML="";runJob("/api/eai/demo",{scenes},$("#eaidemolog"),j=>{if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
+$("#eaievents").onclick=async()=>{const el=$("#eaievout");el.innerHTML='<div class="muted">Loading…</div>';
+  try{const r=await api(`/api/eai/events?hours=${$("#eaihours").value}`);if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));
+    if(!r.items.length){el.innerHTML=`<div class="muted">No AI activity from ${esc((r.hosts||[]).concat(r.emails||[]).join(", ")||"the generator (not found yet)")} in this window. Events show a few minutes after a scene runs.</div>`;return}
+    el.innerHTML=`<div class="muted" style="font-size:12.5px;margin-bottom:6px">${r.matched} matched the demo rules · ${r.total} events in all · ${esc((r.hosts||[]).join(", "))}</div><div class="tablewrap"><table><tr><th>Time</th><th>Verdict</th><th>Tool</th><th>Command</th><th>Detections</th></tr>${r.items.map(i=>`<tr${i.demo?' style="font-weight:600"':""}><td>${esc(String(i.time||"").replace("T"," ").slice(0,19))}</td><td><span class="ic ${/block|deny/.test(i.verdict)?"fail":i.verdict=="audit"?"warn":"ok"}">${/block|deny/.test(i.verdict)?ICON.fail:i.verdict=="audit"?ICON.warn:ICON.ok}</span> ${esc(i.verdict||"")}</td><td>${esc(i.tool||"")}</td><td><code style="font-size:12px">${esc(i.command)}</code></td><td style="font-size:12px">${esc([...(i.patterns||[]),...(i.owasp||[]),...(i.mitre||[])].filter(Boolean).join(" · "))}</td></tr>`).join("")}</table></div>`}
+  catch(err){el.innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
+$("#eaireport").onclick=()=>{runJob("/api/eai/report",{edition:$("#eaiedition").value,days:7},$("#eairepl"),j=>{eai();const f=((j.notes||[])[0]||{}).file;
+  if(f)$("#eairepl").insertAdjacentHTML("beforeend",`<div class="h"><a href="#" data-rep="${esc(f)}">Download ${esc(f)}</a></div>`)})};
+document.addEventListener("click",async ev=>{const a=ev.target.closest&&ev.target.closest("[data-rep]");if(!a)return;ev.preventDefault();   // the console's API needs its token header, so fetch, then save
+  const r=await fetch(`/api/eai/report-file?name=${encodeURIComponent(a.dataset.rep)}`,{headers:{"X-Kit-Token":TOKEN}});if(!r.ok)return alert("That report isn't on this computer any more.");
+  const b=await r.blob();const l=document.createElement("a");l.href=URL.createObjectURL(b);l.download=a.dataset.rep;l.click()});
+$("#eaitd").onclick=()=>{if($("#eaitdc").value!="DELETE")return alert("Type DELETE to confirm.");runJob("/api/eai/teardown",{confirm:"DELETE",devices:$("#eaitddev").checked},$("#eaitdlog"),()=>{$("#eaitdc").value="";eai()})};
 
 init();
 </script>
