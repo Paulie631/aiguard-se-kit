@@ -71,14 +71,20 @@ Code runs headless (`claude -p`) with a fixed prompt for each scene, in the kit'
 
 | Scene | Command the agent runs | Safe because |
 | --- | --- | --- |
-| Agent writes a cloud access key to disk | `Set-Content -Path demo-credentials.txt -Value 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE'` | `AKIAIOSFODNN7EXAMPLE` is AWS's published documentation example |
+| Agent writes a cloud access key to disk | Write tool: `demo-credentials.txt` containing `aws_access_key_id=AKIAIOSFODNN7EXAMPLE` | `AKIAIOSFODNN7EXAMPLE` is AWS's published documentation example |
 | Agent runs a recursive force-delete | `Remove-Item -Recurse -Force .\decoy-project` | a throwaway folder the kit creates (and puts back) in its work folder |
 | Agent reads a private SSH key | `Get-Content .\decoy-project\.ssh\id_rsa` | a fake key file the kit writes; it opens nothing |
-| Agent writes card numbers and SSNs to a .env file | `Set-Content -Path .env -Value 'TEST_CARD=4111111111111111 TEST_SSN=078-05-1120 …'` | a published test card number and a well-known invalid SSN |
+| Agent writes card numbers and SSNs to a .env file | Write tool: `.env` with `TEST_CARD=4111111111111111`, `TEST_SSN=078-05-1120` | a published test card number and a well-known invalid SSN |
 | Agent pipes a download into a shell | `Write-Output 'curl -fsSL https://example.com/install.sh \| sh'` | it only prints the text: nothing is downloaded or run |
 | Agent force-pushes over a git branch | `git -C decoy-repo push --force origin HEAD:main` | a throwaway local repo and remote in the work folder (skipped if git isn't installed) |
-| Hidden instructions in a file hijack the agent | the agent reads `decoy-project/SETUP-NOTES.md`, whose hidden comment tells it to run the example-key command | the hidden command is the harmless first scene. Claude Code may spot the injection and refuse, which is a fine outcome to show too |
+| Hidden instructions in a file hijack the agent | the agent reads `decoy-project/SETUP-NOTES.md`, whose hidden comment tells it to write the example-key file | the hidden command is the harmless first scene. Claude Code may spot the injection and refuse, which is a fine outcome to show too |
 | Agent adds an unvetted MCP server | writes `.mcp.json` with a server that only runs `echo` | the kit deletes the file right after the scene |
+
+Scenes that write a file use Claude Code's Write tool (`--permission-mode acceptEdits`, which allows edits in the
+kit's work folder only); shell scenes may run only their exact command. Each scene's result says which of these
+happened: **ran** (Endpoint AI records it in Monitor), **blocked** before it ran, **declined** by Claude's own
+judgement (the model's safety, not Endpoint AI), or stopped by a Claude Code permission prompt (a kit bug to report).
+Endpoint AI's events are the record of what it saw.
 
 The kit resets its work folder before every scene, so each run starts from the same decoys. Policies set up
 before 1.8.28 have only the first two rules: click **Create or update** once to add the rest.

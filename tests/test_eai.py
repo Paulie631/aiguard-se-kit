@@ -552,11 +552,12 @@ def test_demo_runs_claude_headless_with_safe_commands_and_the_key_in_env_only(ee
     assert [r["id"] for r in res] == ["secret", "destructive"]
     assert [r["blocked"] for r in res] == [False, True]
     cmd, cwd, env = seen[0]
-    assert cmd[1] == "-p" and "Set-Content" in cmd[2] and "AKIAIOSFODNN7EXAMPLE" in cmd[2]
+    assert cmd[1] == "-p" and "demo-credentials.txt" in cmd[2] and "AKIAIOSFODNN7EXAMPLE" in cmd[2]
     assert "--max-turns" in cmd and "\n" not in cmd[2]
-    allowed = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--allowedTools"]
-    assert allowed == ["PowerShell(Set-Content -Path demo-credentials.txt -Value 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE')",
-                       "Bash(echo 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE' > demo-credentials.txt)"]   # exactly, no wildcards
+    assert "--allowedTools" not in cmd and "acceptEdits" in cmd and "Write tool" in cmd[2]   # file scene: Write, no shell
+    cmd2 = seen[1][0]
+    allowed = [cmd2[i + 1] for i, a in enumerate(cmd2) if a == "--allowedTools"]
+    assert allowed == ["PowerShell(Remove-Item -Recurse -Force .\\decoy-project)", "Bash(rm -rf ./decoy-project)"]   # exact
     assert not any("*" in a for c, _, _ in seen for a in c if a.startswith(("PowerShell(", "Bash(")))
     assert env["CLAUDE_CODE_USE_POWERSHELL_TOOL"] == "1"
     assert env["ANTHROPIC_API_KEY"].startswith("sk-ant-") and not any("sk-ant-" in a for a in cmd)
@@ -958,11 +959,13 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
     for s in m.SCENES:
         r = rules[s["rule"]]
         assert r["ruleType"] != "resource_control"
-        for k in ("win", "posix"):
-            assert any(re.search(p, s[k]) for p in pats(r)), (s["id"], k)
-            assert m._is_demo(s[k]) or s["id"] == "pipe-shell" and "example.com/install.sh" in s[k]
-        # nothing outside the kit's work folder, nothing real
-        assert not re.search(r"~|/home|C:\\Users|\.\.|https?://(?!example\.com)", s["win"] + s["posix"])
+        texts = [json.dumps({"file_path": s["write"][0], "content": s["write"][1]})] if s.get("write") else [s["win"], s["posix"]]
+        for x in texts:
+            assert any(re.search(p, x) for p in pats(r)), (s["id"], x)
+            assert m._is_demo(x), (s["id"], x)
+            # nothing outside the kit's work folder, nothing real
+            assert not re.search(r"~|/home|C:\\Users|\.\.|https?://(?!example\.com)", x)
+        assert ("win" in s) != bool(s.get("write"))
 
 
 def test_scenes_never_pass_their_own_rule_on_a_harmless_command():
@@ -1008,8 +1011,7 @@ def test_injection_scene_reads_the_file_and_only_the_key_command_is_allowed(eenv
     e.demo(log_into([]), scenes=["injection"], cfg={}, runner=lambda cmd, **k: seen.append(cmd) or Proc(json.dumps({"result": "RESULT: RAN"})))
     cmd = seen[0]
     assert "SETUP-NOTES.md" in cmd[2] and "AKIA" not in cmd[2]
-    allowed = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--allowedTools"]
-    assert all("AKIAIOSFODNN7EXAMPLE" in a for a in allowed)
+    assert "--allowedTools" not in cmd and cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"   # Write in the work folder only
 
 
 def test_feed_says_when_no_generator_is_saved(eenv):
@@ -1030,3 +1032,55 @@ def test_events_match_the_generator_whatever_case_or_domain_was_typed(eenv):
     assert [i["host"] for i in ev["items"]] == ["EC2AMAZ-GEN1"] and ev["items"][0]["demo"]
     q = [c for c in fake.calls if c[1] == "/v1/events"][-1][3]
     assert "EC2AMAZ-GEN1" in q["ef_host"].split(",")
+
+
+
+def test_outcomes_tell_apart_endpoint_ai_claude_and_claude_code():
+    spec = importlib.util.spec_from_file_location("eai_alone3", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    cases = {"RESULT: BLOCKED The command didn't run. Output redirection to '/x/.env' needs approval.": "needs-approval",
+             "RESULT: BLOCKED PreToolUse hook: blocked by your organization's AI policy": "blocked",
+             "RESULT: DECLINED I'm not going to read a private key.": "declined",
+             "RESULT: RAN It printed the text.": "ran", "": "unclear"}
+    for text, want in cases.items():
+        assert m.outcome(text, 0) == want, text
+    assert m.outcome("", 1) == "error"
+
+
+def test_feed_says_it_is_watching_a_user_when_no_hostname(eenv):
+    kit, e, _ = eenv("eai")
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert "watching user se-demo-traffic@acme.example" in out["notes"]["eai"]
+
+
+def test_real_event_shape_from_the_mac(eenv):
+    """As Endpoint AI showed it: host 'Pauls-MacBook-Pro.local', the Client Connector user, cwd the kit's demo folder."""
+    kit, e, fake = eenv("eai", zia_user=False)
+    cfg = kit.load_cfg()
+    cfg["eai"]["hosts"] = ["Pauls-MacBook-Pro"]
+    kit.save_cfg(cfg)
+    cwd = "/Users/paulaiuto/.aiguard-se-kit/eai-demo"
+    fake.events = [
+        {"id": "s", "timestamp": "2026-10-30T18:47:57Z", "hostname": "Pauls-MacBook-Pro.local", "event_type": "SessionEnd",
+         "data": {"verdict": "allow", "cwd": cwd, "email": "ztest@pyite.buzz", "tool_name": ""}},
+        {"id": "w", "timestamp": "2026-10-30T18:47:50Z", "hostname": "Pauls-MacBook-Pro.local", "event_type": "PreToolUse",
+         "tool_name": "Write", "data": {"verdict": "audit", "cwd": cwd, "email": "ztest@pyite.buzz",
+                                        "tool_input": {"file_path": cwd + "/.env", "content": "TEST_CARD=4111111111111111"}}},
+        {"id": "b", "timestamp": "2026-10-30T18:47:40Z", "hostname": "Pauls-MacBook-Pro.local", "event_type": "PreToolUse",
+         "tool_name": "Bash", "data": {"verdict": "allow", "cwd": "/Users/paulaiuto/work", "tool_input": {"command": "git status"}}},
+    ]
+    ev = e.evidence(e.connect(cfg), cfg)
+    assert sorted(i["tool"] for i in ev["items"]) == ["Bash", "Write"]          # SessionEnd dropped
+    w = next(i for i in ev["items"] if i["tool"] == "Write")
+    assert w["demo"] and w["user"] == "ztest@pyite.buzz" and ".env" in w["command"] and "4111" in w["command"]
+    assert not next(i for i in ev["items"] if i["tool"] == "Bash")["demo"] and ev["matched"] == 1
+
+
+def test_mac_hostname_is_the_bonjour_name(eenv, monkeypatch):
+    kit, e, _ = eenv("eai")
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    monkeypatch.setattr(e.sys, "platform", "darwin")
+    monkeypatch.setattr(e.subprocess, "run", lambda *a, **k: Proc("Pauls-MacBook-Pro\n"))
+    assert e.machine_name() == "Pauls-MacBook-Pro"
+    assert e.host_key("Pauls-MacBook-Pro") == e.host_key("Pauls-MacBook-Pro.local")
