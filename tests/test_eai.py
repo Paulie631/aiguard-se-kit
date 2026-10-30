@@ -100,6 +100,8 @@ class FakeEai:
                 return Resp(200, {"device_groups": [g for g in self.groups if not q.get("q") or q["q"].lower() in g["name"].lower()]})
             if any(g["name"] == body["name"] for g in self.groups):
                 return Resp(409, {"error": "conflict", "message": "duplicate name"})
+            if set(body) - {"name"}:   # like the real API: unknown fields are a 400
+                return Resp(400, {"error": "validation_failed", "message": "invalid request body", "request_id": "req-400"})
             g = {"id": next(self.ids), "name": body["name"], "members": []}
             self.groups.append(g)
             return Resp(201, g)
@@ -763,3 +765,10 @@ def test_report_rate_limit_download_failure_and_names(eenv):
     fake.report_polls = 0
     b = e.report(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
     assert a != b and a.exists() and b.exists()
+
+
+def test_errors_name_the_call_that_failed(eenv):
+    kit, e, fake = eenv("eai")
+    fake.fail_next.append(("POST", "/v1/device-groups", 400, "validation_failed"))
+    with pytest.raises(e.EaiError, match="on POST /v1/device-groups"):
+        e.ensure_group(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
