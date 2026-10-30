@@ -209,6 +209,18 @@ def eenv(monkeypatch, tmp_path):
     return make
 
 
+def rule_matches(match, tool_name, tool_input):
+    """The template's match language, enough to check the demo rules: field/op/value, any, all, not."""
+    if "any" in match:
+        return any(rule_matches(m, tool_name, tool_input) for m in match["any"])
+    if "all" in match:
+        return all(rule_matches(m, tool_name, tool_input) for m in match["all"])
+    if "not" in match:
+        return not rule_matches(match["not"], tool_name, tool_input)
+    val = tool_name if match["field"] == "tool_name" else tool_input
+    return bool(re.search(match["value"], val)) if match["op"] == "regex" else val == match["value"]
+
+
 def log_into(lines):
     return lambda level, msg: lines.append((level, msg))
 
@@ -963,9 +975,11 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
     for s in m.SCENES:
         r = rules[s["rule"]]
         assert r["ruleType"] != "resource_control"
-        texts = [json.dumps({"file_path": s["write"][0], "content": s["write"][1]})] if s.get("write") else [s["win"], s["posix"]]
-        for x in texts:
-            assert any(re.search(p, x) for p in pats(r)), (s["id"], x)
+        texts = ([("Write", json.dumps({"file_path": s["write"][0], "content": s["write"][1]}))] if s.get("write")
+                 else [("PowerShell", s["win"]), ("Bash", s["posix"]), ("PowerShell", json.dumps({"command": s["win"]}))])
+        for tool, x in texts:
+            assert rule_matches(r["match"], tool, x), (s["id"], tool, x)
+            x = x if tool != "PowerShell" or not x.startswith("{") else json.loads(x)["command"]
             assert m._is_demo(x), (s["id"], x)
             # nothing outside the kit's work folder, nothing real
             # nothing outside the kit's folders (the "outside" scene reads the kit's own second decoy folder), nothing real
@@ -977,15 +991,23 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
         assert ("win" in s) != bool(s.get("write"))
 
 
-def test_scenes_never_pass_their_own_rule_on_a_harmless_command():
+def test_rules_stay_quiet_on_ordinary_developer_work():
     rules = json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"]
-    for harmless in ("git status", "Get-Content README.txt", "echo hello", "ls -la", "npm test"):
-        for r in rules:
-            if r.get("optional"):
-                continue
-            mt = r["match"]
-            for p in ([c["value"] for c in mt["any"]] if "any" in mt else [mt["value"]]):
-                assert not re.search(p, harmless), (r["id"], harmless)
+    harmless = [("Bash", c) for c in ("git status", "Get-Content README.txt", "echo hello", "ls -la", "npm test", "cd ../frontend",
+                                      "ls ../", "source ~/.bashrc", "cat ~/.zshrc", "git commit --no-verify -m wip",
+                                      "curl -s https://example.com -d q=1", "docker run -d nginx", "npm install left-pad",
+                                      "pip install requests", "cat app.profile.ts", "tar -czf build.tgz dist")]
+    harmless += [("Write", json.dumps({"file_path": "src/app.ts", "content": "import { x } from '../utils'"})),
+                 ("Edit", json.dumps({"file_path": "src/app.profile.ts", "old_string": "a", "new_string": "b"})),
+                 ("Bash", json.dumps({"command": "Get-ChildItem ..\\docs"}))]
+    for r in rules:
+        if r.get("optional"):
+            continue
+        for tool, x in harmless:
+            assert not rule_matches(r["match"], tool, x), (r["id"], x)
+    for r in rules:   # no lookaheads or other constructs a non-Python (RE2/Go) engine rejects
+        for v in re.findall(r'"value": "([^"]*)"', json.dumps(r["match"])):
+            assert "(?!" not in v and "(?=" not in v and "(?<" not in v, (r["id"], v)
 
 
 def test_work_dir_builds_and_resets_the_decoys(eenv, monkeypatch):
@@ -1211,3 +1233,39 @@ def test_new_scenes_decoys(eenv):
     (d / "decoy-project" / ".bashrc").write_text("x")
     e.work_dir()
     assert not (d / ".claude" / "settings.json").exists() and not (d / "decoy-project" / ".bashrc").exists()
+
+
+
+def test_setup_without_a_mode_keeps_block(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]), mode="block")
+    cfg = kit.load_cfg()
+    cfg["eai"].pop("actions")   # e.g. saved by an older kit, before per-rule actions
+    kit.save_cfg(cfg)
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    pol = next(p for p in fake.policies if p["name"].startswith("SE-Demo"))
+    assert {r["verdict"] for r in pol["rules"]} == {"block"}
+
+
+def test_a_timed_out_scene_still_cleans_up(eenv, monkeypatch):
+    kit, e, _ = eenv("eai", "demo")
+    monkeypatch.setattr(e, "find_claude", lambda: "/usr/bin/claude")
+    d = e.work_dir()
+
+    def slow(cmd, **k):
+        (d / ".claude").mkdir(exist_ok=True)
+        (d / ".claude" / "settings.json").write_text('{"permissions": {"defaultMode": "bypassPermissions"}}')
+        raise e.subprocess.TimeoutExpired(cmd, 240)
+    res = e.demo(log_into([]), scenes=["bypass"], cfg={}, runner=slow)
+    assert res[0]["outcome"] == "error" and "240 seconds" in res[0]["error"]
+    assert not (d / ".claude" / "settings.json").exists()
+
+
+def test_status_keeps_the_mode_when_rules_come_back_without_ids(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]), mode="block")
+    pol = next(p for p in fake.policies if p["name"].startswith("SE-Demo"))
+    for r in pol["rules"]:
+        r.pop("id")
+    e.status(e.connect(kit.load_cfg()), kit.load_cfg())
+    assert kit.load_cfg()["eai"]["state"]["mode"] == "block"

@@ -57,7 +57,7 @@
       "match": {
         "field": "tool_input",
         "op": "regex",
-        "value": "(?i)[\\\\/]\\.ssh[\\\\/]id_(rsa|ed25519|ecdsa|dsa)\\b"
+        "value": "(?i)[\\\\/]+\\.ssh[\\\\/]+id_(rsa|ed25519|ecdsa|dsa)\\b"
       },
       "events": [
         "PreToolUse"
@@ -164,14 +164,14 @@
     },
     {
       "id": "r-sedemo-upload",
-      "title": "Upload to an outside URL",
+      "title": "File upload to an outside URL",
       "group": "Data exfiltration",
       "scene": "exfil-post",
       "ruleType": "custom",
       "match": {
         "field": "tool_input",
         "op": "regex",
-        "value": "(?i)\\b(curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\\b.*(-X\\s*POST|--data|--upload-file|\\s-d\\s|\\s-F\\s|-Method\\s+Post|-InFile)"
+        "value": "(?i)\\b(curl|wget)\\b[^;&|\\n]*(--data-binary\\s+@|--upload-file|-F\\s+\\S*=@|\\s-T\\s)|\\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\\b[^;&|\\n]*-InFile"
       },
       "events": [
         "PreToolUse"
@@ -190,7 +190,7 @@
       "match": {
         "field": "tool_input",
         "op": "regex",
-        "value": "(?i)[\\\\/]\\.(aws[\\\\/]credentials|azure[\\\\/]|config[\\\\/]gcloud[\\\\/])"
+        "value": "(?i)[\\\\/]+\\.(aws[\\\\/]+credentials|azure[\\\\/]+|config[\\\\/]+gcloud[\\\\/]+)"
       },
       "events": [
         "PreToolUse"
@@ -207,9 +207,27 @@
       "scene": "persistence",
       "ruleType": "custom",
       "match": {
-        "field": "tool_input",
-        "op": "regex",
-        "value": "(?i)[\\\\/]?\\.(bashrc|zshrc|bash_profile|zprofile|profile)\\b|Microsoft\\.PowerShell_profile\\.ps1|LaunchAgents"
+        "any": [
+          {
+            "all": [
+              {
+                "field": "tool_name",
+                "op": "regex",
+                "value": "^(Write|Edit|MultiEdit)$"
+              },
+              {
+                "field": "tool_input",
+                "op": "regex",
+                "value": "(?i)(^|[\\s'\\\"/\\\\])\\.(bashrc|zshrc|bash_profile|zprofile)\\b|[\\\\/]+\\.profile\\b|Microsoft\\.PowerShell_profile\\.ps1|LaunchAgents[\\\\/]+"
+              }
+            ]
+          },
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)>>?\\s*\\S*\\.(bashrc|zshrc|bash_profile|zprofile|profile)\\b"
+          }
+        ]
       },
       "events": [
         "PreToolUse"
@@ -228,7 +246,7 @@
       "match": {
         "field": "tool_input",
         "op": "regex",
-        "value": "(?i)core\\.hooksPath|--no-verify\\b"
+        "value": "(?i)core\\.hooksPath"
       },
       "events": [
         "PreToolUse"
@@ -259,14 +277,14 @@
     },
     {
       "id": "r-sedemo-registry",
-      "title": "Unknown package registry",
+      "title": "Non-default package registry",
       "group": "Supply chain",
       "scene": "registry",
       "ruleType": "custom",
       "match": {
         "field": "tool_input",
         "op": "regex",
-        "value": "(?i)(--registry|--index-url|--extra-index-url)\\s*=?\\s*https?://(?!registry\\.npmjs\\.org|pypi\\.org)"
+        "value": "(?i)(--registry|--index-url|--extra-index-url)(\\s+|=)https?://"
       },
       "events": [
         "PreToolUse"
@@ -297,14 +315,14 @@
     },
     {
       "id": "r-sedemo-outside",
-      "title": "Reaching outside the project",
+      "title": "Reading files outside the project",
       "group": "Agent misuse",
       "scene": "outside",
       "ruleType": "custom",
       "match": {
         "field": "tool_input",
         "op": "regex",
-        "value": "(?:^|[\\s'\\\"=(])\\.\\.[\\\\/]"
+        "value": "(?i)\\.\\.[\\\\/]+[^\\s'\\\"]*?(notes\\.txt|\\.env\\b|secrets?\\b|credentials\\b)"
       },
       "events": [
         "PreToolUse"
@@ -317,7 +335,7 @@
     {
       "id": "r-sedemo-shell-lock",
       "title": "Shell lock: every shell command",
-      "group": "Agent misuse",
+      "group": "Shell lock",
       "optional": true,
       "ruleType": "custom",
       "match": {
