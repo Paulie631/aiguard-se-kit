@@ -633,11 +633,14 @@ def evidence(t, cfg, hours=24, limit=50):
     if not hosts and not emails:
         return {"items": [], "matched": 0, "total": 0, "hosts": [], "patterns": {}}
     q = {"since": _since(hours), "limit": limit}
-    if hosts:
-        q["ef_host"] = ",".join(hosts)
+    if hosts:   # as typed, short and upper-case: Endpoint AI may record "EC2AMAZ-GEN1" for "ec2amaz-gen1.ec2.internal"
+        q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for x in (h, host_key(h), host_key(h).upper())))
     elif emails:
         q["ef_user"] = ",".join(emails)
     body = t.get("/v1/events", **q)
+    if hosts:   # and only the generator's events, even if the API ignored the filter
+        keys = {host_key(h) for h in hosts}
+        body = {"items": [ev for ev in _items(body, "events") if host_key(ev.get("hostname")) in keys]}
     ids = {r["id"] for r in template()["rules"]}
     items = []
     for ev in _items(body, "events"):

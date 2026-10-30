@@ -1016,3 +1016,17 @@ def test_feed_says_when_no_generator_is_saved(eenv):
     kit, e, _ = eenv("eai", zia_user=False)
     out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     assert "Create or update" in out["notes"]["eai"]
+
+
+def test_events_match_the_generator_whatever_case_or_domain_was_typed(eenv):
+    kit, e, fake = eenv("eai", zia_user=False)
+    cfg = kit.load_cfg()
+    cfg["eai"]["hosts"] = ["ec2amaz-gen1.ec2.internal"]
+    kit.save_cfg(cfg)
+    fake.events = [{"id": "a", "timestamp": "2026-10-30T12:00:00Z", "hostname": "EC2AMAZ-GEN1", "tool_name": "PowerShell",
+                    "data": {"verdict": "audit", "tool_input": {"command": "cat ./decoy-project/.ssh/id_rsa"}}},
+                   {"id": "b", "timestamp": "2026-10-30T12:00:00Z", "hostname": "MBP-JLEE", "data": {}}]
+    ev = e.evidence(e.connect(cfg), cfg)
+    assert [i["host"] for i in ev["items"]] == ["EC2AMAZ-GEN1"] and ev["items"][0]["demo"]
+    q = [c for c in fake.calls if c[1] == "/v1/events"][-1][3]
+    assert "EC2AMAZ-GEN1" in q["ef_host"].split(",")
