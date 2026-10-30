@@ -3,6 +3,9 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.23
+- Eight Endpoint AI scenes (see AI Guard kit CHANGELOG 1.8.28).
+
 ## 0.2.22
 - Live feed on its own tab (see AI Guard kit CHANGELOG 1.8.27).
 
