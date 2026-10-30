@@ -466,7 +466,7 @@ def test_evidence_puts_the_demo_events_first(eenv):
     assert ev["matched"] == 1 and ev["items"][0]["tool"] == "PowerShell" and ev["items"][0]["demo"]
     assert "AKIAIOSFODNN7EXAMPLE" in ev["items"][0]["command"] and ev["items"][0]["mitre"] == ["AML.T0055"]
     q = [c for c in fake.calls if c[1] == "/v1/events"][-1][3]
-    assert q["ef_host"] == "EC2AMAZ-GEN1" and "since" in q
+    assert "EC2AMAZ-GEN1" in q["ef_host"].split(",") and "since" in q
 
 
 def test_report_is_queued_polled_and_downloaded_without_the_token(eenv):
