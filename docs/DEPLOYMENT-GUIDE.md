@@ -208,7 +208,7 @@ Shows an AI coding agent on the generator trying something risky: Endpoint AI re
 2. **Connect** on the kit's **Endpoint AI** tab: console domain, region, client_id, secret, then **Save and test**.
 3. **Turn on the Endpoint AI agent** for the generator's app profile in the Client Connector portal, and check the generator shows under **Administration > Devices**.
 4. **Create the demo policy**: **Create or update** on the Endpoint AI tab. The kit makes the device group `SE-Demo: traffic generator` (only the generator) and the policy `SE-Demo: Agentic Guardrails`, assigned to that group only.
-5. **On the generator**, as the Windows user who'll run the demo: `C:\SE-Demo\eai.cmd demo --install`, then sign in with `claude` (or `C:\SE-Demo\eai.cmd demo --set-key` for an API key). Double-click **SE-Demo Endpoint AI scenes** once and check **Generator activity** on the Endpoint AI tab a few minutes later.
+5. **On the generator**, as the Windows user who'll run the demo: `C:\SE-Demo\eai.cmd demo --install`, then sign in with `claude` (or `C:\SE-Demo\eai.cmd demo --set-key` for an API key). Double-click **SE-Demo Endpoint AI scenes** once and watch the live feed (Endpoint AI tab, step 4) on your laptop.
 
 The scenes use only AWS's published example key (`AKIAIOSFODNN7EXAMPLE`) and a decoy folder the kit creates. **Build PDF** on the tab gives you the Executive Brief as a leave-behind.
 

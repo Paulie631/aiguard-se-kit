@@ -80,8 +80,14 @@ before it runs and tells the agent why.
 
 ## Showing the results
 
-- **Generator activity** on the Endpoint AI tab (or `./aiguard-kit eai events --hours 24`): the generator's recent AI
-  events, the demo's own on top, with verdict, tool, command and detections.
+- **Live feed** (Endpoint AI tab, step 4, on your laptop; no Client Connector needed there): refreshes every 20
+  seconds while you're looking at it, with new rows flashing. It merges the generator's Endpoint AI events (verdict,
+  tool, command, OWASP Agentic and MITRE ATLAS tags) with the AI Guard events this computer sent, on one clock. ZIA
+  has no near-live log API, so ZIA shows as the Insights summary (about 2 days behind). Pause, sources and window
+  (15 minutes, hour, 24 hours) are on the feed. `./aiguard-kit eai events --hours 24` prints the Endpoint AI part.
+- **Guided demo storyline "AI agents on the endpoint"**: four steps with a talk track. Each step switches the
+  Endpoint AI policy for you (Monitor, Monitor, Block, then back to Monitor) and shows the live feed beside it.
+  You run the scenes on the generator; the laptop only watches.
 - **Build PDF**: the **AI Security Executive Brief** or **AI Asset Report** for the last 7 days
   (`./aiguard-kit eai report --edition executive`), saved under the kit's folder in `reports/` and downloadable
   from the tab. A leave-behind for the customer.

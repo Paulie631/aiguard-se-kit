@@ -178,6 +178,8 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 @media (max-width:1200px){.twocol{grid-template-columns:1fr}}
 @media (max-width:900px){.wiz,.form{grid-template-columns:1fr}}
 @media (max-width:900px){main,.demo{grid-template-columns:1fr;padding:16px}.wrap{padding:16px}aside.panel{position:static;max-height:none}header{padding:12px 16px}nav.tabs{padding:0 12px;top:0;position:static}.stage{padding:18px}}
+@keyframes feedflash{from{background:rgba(255,196,0,.35)}to{background:transparent}}
+tr.feednew td{animation:feedflash 4s ease-out}
 </style>
 </head>
 <body>
@@ -324,12 +326,11 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
     <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
   </div>
   <div class="panel">
-    <h2>4 · Show what happened</h2>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><button id="eaievents">Generator activity</button>
-      <select id="eaihours"><option value="1">Last hour</option><option value="24" selected>Last 24 hours</option><option value="168">Last 7 days</option></select>
-      <span class="lbl" style="margin-left:8px">Leave-behind</span><select id="eaiedition"><option value="executive">AI Security Executive Brief</option><option value="ai-asset">AI Asset Report</option></select>
+    <h2>4 · Show what happened <span class="muted" style="font-weight:400;font-size:13px">· your laptop: a live feed, no Client Connector needed here</span></h2>
+    <div id="eaifeed"></div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px">
+      <span class="lbl">Leave-behind</span><select id="eaiedition"><option value="executive">AI Security Executive Brief</option><option value="ai-asset">AI Asset Report</option></select>
       <button id="eaireport">Build PDF (last 7 days)</button><span id="eailastrep" class="muted" style="font-size:12px"></span></div>
-    <div id="eaievout" style="margin-top:10px"></div>
     <div class="log" id="eairepl" style="display:none;margin-top:12px"></div>
   </div>
   <div class="panel danger">
@@ -554,7 +555,7 @@ $$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.cla
 /* ---------- state ---------- */
 async function loadState(){
   const st=await api("/api/state");
-  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;S.ziaSetUp=!!st.zia_set_up;S.levels=st.block_levels||{attacks:[],data:[],never:[]};
+  S.lib=st.lib;S.apps=st.apps;S.panels=st.panels;S.competitor=st.competitor;S.console=st.console;S.ziaSetUp=!!st.zia_set_up;S.eaiSetUp=!!st.eai_set_up;S.levels=st.block_levels||{attacks:[],data:[],never:[]};
   $("#tenant").textContent=`${st.tenant||"not set up"}${st.profile!="default"?" · profile "+st.profile:""} · kit ${st.version}`;
   $("#console").href=st.console;
   if(st.update_behind){const u=$("#upd");u.classList.add("new");u.textContent="Update available";u.title=`git -C "${st.kit_dir}" pull`}
@@ -882,7 +883,7 @@ function drawStage(){
   const s=steps[S.step], show=s.kind=="show", t=show?null:(stepTest(s)||{text:"(test not found: "+s.test+")",direction:"IN"});
   const viaProxy=!show&&demoProxy()&&t.direction=="IN", last=S.step==steps.length-1;
   const owasp=(s.owasp||[]).map(o=>`<span class="owasp" title="OWASP Top 10 for LLM Applications 2025: ${esc(OWASP[o]||o)}">${esc(o)}</span>`).join("");
-  const needs=S.story.requires=="zia"&&!S.ziaSetUp?`<div class="notice" style="display:block;margin-bottom:14px">This storyline uses the ZIA demo. Set it up first: <code>zia setup</code> on this machine and a traffic generator running for a few days (Internet Access tab, ZIA.md).</div>`:"";
+  const needs=S.story.requires=="eai"&&!S.eaiSetUp?`<div class="notice" style="display:block;margin-bottom:14px">This storyline uses the Endpoint AI demo. Set it up first on the Endpoint AI tab (connect, then Create or update), with the traffic generator enrolled.</div>`:S.story.requires=="zia"&&!S.ziaSetUp?`<div class="notice" style="display:block;margin-bottom:14px">This storyline uses the ZIA demo. Set it up first: <code>zia setup</code> on this machine and a traffic generator running for a few days (Internet Access tab, ZIA.md).</div>`:"";
   $("#stage").innerHTML=`${S.step==0?needs:""}<div class="kicker">STEP ${S.step+1} OF ${steps.length}<span id="skpol">${kickPol()}</span>${show?" · SHOW IN THE CONSOLE":""}</div>
     <h3>${esc(s.title)}${owasp}</h3>
     ${newsHTML(s)}${talkHTML(s)}${notesHTML(s)}
@@ -895,7 +896,11 @@ function drawStage(){
       <button id="snext" ${last?"disabled":""}>Next ›</button>
       ${last?`<button id="srecap">Recap</button><a href="${esc(S.console)}" target="_blank">Show it in Insights ↗</a>`:""}
     </div>
+    ${show&&s.eai_mode?`<div class="muted" id="seaimode" style="font-size:12.5px;margin-top:10px"></div>`:""}
+    ${show&&s.feed?`<div id="sfeed" style="margin-top:14px"></div>`:""}
     <div class="verdict" id="sverdict"></div>`;
+  if(show&&s.feed)liveFeed($("#sfeed"),{sources:["eai","aiguard"],minutes:15});
+  if(show&&s.eai_mode)eaiStepMode(s.eai_mode);
   if(last)$("#srecap").onclick=drawRecap;
   if(show&&s.link)$("#slink").onclick=()=>window.open(s.link,"_blank","noopener");
   $("#sback").onclick=()=>{S.step--;drawStage()};$("#snext").onclick=()=>{S.step++;drawStage()};$("#srun").onclick=show?markShown:runStep;
@@ -905,6 +910,17 @@ function drawStage(){
     $$("#smode button").forEach(x=>x.classList.toggle("on",x===b));$("#skpol").innerHTML=kickPol();drawSteps();applyNote();preApply(0)});
   applyNote();preApply();
 }
+// Endpoint AI steps switch the SE-Demo Endpoint AI policy when they open (only when it isn't in that mode already).
+let EAIMODE=null;
+async function eaiStepMode(m){const el=$("#seaimode");if(!el)return;
+  try{if(EAIMODE==null){const e=await api("/api/eai/state");EAIMODE=(e.state||{}).mode||null;if(!(e.state||{}).policy_id){el.textContent="Endpoint AI demo policy not set up: Endpoint AI tab, step 2.";return}}
+    if(EAIMODE==m){el.textContent=`Endpoint AI policy: ${m=="block"?"Block":"Monitor"}.`;return}
+    el.textContent=`Switching the Endpoint AI policy to ${m=="block"?"Block":"Monitor"}…`;
+    const {id}=await api("/api/eai/mode",{mode:m});
+    const tick=async()=>{const j=await api(`/api/job?id=${id}&since=0`);if(!j.done)return setTimeout(tick,800);
+      if(j.error){el.innerHTML=`<span class="fail">${esc(j.error.error)}</span>`;return}
+      EAIMODE=m;if($("#seaimode"))$("#seaimode").textContent=`Endpoint AI policy: ${m=="block"?"Block":"Monitor"} (switched just now).`};tick()}
+  catch(err){el.innerHTML=`<span class="fail">${esc(err.message)}</span>`}}
 // Per-step Monitor / Block, and switching the policy when a step opens so the ~30 s it takes to apply is spent talking.
 const APPLY_MS=30000;
 // Block = the smallest profile that covers the detectors the step's test is written to trigger (or the step's own
@@ -1307,9 +1323,41 @@ $("#ziadash").onclick=async()=>{$("#ziadashout").innerHTML='<div class="muted">A
   $("#ziadashout").innerHTML=`<div class="tablewrap"><table><tr><th>Panel</th><th>State</th><th>Total</th><th>Top</th></tr>${r.panels.map(p=>`<tr><td>${esc(p.label)}</td><td><span class="ic ${p.status=="ok"?"ok":p.status=="empty"?"fail":"warn"}">${ICON[p.status=="ok"?"ok":p.status=="empty"?"fail":"warn"]}</span> ${lab[p.status]}</td><td>${p.total!=null?p.total.toLocaleString():""}</td><td>${esc((p.top||[]).join(", ")||p.error||"")}</td></tr>`).join("")}</table></div>`}catch(e){$("#ziadashout").innerHTML=`<div class="fail">${esc(e.message)}</div>`}};
 $("#ziatd").onclick=()=>{if($("#ziatdc").value!="DELETE")return alert("Type DELETE to confirm.");runJob("/api/zia/teardown",{confirm:"DELETE"},$("#ziatdlog"),()=>{$("#ziatdc").value="";zia()})};
 
+/* ---------- live feed (Endpoint AI, AI Guard, ZIA) ---------- */
+const FEEDSRC={eai:"Endpoint AI",aiguard:"AI Guard",zia:"ZIA"};
+function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
+  const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null};
+  el.innerHTML=`<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
+    <span class="lbl">Live feed</span>${Object.entries(FEEDSRC).map(([k,v])=>`<label class="chk" style="margin:0"><input type="checkbox" data-fs="${k}" ${st.src.includes(k)?"checked":""}>${v}</label>`).join("")}
+    <select data-fm><option value="15" ${st.min==15?"selected":""}>Last 15 min</option><option value="60" ${st.min==60?"selected":""}>Last hour</option><option value="1440">Last 24 hours</option></select>
+    <button data-fp>Pause</button><span class="muted" data-fstat style="font-size:12px"></span></div>
+    <div data-fzia style="margin-top:8px"></div><div data-fbody style="margin-top:8px"></div>`;
+  const q=x=>el.querySelector(x);
+  el.querySelectorAll("[data-fs]").forEach(c=>c.onchange=()=>{st.src=[...el.querySelectorAll("[data-fs]")].filter(x=>x.checked).map(x=>x.dataset.fs);tick(true)});
+  q("[data-fm]").onchange=()=>{st.min=+q("[data-fm]").value;tick(true)};
+  q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
+  const vis=()=>el.isConnected&&el.offsetParent!==null&&!document.hidden;   // only polls while you can see it
+  async function tick(now){clearTimeout(st.timer);if(!el.isConnected)return;
+    if(st.on&&(now||vis())){try{draw(await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`))}catch(e){q("[data-fstat]").textContent=e.message}}
+    st.timer=setTimeout(()=>tick(false),opt.every||20000)}
+  function draw(r){const errs=Object.entries(r.errors||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
+    q("[data-fstat]").textContent=`updated ${r.at}`+(st.on?" · every 20 s":" · paused")+(errs.length?" · "+errs.join("; "):"");
+    const z=r.zia;q("[data-fzia]").innerHTML=st.src.includes("zia")?(z?(z.error?`<div class="muted" style="font-size:12.5px">ZIA (${esc(z.note)}): ${esc(z.error)}</div>`:`<div class="muted" style="font-size:12.5px"><b>ZIA</b> (${esc(z.note)}; ZIA has no live log API): ${z.panels.map(p=>`${esc(p.label)} ${p.total!=null?p.total.toLocaleString():"–"}`).join(" · ")}</div>`):`<div class="muted" style="font-size:12.5px">ZIA: not set up on this computer.</div>`):"";
+    const items=r.items||[];
+    if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}
+    const bad=v=>/block|deny/.test(v||""),warn=v=>v=="audit";
+    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:52vh;overflow:auto"><table><tr><th>Time</th><th>Source</th><th>Verdict</th><th>Where / who</th><th>What</th><th>Detections</th></tr>${items.map(i=>{const fresh=!st.first&&!st.seen.has(i.id);
+      return `<tr class="${fresh?"feednew":""}"${i.demo?' style="font-weight:600"':""}><td>${esc(new Date(i.time).toLocaleTimeString())}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
+      <td><span class="ic ${bad(i.verdict)?"fail":warn(i.verdict)?"warn":"ok"}">${bad(i.verdict)?ICON.fail:warn(i.verdict)?ICON.warn:ICON.ok}</span> ${esc(i.verdict||"")}</td>
+      <td style="font-size:12px">${esc(i.who||"")}</td><td><code style="font-size:12px">${esc(i.what||"")}</code></td><td style="font-size:12px">${esc(i.detail||"")}</td></tr>`}).join("")}</table></div>`;
+    items.forEach(i=>st.seen.add(i.id));st.first=false}
+  tick(true);return st}
+
 /* ---------- Endpoint AI ---------- */
 let EAI=null;
+let EAIFEED=null;
 async function eai(){
+  if(!EAIFEED||!$("#eaifeed").firstChild)EAIFEED=liveFeed($("#eaifeed"));
   try{const e=EAI=await api("/api/eai/state");if(e.error)throw new Error(e.error);
     $("#eaidomain").value=$("#eaidomain").value||e.domain;$("#eairegion").value=$("#eairegion").value||e.region;$("#eaicid").value=$("#eaicid").value||e.client_id;
     $("#eaipath").textContent=e.console_path;$("#eaigroup").textContent=e.group;$("#eaipol").textContent=e.policy;
@@ -1341,7 +1389,7 @@ $("#eaisetup").onclick=async()=>{
 $("#eaistatus").onclick=async()=>{$("#eaiout").innerHTML='<div class="muted">Checking…</div>';
   try{const r=await api("/api/eai/status");if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));$("#eaiout").innerHTML=checksHTML(r.checks);eai()}catch(err){$("#eaiout").innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
 $("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
-  $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+  $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{EAIMODE=null;eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
 $("#eaizccpw").onclick=async()=>{const b=$("#eaizccpw");if(b.dataset.on){$("#eaizccout").innerHTML="";delete b.dataset.on;b.textContent="Show password";return}
   try{const r=await api("/api/zia/password",{});if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));b.dataset.on=1;b.textContent="Hide password";
   $("#eaizccout").innerHTML=`<div class="notice" style="display:block;margin:0 0 10px">Client Connector sign-in:<br><code>${esc(r.email)}</code><br><code>${esc(r.password)}</code> <button id="eaipwcp" style="margin-left:6px">Copy</button><div class="muted" style="font-size:12px;margin-top:6px">Shown on this computer only. Don't paste it into chat, email or tickets.</div></div>`;
@@ -1351,11 +1399,6 @@ $("#eaiinstall").onclick=()=>{if(!confirm("Install Claude Code for this computer
 $("#eaidemo").onclick=()=>{const scenes=$$("[data-es]").filter(x=>x.checked).map(x=>x.dataset.es);if(!scenes.length)return;
   if(!confirm("Run the scenes on THIS machine? Only on the traffic generator VM, never a corporate laptop: Claude Code will try to write AWS's example key to a file and delete the kit's decoy folder."))return;
   $("#eaidemoout").innerHTML="";runJob("/api/eai/demo",{scenes},$("#eaidemolog"),j=>{if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
-$("#eaievents").onclick=async()=>{const el=$("#eaievout");el.innerHTML='<div class="muted">Loading…</div>';
-  try{const r=await api(`/api/eai/events?hours=${$("#eaihours").value}`);if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));
-    if(!r.items.length){el.innerHTML=`<div class="muted">No AI activity from ${esc((r.hosts||[]).concat(r.emails||[]).join(", ")||"the generator (not found yet)")} in this window. Events show a few minutes after a scene runs.</div>`;return}
-    el.innerHTML=`<div class="muted" style="font-size:12.5px;margin-bottom:6px">${r.matched} matched the demo rules · ${r.total} events in all · ${esc((r.hosts||[]).join(", "))}</div><div class="tablewrap"><table><tr><th>Time</th><th>Verdict</th><th>Tool</th><th>Command</th><th>Detections</th></tr>${r.items.map(i=>`<tr${i.demo?' style="font-weight:600"':""}><td>${esc(String(i.time||"").replace("T"," ").slice(0,19))}</td><td><span class="ic ${/block|deny/.test(i.verdict)?"fail":i.verdict=="audit"?"warn":"ok"}">${/block|deny/.test(i.verdict)?ICON.fail:i.verdict=="audit"?ICON.warn:ICON.ok}</span> ${esc(i.verdict||"")}</td><td>${esc(i.tool||"")}</td><td><code style="font-size:12px">${esc(i.command)}</code></td><td style="font-size:12px">${esc([...(i.patterns||[]),...(i.owasp||[]),...(i.mitre||[])].filter(Boolean).join(" · "))}</td></tr>`).join("")}</table></div>`}
-  catch(err){el.innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
 $("#eaireport").onclick=()=>{runJob("/api/eai/report",{edition:$("#eaiedition").value,days:7},$("#eairepl"),j=>{eai();const f=((j.notes||[])[0]||{}).file;
   if(f)$("#eairepl").insertAdjacentHTML("beforeend",`<div class="h"><a href="#" data-rep="${esc(f)}">Download ${esc(f)}</a></div>`)})};
 document.addEventListener("click",async ev=>{const a=ev.target.closest&&ev.target.closest("[data-rep]");if(!a)return;ev.preventDefault();   // the console's API needs its token header, so fetch, then save
