@@ -30,8 +30,8 @@ SHIP = ["Install AI Guard Kit.cmd", "Install AI Guard Kit.command", "Uninstall A
         "Uninstall AI Guard Kit.command", "aiguard-kit", "aiguard-kit.cmd", "aiguard_kit.py", "gui.html", "tests.json",
         "packs", "policy_template.json", "preflight_help.json", "manual_steps.json", "MANUAL-STEPS.md", "README.md", "INSTALL.md", "PREFLIGHT.md", "SECURITY.md",
         "TESTPLAN.md", "CHANGELOG.md", "WINDOWS.md",
-        "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md", "assets", "docs",
-        "eai_module.py", "eai_policy_template.json", "ENDPOINT-AI.md"]
+        "zia_module.py", "zia_traffic.py", "zia_aws.py", "zia_policy_template.json", "zia_traffic.json", "ZIA.md",
+        "eai_module.py", "eai_policy_template.json", "ENDPOINT-AI.md", "assets", "docs"]
 EMAIL_BLOCKED = re.compile(r"\.(cmd|command|bat|ps1|exe)$", re.I)
 
 
