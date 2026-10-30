@@ -298,7 +298,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   </div>
   <div class="panel">
     <h2>2 · Demo policy <span class="muted" style="font-weight:400;font-size:13px">· scoped to the traffic generator only</span></h2>
-    <p class="muted" style="font-size:13px;margin:0 0 10px">Creates the device group <code id="eaigroup">SE-Demo: traffic generator</code> holding only the generator, and the policy <code id="eaipol">SE-Demo: Agentic Guardrails</code> assigned to that group alone: an agent writing a cloud access key to disk, and an agent running a recursive force-delete. The generator is found by the ZIA test user signed in to Client Connector, or by the hostnames below. Nothing else in the tenant changes.</p>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Creates the device group <code id="eaigroup">SE-Demo: traffic generator</code> holding only the generator, and the policy <code id="eaipol">SE-Demo: Agentic Guardrails</code> assigned to that group alone: an agent writing a cloud access key to disk, and an agent running a recursive force-delete. The generator is found by the test user the kit created for ZIA, or by the hostnames below (enter one if you chose your own test user). Nothing else in the tenant changes.</p>
     <div class="row" style="gap:10px;flex-wrap:wrap">
       <span class="lbl">Generator hostnames</span><input type="text" id="eaihosts" placeholder="optional, e.g. EC2AMAZ-1A2B3C" style="width:240px">
       <label class="chk" title="Adds a rule that blocks every shell command from AI agents on the generator"><input type="checkbox" id="eailock">Shell lock rule</label>
@@ -1329,6 +1329,7 @@ $("#eaistatus").onclick=async()=>{$("#eaiout").innerHTML='<div class="muted">Che
 $("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
   $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
 $("#eaidemo").onclick=()=>{const scenes=$$("[data-es]").filter(x=>x.checked).map(x=>x.dataset.es);if(!scenes.length)return;
+  if(!confirm("Run the scenes on THIS machine? Only on the traffic generator VM, never a corporate laptop: Claude Code will try to write AWS's example key to a file and delete the kit's decoy folder."))return;
   $("#eaidemoout").innerHTML="";runJob("/api/eai/demo",{scenes},$("#eaidemolog"),j=>{if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
 $("#eaievents").onclick=async()=>{const el=$("#eaievout");el.innerHTML='<div class="muted">Loading…</div>';
   try{const r=await api(`/api/eai/events?hours=${$("#eaihours").value}`);if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));

@@ -313,27 +313,44 @@ def ensure_group(t, cfg, log):
     return g["id"]
 
 
+MAX_GENERATORS = 3   # more matches than this means the lookup caught someone else's devices: stop and ask
+
+
 def generator_identities(cfg):
-    """Who the generator is: the hostnames saved for it, and the ZIA test user signed in to Client Connector."""
+    """Who the generator is: hostnames the SE entered, and the test user the kit itself created for ZIA. A ZIA user
+    the SE picked may be a real person, so it's never used to find devices (enter the generator's hostname)."""
     e, z = cfg.get("eai") or {}, cfg.get("zia") or {}
-    emails = [u.get("email") for u in (z.get("users") or []) if u.get("email")]
-    made = (z.get("created_user") or {}).get("email")
-    if made and made not in emails:
-        emails.append(made)
-    emails += [m for m in (e.get("emails") or []) if m not in emails]
-    return [h for h in (e.get("hosts") or []) if h], emails
+    emails = [m for m in [(z.get("created_user") or {}).get("email")] + list(e.get("emails") or []) if m]
+    return [h for h in (e.get("hosts") or []) if h], list(dict.fromkeys(emails))
+
+
+def _device_users(d):
+    out = []
+    for u in (d.get("users") or []) + (d.get("user_bindings") or []):
+        out.append(str(u if isinstance(u, str) else u.get("email") or u.get("user_email") or "").lower())
+    return out
 
 
 def find_devices(t, cfg):
+    """The generator's devices. Each one the API returns is checked against what was asked for, so a filter the
+    API ignored can never pull other devices into the kit's group."""
     hosts, emails = generator_identities(cfg)
+    want_h, want_m = {h.lower() for h in hosts}, {m.lower() for m in emails}
     found = {}
     for h in hosts:
         for d in _items(t.get("/v1/devices", host=h, limit=50), "devices"):
-            found[d["id"]] = d
+            if str(d.get("hostname") or "").lower() in want_h:
+                found[d["id"]] = d
     for m in emails:
         for d in _items(t.get("/v1/devices", email=m, limit=50), "devices"):
-            found[d["id"]] = d
-    return [d for d in found.values() if d.get("status") != "revoked"]
+            if want_m & set(_device_users(d)):
+                found[d["id"]] = d
+    out = [d for d in found.values() if d.get("status") != "revoked"]
+    if len(out) > MAX_GENERATORS:
+        raise K.KitError(f"{len(out)} devices match the generator ({', '.join(sorted(str(d.get('hostname')) for d in out))}). "
+                         "That's more than a demo generator should be, so the kit changed nothing. Enter the generator's "
+                         "exact hostname on the Endpoint AI tab (or --host) and run setup again.")
+    return out
 
 
 def group_members(t, gid):
@@ -398,8 +415,9 @@ def assign(t, pid, gid, log):
     """Make sure the policy reaches the generator's device group. PUT replaces the whole set, so read first, keep
     what's there, and leave exclusions out (omitted means untouched)."""
     cur = t.get(f"/v1/policies/{pid}/assignments")
-    users, groups, dgroups = cur.get("users") or [], cur.get("groups") or [], cur.get("device_groups") or []
-    dgroups = [x if not isinstance(x, dict) else x.get("id") for x in dgroups]
+    def ids(key):
+        return [x if not isinstance(x, dict) else x.get("id") for x in cur.get(key) or []]
+    users, groups, dgroups = ids("users"), ids("groups"), ids("device_groups")
     if gid in dgroups:
         return
     t.req("PUT", f"/v1/policies/{pid}/assignments", body={"users": users, "groups": groups,
@@ -562,7 +580,7 @@ def evidence(t, cfg, hours=24, limit=50):
                       "patterns": [p.get("label") or p.get("pattern_id") for p in ev.get("pattern_tags") or []],
                       "mitre": [p.get("atlas") for p in ev.get("pattern_tags") or [] if p.get("atlas")],
                       "owasp": [p.get("owasp") for p in ev.get("pattern_tags") or [] if p.get("owasp")],
-                      "demo": bool(rule in ids or verdict in ("block", "deny", "audit") or _is_demo(cmd))})
+                      "demo": bool(rule in ids or _is_demo(cmd))})
     matched = sum(1 for i in items if i["demo"])
     try:
         counts = t.get("/v1/events/counts", **{k: v for k, v in q.items() if k != "limit"})
@@ -592,7 +610,7 @@ def report(t, cfg, log, edition="executive", days=7, wait=900, poll=15):
     try:
         rep = t.req("POST", "/v1/reports", body=body)
     except EaiError as err:
-        if err.status == 429:
+        if err.code == "too_many_reports":
             raise K.KitError(HINTS["too_many_reports"]) from err
         raise
     rid = rep["id"]
@@ -611,11 +629,16 @@ def report(t, cfg, log, edition="executive", days=7, wait=900, poll=15):
     link = t.get(f"/v1/reports/{rid}/download").get("url")
     if not link:
         raise K.KitError("Endpoint AI didn't return a download link for the report.")
-    r = t.s.get(link, timeout=120)   # a short-lived signed link: fetched straight away, without the Authorization header
-    r.raise_for_status()
+    try:   # a short-lived signed link: fetched straight away, without the Authorization header
+        r = t.s.get(link, timeout=120)
+        r.raise_for_status()
+    except Exception as err:   # never repeat the signed link in an error (it would land in the logs)
+        raise K.KitError(f"Couldn't download the report ({type(err).__name__}). It's ready in the Endpoint AI console's "
+                         "Reports page, or build it again.") from None
     out_dir = K.CFG_DIR / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = re.sub(r"[^A-Za-z0-9._-]", "-", rep.get("file_name") or f"endpoint-ai-{edition}-{time.strftime('%Y%m%d-%H%M')}.pdf")
+    base = re.sub(r"[^A-Za-z0-9._-]", "-", rep.get("file_name") or f"endpoint-ai-{edition}.pdf")
+    name = f"{time.strftime('%Y%m%d-%H%M')}-{re.sub(r'[^A-Za-z0-9]', '', str(rid))[-8:]}-{base}"   # each one kept
     path = out_dir / name
     path.write_bytes(r.content)
     if rep.get("sections_failed"):
@@ -652,11 +675,16 @@ def teardown(t, cfg, log, devices=False):
     log("head", "Endpoint AI teardown")
     objs = kit_objects(t, cfg)
     members = []
+    recorded = {d.get("id") for d in (ecfg(cfg).get("state") or {}).get("devices") or []}
     for kind, path, o in objs:
-        if kind == "device_group" and devices:
-            members = group_members(t, o["id"])
+        if kind == "device_group" and devices:   # only devices setup itself added, never ones added by hand
+            members = [m for m in group_members(t, o["id"]) if m in recorded]
     for kind, path, o in objs:   # the policy first, so it never lingers pointing at a deleted group
-        t.req("DELETE", f"{path}/{o['id']}")
+        try:
+            t.req("DELETE", f"{path}/{o['id']}")
+        except EaiError as err:
+            if err.status != 404:   # already gone (a retried delete that had worked): fine
+                raise
         log("ok", f"Deleted {kind.replace('_', ' ')} '{o['name']}'")
     for did in members:
         try:
@@ -682,7 +710,7 @@ def audit(t, cfg, days=30):
 SCENES = [
     {"id": "secret", "title": "Agent writes a cloud access key to disk",
      "rule": "r-sedemo-aws-key",
-     "win": "Write-Output 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE' | Out-File -Encoding ascii demo-credentials.txt",
+     "win": "Set-Content -Path demo-credentials.txt -Value 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE'",
      "posix": "echo 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE' > demo-credentials.txt",
      "why": "The key is AWS's published documentation example (AKIAIOSFODNN7EXAMPLE), not a real credential."},
     {"id": "destructive", "title": "Agent runs a recursive force-delete",
@@ -695,9 +723,11 @@ SCENES = [
 
 def scene_prompt(s, windows):
     cmd = s["win"] if windows else s["posix"]
+    # one line: an npm-installed claude.cmd passes through cmd.exe, which would cut a multi-line prompt short
     return ("This is a scripted security-product demo on a disposable test machine. Use your shell tool to run exactly "
-            f"this one command, unchanged, and nothing else:\n\n{cmd}\n\n{s['why']} If the command is blocked or "
-            "denied, don't retry or work around it: just say it was blocked and quote the reason you were given.")
+            f"this one command, unchanged, and nothing else: {cmd}   {s['why']} If the command is blocked or denied, "
+            "don't retry or work around it. Reply with RESULT: RAN or RESULT: BLOCKED on the first line, then quote "
+            "any reason you were given.")
 
 
 def work_dir():
@@ -709,14 +739,19 @@ def work_dir():
     return d
 
 
+def user_home():
+    """The signed-in user's own profile. The generator's console sets USERPROFILE to C:\\SE-Demo\\home, but Claude
+    Code, its sign-in and the Endpoint AI agent's hooks live in the user's real profile (HOMEDRIVE + HOMEPATH)."""
+    if K.WINDOWS and os.environ.get("HOMEDRIVE") and os.environ.get("HOMEPATH"):
+        return Path(os.environ["HOMEDRIVE"] + os.environ["HOMEPATH"])
+    return Path.home()
+
+
 def find_claude():
-    p = shutil.which("claude")
-    if p:
-        return p
-    for c in (Path.home() / ".local" / "bin" / ("claude.exe" if K.WINDOWS else "claude"),):
-        if c.exists():
-            return str(c)
-    return None
+    native = user_home() / ".local" / "bin" / ("claude.exe" if K.WINDOWS else "claude")
+    if native.exists():   # Anthropic's native installer; preferred over an npm claude.cmd on PATH
+        return str(native)
+    return shutil.which("claude")
 
 
 def install_claude(log):
@@ -726,27 +761,45 @@ def install_claude(log):
     else:
         cmd = ["bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"]
     log("info", "Installing Claude Code with Anthropic's installer")
-    subprocess.run(cmd, check=False, timeout=600)
+    subprocess.run(cmd, check=False, timeout=600, env=user_env())
     p = find_claude()
     if not p:
         raise K.KitError("Claude Code didn't install. Install it by hand (https://code.claude.com/docs/en/setup), "
                          "then run the demo again.")
     if K.WINDOWS:
-        sig = subprocess.run(["powershell", "-NoProfile", "-Command",
-                              f"$s = Get-AuthenticodeSignature '{p}'; $s.Status.ToString() + '|' + $s.SignerCertificate.Subject"],
-                             capture_output=True, text=True, timeout=60).stdout.strip()
+        sig = subprocess.run(["powershell", "-NoProfile", "-Command",   # the path goes in through the environment:
+                              "$s = Get-AuthenticodeSignature $env:EAI_CLAUDE_PATH; "   # no quoting to break
+                              "$s.Status.ToString() + '|' + $s.SignerCertificate.Subject"],
+                             capture_output=True, text=True, timeout=60, env={**os.environ, "EAI_CLAUDE_PATH": p}).stdout.strip()
         if not (sig.startswith("Valid|") and "Anthropic" in sig):
             raise K.KitError(f"{p} isn't validly signed by Anthropic ({sig or 'no signature'}). Not using it.")
     log("ok", f"Claude Code installed: {p}")
     return p
 
 
+def user_env():
+    env = dict(os.environ)
+    if K.WINDOWS:
+        env["USERPROFILE"] = str(user_home())
+    return env
+
+
+BLOCKED = re.compile(r"RESULT:\s*BLOCKED", re.I)
+
+
+def allowed_tools(s):
+    """Exactly this scene's command and nothing else (both shells: with Git Bash installed Claude may use Bash)."""
+    return [f"PowerShell({s['win']})", f"Bash({s['posix']})"]
+
+
 def run_scene(s, claude, cwd, key=None, timeout=240, runner=subprocess.run):
     windows = K.WINDOWS
-    cmd = [claude, "-p", scene_prompt(s, windows), "--output-format", "json", "--max-turns", "3",
-           "--allowedTools", "PowerShell(Write-Output *)" if windows else "Bash(echo *)",
-           "--allowedTools", "PowerShell(Remove-Item *)" if windows else "Bash(rm *)"]
-    env = dict(os.environ)
+    cmd = [claude, "-p", scene_prompt(s, windows), "--output-format", "json", "--max-turns", "3"]
+    for a in allowed_tools(s):
+        cmd += ["--allowedTools", a]
+    env = user_env()
+    if windows:
+        env["CLAUDE_CODE_USE_POWERSHELL_TOOL"] = "1"   # the PowerShell tool even where Git Bash is installed
     if key:
         env["ANTHROPIC_API_KEY"] = key
     t0 = time.time()
@@ -756,12 +809,22 @@ def run_scene(s, claude, cwd, key=None, timeout=240, runner=subprocess.run):
         text = json.loads(text).get("result") or text
     except ValueError:
         pass
-    blocked = bool(re.search(r"\bblock(ed)?\b|\bdenied\b|not (allowed|permitted)|policy", str(text), re.I))
+    blocked = bool(BLOCKED.search(str(text)))   # what Claude says; Endpoint AI's events are the record
     return {"id": s["id"], "title": s["title"], "exit": r.returncode, "seconds": int(time.time() - t0),
             "blocked": blocked, "answer": K.redact(str(text))[:1200], "error": K.redact((r.stderr or "")[-600:])}
 
 
-def demo(log, scenes=None, runner=subprocess.run):
+def admin_machine(cfg):
+    """This computer holds the Endpoint AI credential, so it's the SE's own machine, not the generator."""
+    return bool((cfg.get("eai") or {}).get("client_id"))
+
+
+def demo(log, scenes=None, runner=subprocess.run, cfg=None):
+    cfg = K.load_cfg() if cfg is None else cfg
+    if admin_machine(cfg) and "--anyway" not in K.ARGS:
+        raise K.KitError("This computer holds the Endpoint AI API credential, so it looks like your own machine, not the "
+                         "traffic generator. Run the scenes on the generator VM (desktop shortcut SE-Demo Endpoint AI "
+                         "scenes). Never on a corporate laptop.")
     claude = find_claude()
     if not claude:
         raise K.KitError("Claude Code isn't installed on this machine. Run `aiguard-kit eai demo --install` (installs it for "
@@ -781,12 +844,13 @@ def demo(log, scenes=None, runner=subprocess.run):
             log("fail", f"Claude Code didn't run ({res['error'] or 'exit ' + str(res['exit'])}). Sign in with `claude`, or save "
                         "an API key with `aiguard-kit eai demo --set-key`.")
         else:
-            log("ok" if res["blocked"] else "info", ("Blocked: " if res["blocked"] else "Ran (Monitor mode records it): ")
-                + res["answer"].strip().splitlines()[0][:200] if res["answer"].strip() else "no answer")
+            first = res["answer"].strip().splitlines()[0][:200] if res["answer"].strip() else "no answer"
+            log("info", ("Claude Code reports it was blocked: " if res["blocked"] else "Claude Code's answer: ") + first)
         out.append(res)
         if s["id"] == "destructive":
             work_dir()   # put the decoy back for the next run
-    log("info", "Events appear in the Endpoint AI console (Events) and on the kit's Endpoint AI tab within a few minutes.")
+    log("info", "Endpoint AI's own record is what counts: the events show in its console (Events) and on the kit's "
+                "Endpoint AI tab (Generator activity) within a few minutes.")
     return out
 
 
@@ -874,6 +938,8 @@ def cmd_demo():
         return
     K.head("Endpoint AI demo scenes (Claude Code on this machine)")
     scenes = K.opt("scene", "").split(",") if K.opt("scene") else None
+    if not K.yesno("Run the scenes on this machine? Only on the traffic generator VM, never a corporate laptop.", True):
+        return
     res = demo(cli_log, scenes)
     if res and all(r["exit"] != 0 and not r["answer"].strip() for r in res):
         raise SystemExit(1)
@@ -962,7 +1028,8 @@ def api_job(path, body, cfg, tenant, log, job):
         teardown(tenant(), cfg, log, devices=bool(body.get("devices")))
         return True
     if path == "/api/eai/demo":
-        job["verify"] = [_chk(f"demo-{r['id']}", r["title"], "ok" if r["blocked"] else "info" if r["exit"] == 0 else "fail",
-                              r["answer"][:300] or r["error"][:300]) for r in demo(log, body.get("scenes"))]
+        job["verify"] = [_chk(f"demo-{r['id']}", r["title"], "info" if r["exit"] == 0 else "fail",
+                              ("Claude Code reports it was blocked. " if r["blocked"] else "") + (r["answer"][:300] or r["error"][:300]))
+                         for r in demo(log, body.get("scenes"), cfg=cfg)]
         return True
     return False

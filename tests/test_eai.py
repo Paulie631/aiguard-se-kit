@@ -58,6 +58,8 @@ class FakeEai:
         self.reports = {}
         self.report_polls = 0
         self.downloads = []
+        self.ignore_filters = False   # an API that doesn't know a filter ignores it and returns everything
+        self.download_fails = False
 
     # requests.Session surface
     def post(self, url, json=None, timeout=None, **kw):
@@ -70,6 +72,8 @@ class FakeEai:
 
     def get(self, url, timeout=None, **kw):   # the report's signed download link: no Authorization header
         self.downloads.append((url, kw.get("headers")))
+        if self.download_fails:
+            raise ConnectionError(f"HTTPSConnectionPool: Max retries exceeded with url: {url}")
         return Resp(200, content=b"%PDF-1.4 fake report")
 
     def request(self, method, url, params=None, json=None, headers=None, timeout=None):
@@ -113,8 +117,8 @@ class FakeEai:
                 self.groups.remove(g)
                 return Resp(204)
         if path == "/v1/devices":
-            ds = [d for d in self.devices if (not q.get("host") or d["hostname"] == q["host"])
-                  and (not q.get("email") or q["email"] in d["users"])]
+            ds = [d for d in self.devices if self.ignore_filters or ((not q.get("host") or d["hostname"] == q["host"])
+                  and (not q.get("email") or q["email"] in d["users"]))]
             return Resp(200, {"devices": ds, "has_more": False})
         m = re.fullmatch(r"/v1/devices/([\w-]+)(/delete)?", path)
         if m:
@@ -156,7 +160,8 @@ class FakeEai:
                 self.assignments.pop(p["id"], None)
                 return Resp(204)
         if path == "/v1/events":
-            return Resp(200, {"items": self.events, "next_cursor": ""})
+            hosts = set(filter(None, (q.get("ef_host") or "").split(",")))
+            return Resp(200, {"items": [ev for ev in self.events if not hosts or ev.get("hostname") in hosts], "next_cursor": ""})
         if path == "/v1/events/counts":
             return Resp(200, {"events": len(self.events), "sessions": 1, "tool_calls": len(self.events)})
         if path == "/v1/reports" and method == "POST":
@@ -192,7 +197,8 @@ def eenv(monkeypatch, tmp_path):
         fake = FakeEai()
         cfg = {"eai": {"domain": DOMAIN, "region": "use2", "client_id": CID}}
         if zia_user:
-            cfg["zia"] = {"users": [{"id": 1, "email": "se-demo-traffic@acme.example"}]}
+            cfg["zia"] = {"users": [{"id": 1, "email": "se-demo-traffic@acme.example"}],
+                          "created_user": {"email": "se-demo-traffic@acme.example", "via": "zia"}}
         kit.save_cfg(cfg)
         kit._kc["eai-client-secret"] = SECRET
         monkeypatch.setattr(e, "connect", lambda c: e.EaiTenant(c, session=fake))
@@ -537,14 +543,19 @@ def test_demo_runs_claude_headless_with_safe_commands_and_the_key_in_env_only(ee
     def runner(cmd, cwd, env, capture_output, text, timeout):
         seen.append((cmd, cwd, env))
         blocked = "Remove-Item" in cmd[2]
-        return Proc(json.dumps({"result": "The command was blocked by policy: recursive delete." if blocked else
-                                "Done: wrote demo-credentials.txt"}))
-    res = e.demo(log_into([]), runner=runner)
+        return Proc(json.dumps({"result": "RESULT: BLOCKED\nPreToolUse hook: recursive force-deletes are not allowed." if blocked else
+                                "RESULT: RAN\nWrote demo-credentials.txt; no policy blocked it."}))
+    res = e.demo(log_into([]), runner=runner, cfg={})
     assert [r["id"] for r in res] == ["secret", "destructive"]
     assert [r["blocked"] for r in res] == [False, True]
     cmd, cwd, env = seen[0]
-    assert cmd[1] == "-p" and "Write-Output" in cmd[2] and "AKIAIOSFODNN7EXAMPLE" in cmd[2]
-    assert "--max-turns" in cmd and "PowerShell(Write-Output *)" in cmd
+    assert cmd[1] == "-p" and "Set-Content" in cmd[2] and "AKIAIOSFODNN7EXAMPLE" in cmd[2]
+    assert "--max-turns" in cmd and "\n" not in cmd[2]
+    allowed = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--allowedTools"]
+    assert allowed == ["PowerShell(Set-Content -Path demo-credentials.txt -Value 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE')",
+                       "Bash(echo 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE' > demo-credentials.txt)"]   # exactly, no wildcards
+    assert not any("*" in a for c, _, _ in seen for a in c if a.startswith(("PowerShell(", "Bash(")))
+    assert env["CLAUDE_CODE_USE_POWERSHELL_TOOL"] == "1"
     assert env["ANTHROPIC_API_KEY"].startswith("sk-ant-") and not any("sk-ant-" in a for a in cmd)
     assert pathlib.Path(cwd) == kit.CFG_DIR / "eai-demo"
     assert (kit.CFG_DIR / "eai-demo" / "decoy-project" / "README.txt").exists()   # put back for the next run
@@ -554,14 +565,14 @@ def test_demo_without_claude_says_how_to_install(eenv, monkeypatch):
     kit, e, _ = eenv("eai", "demo")
     monkeypatch.setattr(e, "find_claude", lambda: None)
     with pytest.raises(kit.KitError, match="--install"):
-        e.demo(log_into([]))
+        e.demo(log_into([]), cfg={})
 
 
 def test_demo_reports_a_claude_that_isnt_signed_in(eenv, monkeypatch):
     kit, e, _ = eenv("eai", "demo")
     monkeypatch.setattr(e, "find_claude", lambda: "/usr/bin/claude")
     out = []
-    res = e.demo(log_into(out), scenes=["secret"], runner=lambda *a, **k: Proc("", 1, "Invalid API key · Please run /login"))
+    res = e.demo(log_into(out), scenes=["secret"], runner=lambda *a, **k: Proc("", 1, "Invalid API key · Please run /login"), cfg={})
     assert len(res) == 1 and any(lv == "fail" and "set-key" in m for lv, m in out)
 
 
@@ -640,3 +651,115 @@ def test_generator_setup_has_the_scenes_shortcut():
     assert "USERPROFILE" not in eai_line   # the scenes run in the signed-in user's own profile
     assert len(m.USER_DATA.encode()) < 16000
     assert "anthropic" not in script.lower() and "sk-ant" not in script
+
+
+# ---------------------------------------------------------------- review fixes
+def test_a_zia_user_the_se_picked_is_never_used_to_find_devices(eenv):
+    kit, e, fake = eenv("eai")
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"users": [{"id": 1, "email": "jordan@acme.example"}]}   # a real person's account, chosen in ZIA setup
+    kit.save_cfg(cfg)
+    out = []
+    e.setup(e.connect(cfg), kit.load_cfg(), log_into(out))
+    assert next(g for g in fake.groups if g["name"].startswith("SE-Demo"))["members"] == []
+    assert "dev-other" in next(g for g in fake.groups if g["id"] == 7)["members"]
+
+
+def test_a_filter_the_api_ignores_never_pulls_in_other_devices(eenv):
+    kit, e, fake = eenv("eai")
+    fake.ignore_filters = True
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    assert next(g for g in fake.groups if g["name"].startswith("SE-Demo"))["members"] == ["dev-gen"]
+
+
+def test_too_many_matching_devices_stops_before_any_change(eenv):
+    kit, e, fake = eenv("eai")
+    for i in range(4):
+        fake.devices.append({"id": f"dev-x{i}", "hostname": f"LAPTOP-{i}", "status": "active",
+                             "users": ["se-demo-traffic@acme.example"]})
+    with pytest.raises(kit.KitError, match="exact hostname"):
+        e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    assert ("PUT" not in {m for m, _ in fake.writes()})
+
+
+def test_teardown_devices_never_deletes_members_added_by_hand(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    grp = next(g for g in fake.groups if g["name"].startswith("SE-Demo"))
+    grp["members"].append("dev-other")   # someone added their laptop in the console
+    e.teardown(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]), devices=True)
+    assert [d["id"] for d in fake.devices] == ["dev-other"]
+
+
+def test_teardown_survives_a_delete_that_already_worked(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    pid = kit.load_cfg()["eai"]["state"]["policy_id"]
+    fake.fail_next.append(("DELETE", f"/v1/policies/{pid}", 404, "not_found"))
+    e.teardown(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    assert [g["name"] for g in fake.groups] == ["Engineering laptops"]
+
+
+def test_assignment_objects_are_sent_back_as_ids(eenv):
+    kit, e, fake = eenv("eai")
+    t = e.connect(kit.load_cfg())
+    fake.policies.append({"id": 41, "name": "SE-Demo: Agentic Guardrails", "rules": []})
+    fake.assignments[41] = {"users": [{"id": 4021, "email": "x@acme.example"}], "groups": [{"id": 31, "name": "Eng"}],
+                            "device_groups": [{"id": 9}]}
+    e.assign(t, 41, 55, log_into([]))
+    assert fake.assignments[41] == {"users": [4021], "groups": [31], "device_groups": [9, 55]}
+
+
+def test_claudes_words_alone_dont_count_as_blocked(eenv, monkeypatch):
+    kit, e, _ = eenv("eai", "demo")
+    monkeypatch.setattr(e, "find_claude", lambda: "/usr/bin/claude")
+    for text, want in (("RESULT: RAN\nRan it; no policy blocked it.", False), ("I wasn't allowed by policy to run that", False),
+                       ("RESULT: BLOCKED\nDenied by hook", True)):
+        res = e.demo(log_into([]), scenes=["secret"], runner=lambda *a, t=text, **k: Proc(json.dumps({"result": t})), cfg={})
+        assert res[0]["blocked"] is want, text
+
+
+def test_scenes_refuse_to_run_on_the_admin_machine(eenv, monkeypatch):
+    kit, e, _ = eenv("eai", "demo")
+    monkeypatch.setattr(e, "find_claude", lambda: "/usr/bin/claude")
+    called = []
+    with pytest.raises(kit.KitError, match="not the traffic generator"):
+        e.demo(log_into([]), runner=lambda *a, **k: called.append(1))
+    assert not called
+
+
+def test_scenes_use_the_signed_in_users_own_profile_on_windows(eenv, monkeypatch):
+    kit, e, _ = eenv("eai", "demo")
+    monkeypatch.setattr(kit, "WINDOWS", True)
+    monkeypatch.setenv("USERPROFILE", "C:\\SE-Demo\\home")
+    monkeypatch.setenv("HOMEDRIVE", "C:")
+    monkeypatch.setenv("HOMEPATH", "\\Users\\se")
+    assert str(e.user_home()).replace("/", "\\").endswith("\\Users\\se")
+    assert e.user_env()["USERPROFILE"] == str(e.user_home())
+
+
+def test_evidence_counts_only_the_demos_own_events(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.events = [{"id": "z", "timestamp": "2026-10-30T12:00:00Z", "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+                    "data": {"verdict": "block", "rule_id": "someone-elses-rule", "tool_input": {"command": "git push"}}},
+                   {"id": "y", "timestamp": "2026-10-30T12:00:00Z", "hostname": "MBP-JLEE", "tool_name": "PowerShell",
+                    "data": {"verdict": "block", "tool_input": {"command": "Remove-Item -Recurse -Force .\\decoy-project"}}}]
+    ev = e.evidence(e.connect(kit.load_cfg()), kit.load_cfg())
+    assert ev["matched"] == 0 and [i["host"] for i in ev["items"]] == ["EC2AMAZ-GEN1"]
+
+
+def test_report_rate_limit_download_failure_and_names(eenv):
+    kit, e, fake = eenv("eai")
+    fake.fail_next.append(("POST", "/v1/reports", 429, "rate_limited"))
+    with pytest.raises(e.EaiError, match="rate_limited"):
+        e.report(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.download_fails = True
+    with pytest.raises(kit.KitError) as err:
+        e.report(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    assert "files.example" not in str(err.value) and "sig=" not in str(err.value)
+    fake.download_fails, fake.report_polls = False, 0
+    a = e.report(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.report_polls = 0
+    b = e.report(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    assert a != b and a.exists() and b.exists()

@@ -24,7 +24,8 @@ saving, the kit checks the rules with Endpoint AI's dry-run validator.
 
 What the kit never touches: tenant-wide Settings, identity domains, console admins, sign-in settings, other
 policies or groups, and resource-control (file quarantine and delete) rules. Teardown deletes only the policy and
-device group above, found by the id setup saved and confirmed by exact name.
+device group above, found by the id setup saved and confirmed by exact name. `--devices` also removes the
+generator devices setup itself added to the group, never devices someone added by hand.
 
 ## Setup
 
@@ -40,8 +41,11 @@ device group above, found by the id setup saved and confirmed by exact name.
    generator's app profile in the Client Connector portal, and check the generator shows under **Administration >
    Devices** in the Endpoint AI console.
 4. **Demo policy.** Click **Create or update** on the Endpoint AI tab (or run `./aiguard-kit eai setup`). The kit
-   finds the generator by the ZIA test user signed in to Client Connector, or by a hostname you enter
-   (`--host EC2AMAZ-1A2B3C`), and adds it to the device group. If the agent isn't on yet, run setup again once it is.
+   finds the generator by the test user it created for ZIA, or by a hostname you enter (`--host EC2AMAZ-1A2B3C`),
+   and adds it to the device group. Every device the API returns is checked against that hostname or user, and if
+   more than three match, setup stops and asks for the exact hostname. A ZIA test user you picked yourself is never
+   used to find devices (it could be a real person's laptop): enter the generator's hostname instead. If the agent
+   isn't on yet, run setup again once it is.
 5. **Claude Code on the generator (manual, once).** Signed in to Windows on the generator as the user who will run
    the demo:
    - `C:\SE-Demo\eai.cmd demo --install` installs Claude Code with Anthropic's installer, for that user (no admin).
@@ -57,11 +61,13 @@ Code runs headless (`claude -p`) with a fixed prompt for each scene, in the kit'
 
 | Scene | Command the agent runs | Safe because |
 | --- | --- | --- |
-| Agent writes a cloud access key to disk | `Write-Output 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE' \| Out-File demo-credentials.txt` | `AKIAIOSFODNN7EXAMPLE` is AWS's published documentation example |
+| Agent writes a cloud access key to disk | `Set-Content -Path demo-credentials.txt -Value 'aws_access_key_id=AKIAIOSFODNN7EXAMPLE'` | `AKIAIOSFODNN7EXAMPLE` is AWS's published documentation example |
 | Agent runs a recursive force-delete | `Remove-Item -Recurse -Force .\decoy-project` | a throwaway folder the kit creates (and puts back) in its work folder |
 
-Claude Code may only run those commands (`--allowedTools` limits it to `Write-Output` and `Remove-Item`), with at
-most three turns.
+Claude Code may run only each scene's exact command (`--allowedTools` names the full command, nothing broader),
+with at most three turns. The scenes refuse to run on a computer that holds the Endpoint AI credential (your own
+machine), and ask before they start. What Claude Code says about a scene is shown, but Endpoint AI's own events
+are the record of what was blocked.
 
 The story: start in **Monitor**, run the scenes, show the activity (the commands ran and were recorded, with
 OWASP Agentic and MITRE ATLAS tags). Switch **Mode** to **Block** and run them again: Endpoint AI stops each command
