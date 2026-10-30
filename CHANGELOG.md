@@ -8,6 +8,8 @@
   policy gets a matching rule for each, so click **Create or update** once to add them.
 - **Live feed explains an empty Endpoint AI list.** It shows which generator it's watching, or says none is saved
   yet and what to do.
+- **Live feed fix: events from the generator now show** when its hostname was entered in a different case or with a
+  domain suffix (`ec2amaz-gen1.ec2.internal` vs `EC2AMAZ-GEN1`); only the generator's events are kept.
 
 ## 1.8.27
 - **Live feed has its own tab.** It moved from the Endpoint AI tab's step 4 to a **Live feed** tab, with more room
