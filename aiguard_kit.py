@@ -61,7 +61,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.28"
+VERSION = "1.8.29"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
