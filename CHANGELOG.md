@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.26
+- **Live feed on your laptop.** The Endpoint AI tab's step 4 is now a live feed for the computer you present from
+  (no Client Connector needed there): the generator's Endpoint AI events and the AI Guard events this computer sent,
+  merged on one clock and refreshed every 20 seconds while it's on screen, new rows flashing, with Pause, source and
+  time-window controls. ZIA has no near-live log API, so it shows the Insights summary, labelled as about 2 days
+  behind.
+- **Guided demo: "AI agents on the endpoint".** A four-step storyline with talk track, discovery questions and the
+  live feed on each step. Steps switch the Endpoint AI policy themselves (Monitor, Monitor, Block, back to Monitor)
+  while you talk; you run the scenes on the generator.
+
 ## 1.8.25
 - **Endpoint AI uses the generator's existing Client Connector sign-in.** The generator's console shows *This
   machine: HOSTNAME* with a Copy button and whether Client Connector is running. Paste the hostname into **Generator

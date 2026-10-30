@@ -1488,6 +1488,67 @@
      "proxy_test": "output-pii-generate-fake-record"
     }
    ]
+  },
+  {
+   "id": "endpoint-ai",
+   "name": "AI agents on the endpoint (Endpoint AI)",
+   "minutes": 8,
+   "requires": "eai",
+   "steps": [
+    {
+     "kind": "show",
+     "title": "See what AI agents are on the machine",
+     "owasp": [],
+     "eai_mode": "monitor",
+     "feed": true,
+     "say": "Developers run AI coding agents with their own shell access. Endpoint AI sees every agent, MCP server and extension on the machine, and every action the agent takes.",
+     "show": "The traffic generator in Administration > Devices, and its AI inventory: assistants, MCP servers, extensions.",
+     "where": "Endpoint AI console: Administration > Devices (the generator), then Analytics > AI agents and IDEs & extensions. The live feed below shows the generator's recent activity.",
+     "link": "https://console.zsai.sqrx.io",
+     "link_label": "Open the Endpoint AI console",
+     "ask": "Do you know which AI agents your developers have running, and what they're allowed to do?",
+     "talk": ""
+    },
+    {
+     "kind": "show",
+     "title": "Watch: an agent writes a cloud key to disk",
+     "owasp": [
+      "LLM02"
+     ],
+     "eai_mode": "monitor",
+     "feed": true,
+     "say": "In Monitor mode we let it run and record it. Here the agent writes an AWS access key into a file, the way keys end up in repos and logs.",
+     "show": "Run the scenes on the generator (Endpoint AI tab, step 3, or its desktop shortcut). The event lands in the feed below as 'audit', tagged with the detection pattern.",
+     "where": "The live feed below, or Events in the Endpoint AI console. The key is AWS's published example key, not a real credential.",
+     "ask": "How would you find out today if an agent copied a secret somewhere it shouldn't?",
+     "talk": ""
+    },
+    {
+     "kind": "show",
+     "title": "Stop it: switch to Block",
+     "owasp": [
+      "LLM06"
+     ],
+     "eai_mode": "block",
+     "feed": true,
+     "say": "Same agent, same commands, but now the policy blocks them before they run, and tells the agent why so it doesn't try to work around it.",
+     "show": "This step switches the SE-Demo policy to Block. Run the scenes again on the generator: the key write and the recursive force-delete show as 'block' in the feed.",
+     "where": "The live feed below. In the Endpoint AI console: Policies > SE-Demo: Agentic Guardrails, and Events filtered to the generator.",
+     "sowhat": "Guardrails for agents without taking the agents away: developers keep the productivity, the risky actions just don't happen.",
+     "talk": ""
+    },
+    {
+     "kind": "show",
+     "title": "Leave-behind: the executive brief",
+     "owasp": [],
+     "eai_mode": "monitor",
+     "feed": false,
+     "say": "Everything we just saw rolls up into a report you can hand your CISO: which agents, what they did, what was stopped.",
+     "show": "Endpoint AI tab, step 4: Build PDF (AI Security Executive Brief). This step puts the policy back in Monitor for the next demo.",
+     "where": "Endpoint AI tab, step 4: Build PDF. Or the Endpoint AI console's Reports page.",
+     "talk": ""
+    }
+   ]
   }
  ]
 }

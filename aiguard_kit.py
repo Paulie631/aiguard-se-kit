@@ -2575,6 +2575,93 @@ def readiness(cfg):
     return out
 
 
+# ---------------------------------------------------------------- live feed (console)
+FEED_SOURCES = ("eai", "aiguard", "zia")
+_ZIA_FEED_CACHE: dict = {}
+
+
+def _aiguard_feed(minutes):
+    """AI Guard events this computer sent (console runs, the scheduler's trickle), from today's and yesterday's
+    activity logs, newest first. AI Guard Insights itself has no read API the kit uses."""
+    cutoff = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - minutes * 60))
+    rows = []
+    for day in (time.time() - 86400, time.time()):
+        f = LOG_DIR / f"kit-{time.strftime('%Y-%m-%d', time.localtime(day))}.jsonl"
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()[-3000:] if f.exists() else []
+        except OSError:
+            lines = []
+        for line in lines:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("kind") not in ("scan", "proxy") or e.get("t", "") < cutoff:
+                continue
+            det = e.get("detail") or {}
+            resp = det.get("response") if isinstance(det.get("response"), dict) else {}
+            req = det.get("request") if isinstance(det.get("request"), dict) else {}
+            hits = _hits(resp)[0] if resp else []
+            action = str(resp.get("action") or ("ERROR" if e.get("level") == "error" else "")).upper()
+            text = req.get("content") or ""
+            if not text and isinstance(req.get("messages"), list) and req["messages"]:
+                text = str((req["messages"][-1] or {}).get("content") or "")
+            try:   # the activity log is local time; Endpoint AI is UTC: one clock for the feed
+                utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.mktime(time.strptime(e["t"], "%Y-%m-%dT%H:%M:%S"))))
+            except ValueError:
+                continue
+            rows.append({"source": "aiguard", "time": utc, "verdict": action.lower(), "what": str(text)[:200],
+                         "who": req.get("user") or "", "detail": ", ".join(hits) or e.get("summary", ""),
+                         "demo": action == "BLOCK" or bool(hits), "id": f"ag-{e.get('t')}-{e.get('seq', '')}"})
+    rows.sort(key=lambda r: r["time"], reverse=True)
+    return rows[:100]
+
+
+def _zia_feed(cfg):
+    """ZIA has no near-live log API, so this is the Insights summary (about 2 days behind), cached for 10 minutes."""
+    z = cfg.get("zia") or {}
+    if not (z.get("users") and cfg.get("client_id") and kc_has("oneapi-client-secret")):
+        return None
+    hit = _ZIA_FEED_CACHE.get("v")
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    try:
+        rep_ = product("zia").dashboards(product("zia").connect(cfg))
+        out = {"panels": [{"label": p["label"], "status": p["status"], "total": p.get("total"), "top": p.get("top", [])[:3]}
+                          for p in rep_.get("panels", [])], "note": "Insights, about 2 days behind"}
+    except Exception as e:
+        out = {"error": str(e)[:200], "note": "Insights, about 2 days behind"}
+    _ZIA_FEED_CACHE["v"] = (time.time(), out)
+    return out
+
+
+def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
+    """One list for the console's live feed: Endpoint AI events from the generator and the AI Guard events this
+    computer sent, newest first, plus the ZIA Insights summary (lagged). Read-only; each source fails on its own."""
+    items, errors, out = [], {}, {}
+    if "eai" in sources and (cfg.get("eai") or {}).get("client_id"):
+        try:
+            em = product("eai")
+            ev = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=max(1, -(-minutes // 60)), limit=100)
+            cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - minutes * 60))
+            for i in ev["items"]:
+                if str(i.get("time") or "")[:19] >= cutoff[:19]:
+                    items.append({"source": "eai", "time": i.get("time"), "verdict": i.get("verdict"), "what": i.get("command"),
+                                  "who": i.get("host") or i.get("user") or "", "detail": " · ".join(
+                                      filter(None, [*(i.get("patterns") or []), *(i.get("owasp") or []), *(i.get("mitre") or [])])),
+                                  "tool": i.get("tool"), "demo": i.get("demo"), "id": f"eai-{i.get('time')}-{i.get('command', '')[:30]}"})
+            out["eai_hosts"] = ev.get("hosts") or []
+        except Exception as e:
+            errors["eai"] = str(e)[:200]
+    if "aiguard" in sources:
+        items += _aiguard_feed(minutes)
+    if "zia" in sources:
+        out["zia"] = _zia_feed(cfg)
+    items.sort(key=lambda r: str(r.get("time") or "")[:19], reverse=True)
+    out.update(items=items[:150], errors=errors, at=time.strftime("%H:%M:%S"))
+    return out
+
+
 def cmd_ready():
     cfg = load_cfg()
     head("Demo readiness")
@@ -2932,6 +3019,7 @@ def cmd_gui():
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE),
                                         "edition": (EDITION or {}).get("product"),
                                         "zia_set_up": bool((c.get("zia") or {}).get("users")),
+                                        "eai_set_up": bool(((c.get("eai") or {}).get("state") or {}).get("policy_id")),
                                         "edition_name": (EDITION or {}).get("name"),
                                         "app_name": (EDITION or {}).get("app_name")})
             if path == "/api/update":
@@ -2960,6 +3048,12 @@ def cmd_gui():
                 self.wfile.write(data)
                 activity("setup", "Diagnostics downloaded", "info")
                 return
+            if path == "/api/feed":
+                c = load_cfg()
+                qs = dict(x.split("=", 1) for x in (self.path.split("?", 1)[1:] or [""])[0].split("&") if "=" in x)
+                srcs = tuple(x for x in qs.get("sources", ",".join(FEED_SOURCES)).split(",") if x in FEED_SOURCES)
+                minutes = max(5, min(int(qs.get("minutes", "60") or 60) if qs.get("minutes", "60").isdigit() else 60, 24 * 60))
+                return self._send(200, feed(c, srcs, minutes, lambda: eai_tenant(c)))
             if path.startswith("/api/eai/report-file"):
                 name = (self.path.split("name=", 1)[1:] or [""])[0].split("&")[0]
                 f = product("eai").report_file(name)

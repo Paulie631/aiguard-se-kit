@@ -216,7 +216,7 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 1. On the generator, signed in to Windows as the user who will run the demo, double-click **SE-Demo Endpoint AI scenes** on the desktop once to check it starts (or run `C:\SE-Demo\eai.cmd demo` in a Command Prompt).
 2. Install Claude Code for that user: `C:\SE-Demo\eai.cmd demo --install` (Anthropic's installer; no admin needed; the kit checks the signature).
 3. Sign it in: run `claude` once and follow the browser sign-in, **or** save an Anthropic API key in that user's Credential Manager with `C:\SE-Demo\eai.cmd demo --set-key`.
-4. Run the scenes once: double-click **SE-Demo Endpoint AI scenes**. Events show on the kit's Endpoint AI tab (Generator activity) within a few minutes.
+4. Run the scenes once: double-click **SE-Demo Endpoint AI scenes**. Events show on the kit's Endpoint AI tab (step 4, live feed, on your laptop) within a few minutes.
 
 **Done when:** you mark it done (`aiguard-kit todo --done eai-claude`).
 
