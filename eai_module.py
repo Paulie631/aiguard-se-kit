@@ -324,6 +324,29 @@ def generator_identities(cfg):
     return [h for h in (e.get("hosts") or []) if h], list(dict.fromkeys(emails))
 
 
+def generator_steps(cfg):
+    """What to do to get the generator into Endpoint AI, with this tenant's own names."""
+    hosts, emails = generator_identities(cfg)
+    ctx = {}
+    try:
+        ctx = K.manual_context(cfg)
+    except Exception as e:
+        K.vlog(f"manual context: {e}")
+    user = emails[0] if emails else None
+    app = ctx.get("app_profile") or "SE-Demo traffic generator"
+    pw = ctx.get("password_source") or "the test user's password"
+    if user:
+        who = (f"On the traffic generator VM (never your own laptop), sign in to Client Connector as {user} "
+               f"(password: {pw}). ")
+    else:
+        who = ("You chose your own ZIA test user, so the kit can't tell which device is the generator: on the "
+               "generator VM, sign in to Client Connector as that test user, then enter the generator's Windows "
+               "hostname under Generator hostnames (run `hostname` there to see it). ")
+    return (who + f"Its app profile ({app}) must have the Endpoint AI agent turned on in the Client Connector portal. "
+            "Within about 15 minutes the generator shows under Administration > Devices in the Endpoint AI console; "
+            "then click Create or update again." + (f" The kit looks for: {', '.join(hosts + emails)}." if hosts or emails else ""))
+
+
 def _device_users(d):
     out = []
     for u in (d.get("users") or []) + (d.get("user_bindings") or []):
@@ -435,10 +458,7 @@ def setup(t, cfg, log, mode=None):
         e["state"]["devices"] = [{"id": d["id"], "hostname": d.get("hostname")} for d in devices]
         e["hosts"] = sorted({*(e.get("hosts") or []), *[d.get("hostname") for d in devices if d.get("hostname")]})
     else:
-        hosts, emails = generator_identities(cfg)
-        log("warn", "No generator device in Endpoint AI yet" + (f" (looked for {', '.join(hosts + emails)})" if hosts or emails
-                                                                 else "") + ". Once Client Connector has installed the "
-            "Endpoint AI agent on the generator, run setup again (or Add the generator's hostname)." + MANUAL_TAB)
+        log("warn", "No generator device in Endpoint AI yet. " + generator_steps(cfg))
     ensure_policy(t, cfg, gid, log, mode)
     e["state"]["set_up"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     K.save_cfg(cfg)
@@ -506,8 +526,7 @@ def status(t, cfg):
     online = [d for d in devices if (d.get("health") or "").lower() == "online" or _recent(d.get("last_seen_at"), 24)]
     if not members:
         out.append(_chk("ready-eai-device", "Generator enrolled in Endpoint AI", "fail", "no device in the group yet",
-                        "Turn on the Endpoint AI agent in Client Connector for the generator, wait for it to appear "
-                        "under Administration > Devices, then run setup again." + MANUAL_TAB))
+                        generator_steps(cfg)))
     else:
         names = ", ".join(sorted(d.get("hostname") or d.get("id", "")[:8] for d in devices)) or f"{len(members)} device(s)"
         out.append(_chk("ready-eai-device", "Generator enrolled in Endpoint AI", "ok" if online else "warn",

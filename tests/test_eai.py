@@ -772,3 +772,16 @@ def test_errors_name_the_call_that_failed(eenv):
     fake.fail_next.append(("POST", "/v1/device-groups", 400, "validation_failed"))
     with pytest.raises(e.EaiError, match="on POST /v1/device-groups"):
         e.ensure_group(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+
+
+def test_generator_instructions_name_the_user_and_app_profile(eenv):
+    kit, e, fake = eenv("eai", zia_user=True)
+    text = e.generator_steps(kit.load_cfg())
+    assert "se-demo-traffic@acme.example" in text and "never your own laptop" in text and "app profile" in text
+    out = []
+    fake.devices = [d for d in fake.devices if d["id"] != "dev-gen"]
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(out))
+    assert any(lv == "warn" and "sign in to Client Connector as se-demo-traffic@acme.example" in m for lv, m in out)
+    cfg = kit.load_cfg()
+    cfg["zia"] = {"users": [{"email": "picked@acme.example"}]}   # their own test user: hostname needed
+    assert "Generator hostnames" in e.generator_steps(cfg) and "picked@acme.example" not in e.generator_steps(cfg)

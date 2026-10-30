@@ -287,7 +287,7 @@
    "id": "eai-agent",
    "stage": "generator",
    "who": "you",
-   "title": "Get the Endpoint AI agent onto the generator",
+   "title": "Get the generator into Endpoint AI",
    "why": "Client Connector delivers the Endpoint AI agent. Turning that on for the generator's app profile is a Client Connector setting the kit can't change through the API.",
    "applies": "eai",
    "needs": [
@@ -296,11 +296,13 @@
    ],
    "check": "eai-device",
    "steps": [
-    "In the Client Connector portal, open the app profile the generator uses ({app_profile}) and turn on the Endpoint AI agent for it.",
-    "On the generator, open Client Connector (signed in as {test_user}) and update its policy, or restart it, so the agent installs.",
-    "In the Endpoint AI console, check the generator appears under **Administration > Devices** (its hostname, online). If it doesn't after 15 minutes, restart the generator."
+    "Work on the **traffic generator VM** (the AWS or CloudShare Windows machine), never your own laptop: the kit only puts the generator in its device group.",
+    "On the generator, sign in to **Client Connector** as **{test_user}** (password: {password_source}). That's the same sign-in the ZIA demo uses. If you chose your own test user instead of letting the kit create one, also note the generator's Windows hostname (run `hostname` in a Command Prompt there).",
+    "In the Client Connector portal, open the app profile **{app_profile}** and turn on the **Endpoint AI** agent for it. Then, on the generator, open Client Connector and click **Update Policy** (or restart the VM) so the agent installs.",
+    "In the Endpoint AI console, open **Administration > Devices** and wait for the generator's hostname to show as online (up to about 15 minutes).",
+    "Back on the kit's **Endpoint AI** tab, click **Create or update** again (if you noted a hostname, enter it under **Generator hostnames** first). The status line **Generator enrolled in Endpoint AI** turns green."
    ],
-   "then": "Run Endpoint AI setup again (Endpoint AI tab > Create or update) so the kit adds the generator to its device group.",
+   "then": "",
    "help": [],
    "confirmed": false
   },
