@@ -2651,6 +2651,10 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
                                       filter(None, [*(i.get("patterns") or []), *(i.get("owasp") or []), *(i.get("mitre") or [])])),
                                   "tool": i.get("tool"), "demo": i.get("demo"), "id": f"eai-{i.get('time')}-{i.get('command', '')[:30]}"})
             out["eai_hosts"] = ev.get("hosts") or []
+            if not ev.get("hosts") and ev.get("emails"):
+                out.setdefault("notes", {})["eai"] = (
+                    "watching user " + ", ".join(ev["emails"]) + " (no generator hostname saved). If the scenes run on a "
+                    "machine signed in as someone else, enter its hostname on the Endpoint AI tab and click Create or update")
             if not ev.get("hosts") and not ev.get("emails"):
                 out.setdefault("notes", {})["eai"] = ("no generator saved yet: on the Endpoint AI tab, enter the generator's "
                                                       "hostname and click Create or update")

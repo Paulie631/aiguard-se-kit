@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.29
+- **Endpoint AI scenes that write files now run.** On a Mac they used `echo … > file`, and Claude Code stops for
+  approval on any output redirection. They now use Claude Code's Write tool, allowed for the kit's work folder only.
+- **Plainer scene prompts.** They explain what the folder and files are, so Claude doesn't take them as pressure to
+  skip its own checks.
+- **Each scene says what actually happened:** ran, blocked before it ran, declined by Claude's own judgement, or
+  stopped by a Claude Code permission prompt.
+- **Live feed says who it's watching.** With no generator hostname saved, it watches the ZIA test user, and now says
+  so and to enter the hostname of the machine running the scenes.
+
 ## 1.8.28
 - **Eight Endpoint AI scenes.** New: the agent reads a private SSH key, writes a test card number and SSN to a
   `.env`, pipes a download into a shell (printed only), force-pushes over a git branch, follows hidden instructions
