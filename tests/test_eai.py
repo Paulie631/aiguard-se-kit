@@ -901,6 +901,7 @@ def test_generator_console_shows_its_hostname(eenv, monkeypatch):
     import socket
     monkeypatch.setattr(socket, "gethostname", lambda: "Pauls-Mac.local")
     monkeypatch.setattr(kit, "WINDOWS", False)
+    monkeypatch.setattr(e.sys, "platform", "linux")   # a Mac asks scutil instead (its own test)
     assert e.public_state(kit.load_cfg())["this_machine"]["hostname"] == "Pauls-Mac"
     assert e.host_key("Pauls-Mac.local") == e.host_key("PAULS-MAC")
     cfg = kit.load_cfg()
