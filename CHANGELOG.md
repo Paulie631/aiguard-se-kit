@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+- **Endpoint AI Security demo (new).** A third module beside AI Guard and ZIA, on its own **Endpoint AI** tab and
+  `aiguard-kit eai`. With an Endpoint AI API credential (Administration > API Access, Admin role), the kit creates a
+  device group holding only the traffic generator and the `SE-Demo: Agentic Guardrails` policy, assigned to that
+  group alone, with a **Monitor / Block** switch. On the generator, Claude Code runs scripted scenes that trip the
+  policy using only safe test data: AWS's published example key, and a decoy folder. The tab shows the generator's
+  events with their OWASP Agentic and MITRE ATLAS tags, builds the Executive Brief or AI Asset Report PDF as a
+  leave-behind, and tears down only what the kit made. Readiness checks the credential's expiry, the generator and
+  the policy. Five new manual steps cover the credential, the agent through Client Connector, and Claude Code
+  sign-in. See ENDPOINT-AI.md.
+- Logs and diagnostics now mask anything shaped like an Endpoint AI secret (`sqrx_sk_…`), an enrollment token
+  (`ZTK-…`) or an Anthropic API key (`sk-ant-…`), even when the kit didn't load it.
+- The generator setup (AWS template and CloudShare script) adds `C:\SE-Demo\eai.cmd` and a **SE-Demo Endpoint AI
+  scenes** desktop shortcut.
+
 ## 1.8.20
 - **The setup path, in order.** Manual steps now show what the kit does in between (marked ⚙) and what each step
   needs first. A step that can't be done yet says what it's waiting for, and the one to do now is marked **next**.

@@ -1,0 +1,44 @@
+{
+  "_about": "The SE demo kit's Endpoint AI policy. The kit sets every rule's verdict from the mode (monitor -> audit, block -> block), checks the rules with POST /v1/policies/validate, and assigns the policy only to the kit's device group. Rules marked optional are added only with the shell-lock option. 'scene' and 'optional' are the kit's own keys and are stripped before sending.",
+  "rules": [
+    {
+      "id": "r-sedemo-aws-key",
+      "scene": "secret",
+      "ruleType": "data_protection",
+      "match": {"field": "tool_input", "op": "regex", "value": "AKIA[0-9A-Z]{16}"},
+      "events": ["PreToolUse"],
+      "verdict": "audit",
+      "reason": "AWS access key in a tool call",
+      "user_message": "Blocked by your organization's AI policy: this command contains what looks like an AWS access key.",
+      "agent_message": "This action was blocked because it contains an AWS access key. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-destructive",
+      "scene": "destructive",
+      "ruleType": "custom",
+      "match": {"any": [
+        {"field": "tool_input", "op": "regex", "value": "(?i)\\brm\\s+-[a-z]*r[a-z]*f|\\brm\\s+-[a-z]*f[a-z]*r"},
+        {"field": "tool_input", "op": "regex", "value": "(?i)Remove-Item\\b.*-Recurse"}
+      ]},
+      "events": ["PreToolUse"],
+      "verdict": "audit",
+      "reason": "Recursive force-delete from an AI agent",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not run recursive force-deletes.",
+      "agent_message": "This command was blocked: recursive force-deletes are not allowed for AI agents. Do not retry it."
+    },
+    {
+      "id": "r-sedemo-shell-lock",
+      "optional": true,
+      "ruleType": "custom",
+      "match": {"any": [
+        {"field": "tool_name", "op": "equals", "value": "Bash"},
+        {"field": "tool_name", "op": "equals", "value": "PowerShell"}
+      ]},
+      "events": ["PreToolUse"],
+      "verdict": "audit",
+      "reason": "Shell access for AI agents is locked on this device",
+      "user_message": "Blocked by your organization's AI policy: AI agents can't run shell commands on this device.",
+      "agent_message": "Shell commands are not allowed on this device. Do not retry."
+    }
+  ]
+}
