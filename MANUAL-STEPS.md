@@ -117,7 +117,7 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 *Menu names not yet confirmed · id `zcc-profiles`*
 
-- *The kit:* **create the Endpoint AI demo policy**. A device group holding only the generator, and the SE-Demo policy assigned to that group alone, in Monitor or Block mode. Start it: Endpoint AI tab > Create or update. Needs first: Create the Endpoint AI API credential; Get the Endpoint AI agent onto the generator.
+- *The kit:* **create the Endpoint AI demo policy**. A device group holding only the generator, and the SE-Demo policy assigned to that group alone, in Monitor or Block mode. Start it: Endpoint AI tab > Create or update. Needs first: Create the Endpoint AI API credential; Get the generator into Endpoint AI.
 
 ### Create the test user in your directory (AD or LDAP tenants)
 
@@ -187,7 +187,7 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 *Menu path checked 2026-10 · id `generator-signin`*
 
-### Get the Endpoint AI agent onto the generator
+### Get the generator into Endpoint AI
 
 **Why it's manual:** Client Connector delivers the Endpoint AI agent. Turning that on for the generator's app profile is a Client Connector setting the kit can't change through the API.
 
@@ -195,11 +195,11 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 **Needs first:** Sign in to Client Connector on the generator (with the ZIA demo); Create the Endpoint AI API credential
 
-1. In the Client Connector portal, open the app profile the generator uses (SE-Demo traffic generator) and turn on the Endpoint AI agent for it.
-2. On the generator, open Client Connector (signed in as the test user (for example `se-demo-traffic@<your domain>`)) and update its policy, or restart it, so the agent installs.
-3. In the Endpoint AI console, check the generator appears under **Administration > Devices** (its hostname, online). If it doesn't after 15 minutes, restart the generator.
-
-**Then:** Run Endpoint AI setup again (Endpoint AI tab > Create or update) so the kit adds the generator to its device group.
+1. Work on the **traffic generator VM** (the AWS or CloudShare Windows machine), never your own laptop: the kit only puts the generator in its device group.
+2. On the generator, sign in to **Client Connector** as **the test user (for example `se-demo-traffic@<your domain>`)** (password: the one the kit generated (`aiguard-kit zia password`) or, for a ZIdentity user, the one you set in ZIdentity). That's the same sign-in the ZIA demo uses. If you chose your own test user instead of letting the kit create one, also note the generator's Windows hostname (run `hostname` in a Command Prompt there).
+3. In the Client Connector portal, open the app profile **SE-Demo traffic generator** and turn on the **Endpoint AI** agent for it. Then, on the generator, open Client Connector and click **Update Policy** (or restart the VM) so the agent installs.
+4. In the Endpoint AI console, open **Administration > Devices** and wait for the generator's hostname to show as online (up to about 15 minutes).
+5. Back on the kit's **Endpoint AI** tab, click **Create or update** again (if you noted a hostname, enter it under **Generator hostnames** first). The status line **Generator enrolled in Endpoint AI** turns green.
 
 **Done when:** the kit checks it (Check under Setup > Manual steps).
 
@@ -211,7 +211,7 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 **When:** When you use the Endpoint AI Security demo.
 
-**Needs first:** Get the Endpoint AI agent onto the generator
+**Needs first:** Get the generator into Endpoint AI
 
 1. On the generator, signed in to Windows as the user who will run the demo, double-click **SE-Demo Endpoint AI scenes** on the desktop once to check it starts (or run `C:\SE-Demo\eai.cmd demo` in a Command Prompt).
 2. Install Claude Code for that user: `C:\SE-Demo\eai.cmd demo --install` (Anthropic's installer; no admin needed; the kit checks the signature).

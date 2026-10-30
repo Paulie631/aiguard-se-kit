@@ -284,6 +284,7 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 <!-- ============ ENDPOINT AI ============ -->
 <div class="view" id="v-eai">
 <div class="wrap stack" style="max-width:1100px">
+  <div class="notice" style="display:block" id="eaiwhere"><b>Two machines.</b> On <b>your laptop</b> (admin): steps 1, 2 and 4. On the <b>traffic generator VM</b>: step 3 only. Steps 1 and 2 show errors on the generator, which is expected because the credential stays on your laptop.</div>
   <div class="panel">
     <h2>1 · Connect <span class="muted" style="font-weight:400;font-size:13px">· your admin machine</span></h2>
     <p class="muted" style="font-size:13px;margin:0 0 10px">Endpoint AI Security has its own API credential, not the OneAPI client. In the Endpoint AI console open <b id="eaipath">Administration &gt; API Access</b>, create a credential named <code>se-demo-kit</code> with the <b>Admin</b> role and an expiry, and copy the client_id and client_secret (shown once). The secret is kept in this computer's keychain. Never paste it into chat, email or tickets.</p>
@@ -312,8 +313,13 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
   </div>
   <div class="panel">
     <h2>3 · Run the scenes <span class="muted" style="font-weight:400;font-size:13px">· on the generator VM, never a corporate laptop</span></h2>
-    <p class="muted" style="font-size:13px;margin:0 0 10px">Client Connector delivers the Endpoint AI agent. Claude Code on the generator then runs each scene with a fixed prompt. Only safe test data is used: AWS's published example key <code>AKIAIOSFODNN7EXAMPLE</code> and a throwaway <code>decoy-project</code> folder the kit creates. First time on the generator: <code>eai demo --install</code>, then sign in with <code>claude</code> or save an API key with <code>eai demo --set-key</code>.</p>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><span id="eaiscenes" class="row" style="gap:10px"></span><button class="primary" id="eaidemo">Run scenes on this machine</button></div>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Client Connector delivers the Endpoint AI agent. Claude Code on the generator then runs each scene with a fixed prompt. Only safe test data is used: AWS's published example key <code>AKIAIOSFODNN7EXAMPLE</code> and a throwaway <code>decoy-project</code> folder the kit creates. First time: sign Client Connector in (a), install Claude Code and sign it in once (b), then run the scenes (c).</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"><span class="lbl">a · Client Connector</span>
+      <span id="eaizcc" style="font-size:13px"></span><button id="eaizccpw" style="display:none">Show password</button></div>
+    <div id="eaizccout"></div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"><span class="lbl">b · Claude Code</span>
+      <span id="eaiclaude" style="font-size:13px"></span><button id="eaiinstall">Install Claude Code</button></div>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><span class="lbl">c · Scenes</span><span id="eaiscenes" class="row" style="gap:10px"></span><button class="primary" id="eaidemo">Run scenes on this machine</button></div>
     <div id="eaidemoout"></div>
     <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
   </div>
@@ -1311,6 +1317,12 @@ async function eai(){
     const c=e.credential||{};
     $("#eaicred").textContent=e.saved?`Saved: ${e.client_id}`+(c.name?` (${c.name}${c.roles?", "+c.roles.filter(Boolean).join(", "):""}${c.expires_at?", expires "+String(c.expires_at).slice(0,10):""})`:"")+(e.state&&e.state.set_up?` · demo policy set up ${e.state.set_up}, ${(e.state.mode||"monitor")} mode`:" · connected; demo policy not created yet (step 2)"):"Not connected yet.";
     if(e.state&&e.state.mode)$("#eaimode").value=e.state.mode;
+    const z=e.zcc||{};
+    $("#eaizcc").innerHTML=z.email?`Sign in as <code>${esc(z.email)}</code>${z.password_source&&!z.has_password?` · password: ${esc(z.password_source)}`:""}. In the Endpoint AI console this machine should then appear under Administration &gt; Devices.`:"Sign in as the ZIA test user (the ZIA tab on your laptop shows it). This machine should then appear under Administration &gt; Devices in the Endpoint AI console.";
+    $("#eaizccpw").style.display=z.has_password?"":"none";
+    const cl=e.claude||{};
+    $("#eaiclaude").innerHTML=cl.installed?`Installed (<code>${esc(cl.path)}</code>). Signed in? Run <code>claude</code> once in a terminal and follow the browser sign-in.`:"Not installed on this machine.";
+    $("#eaiinstall").textContent=cl.installed?"Reinstall":"Install Claude Code";
     if(!$("#eaiscenes").children.length)$("#eaiscenes").innerHTML=e.scenes.map(s=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-es="${s.id}" checked>${esc(s.title)}</label>`).join("");
     $("#eailastrep").innerHTML=e.last_report?`Last: <a href="#" data-rep="${esc(e.last_report.file)}">${esc(e.last_report.file)}</a>`:"";
   }catch(err){$("#eaicred").textContent=err.message}
@@ -1328,6 +1340,12 @@ $("#eaistatus").onclick=async()=>{$("#eaiout").innerHTML='<div class="muted">Che
   try{const r=await api("/api/eai/status");if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));$("#eaiout").innerHTML=checksHTML(r.checks);eai()}catch(err){$("#eaiout").innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
 $("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
   $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+$("#eaizccpw").onclick=async()=>{const b=$("#eaizccpw");if(b.dataset.on){$("#eaizccout").innerHTML="";delete b.dataset.on;b.textContent="Show password";return}
+  try{const r=await api("/api/zia/password",{});if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));b.dataset.on=1;b.textContent="Hide password";
+  $("#eaizccout").innerHTML=`<div class="notice" style="display:block;margin:0 0 10px">Client Connector sign-in:<br><code>${esc(r.email)}</code><br><code>${esc(r.password)}</code> <button id="eaipwcp" style="margin-left:6px">Copy</button><div class="muted" style="font-size:12px;margin-top:6px">Shown on this computer only. Don't paste it into chat, email or tickets.</div></div>`;
+  $("#eaipwcp").onclick=()=>navigator.clipboard.writeText(r.password)}catch(err){alert(err.message)}};
+$("#eaiinstall").onclick=()=>{if(!confirm("Install Claude Code for this computer's user with Anthropic's installer (claude.ai/install)? Only on the traffic generator VM. No admin rights needed; the kit checks the download is signed by Anthropic."))return;
+  $("#eaidemoout").innerHTML="";runJob("/api/eai/install",{},$("#eaidemolog"),j=>{eai();if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
 $("#eaidemo").onclick=()=>{const scenes=$$("[data-es]").filter(x=>x.checked).map(x=>x.dataset.es);if(!scenes.length)return;
   if(!confirm("Run the scenes on THIS machine? Only on the traffic generator VM, never a corporate laptop: Claude Code will try to write AWS's example key to a file and delete the kit's decoy folder."))return;
   $("#eaidemoout").innerHTML="";runJob("/api/eai/demo",{scenes},$("#eaidemolog"),j=>{if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
