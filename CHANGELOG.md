@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.21
 - **Endpoint AI Security demo (new).** A third module beside AI Guard and ZIA, on its own **Endpoint AI** tab and
   `aiguard-kit eai`. With an Endpoint AI API credential (Administration > API Access, Admin role), the kit creates a
   device group holding only the traffic generator and the `SE-Demo: Agentic Guardrails` policy, assigned to that
@@ -14,6 +14,10 @@
   (`ZTK-…`) or an Anthropic API key (`sk-ant-…`), even when the kit didn't load it.
 - The generator setup (AWS template and CloudShare script) adds `C:\SE-Demo\eai.cmd` and a **SE-Demo Endpoint AI
   scenes** desktop shortcut.
+- **No terminal window, from the installer and after updates too.** The desktop shortcut already started the console
+  in the background, but the installer still opened it in its own Terminal or command window, and an update
+  restarted a console in the window it was started from. Both now start it in the background (Quit in the console
+  stops it); the installer window can be closed (on Windows it closes by itself).
 
 ## 1.8.20
 - **The setup path, in order.** Manual steps now show what the kit does in between (marked ⚙) and what each step

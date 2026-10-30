@@ -1045,3 +1045,27 @@ def test_background_console_reuses_a_running_one_and_quits_from_the_button(monke
     assert json.loads(urllib.request.urlopen(req).read())["ok"]
     t.join(5)
     assert not t.is_alive() and not kit.console_file().exists() and kit.running_console() is None
+
+
+def test_restart_and_installers_bring_the_console_up_without_a_terminal(monkeypatch, tmp_path):
+    """After an update the console comes back in the background even if it had been started in a terminal (by the
+    installer or an older shortcut); the installers start it in the background too."""
+    import subprocess
+    kit = load_kit(monkeypatch, tmp_path, ["gui"])
+    calls = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw)))
+    monkeypatch.setattr(kit.os, "_exit", lambda code: calls.append(("exit", code)))
+    srv = types.SimpleNamespace(socket=types.SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    kit.restart_console(srv, 8765)
+    cmd, kw = calls[0]
+    assert cmd[:2] == ["nohup", "bash"] and "--background" in cmd and "--restarted" in cmd and kw["start_new_session"]
+    assert calls[-1] == ("exit", 0)
+    calls.clear()
+    monkeypatch.setattr(kit, "WINDOWS", True)
+    kit.restart_console(srv, 8765)
+    assert calls[0][0][0].endswith("conhost.exe") and calls[0][0][1] == "--headless" and "--background" in calls[0][0]
+    mac = (ROOT / "Install AI Guard Kit.command").read_text(encoding="utf-8")
+    win = (ROOT / "Install AI Guard Kit.cmd").read_text(encoding="utf-8")
+    assert 'nohup "$HOME/.aiguard-se-kit/app/aiguard-kit" gui --background' in mac and "Keep this window open" not in mac
+    assert 'conhost.exe" --headless' in win and "gui --background" in win and "Keep this window open" not in win

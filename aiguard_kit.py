@@ -61,7 +61,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.20"
+VERSION = "1.8.21"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -2805,23 +2805,27 @@ WIN_CONHOST = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "
 
 
 def restart_console(srv, port):
-    """Reopen the console from the installed copy (after an update), on the same port when possible."""
+    """Reopen the console from the installed copy (after an update), on the same port when possible. Always in the
+    background, like the desktop shortcut: a console that was started in a terminal (by the installer, or by an older
+    shortcut) doesn't come back in that terminal."""
     import subprocess
     launcher = APP_DIR / ("aiguard-kit.cmd" if WINDOWS else "aiguard-kit")
-    background = "--background" in ARGS
-    args = (["gui", "--port", str(port), "--restarted"] + (["--background"] if background else [])
+    args = (["gui", "--port", str(port), "--restarted", "--background"]
             + (["--profile", PROFILE] if PROFILE != "default" else []))
     try:
         srv.socket.close()  # free the port for the new console
     except OSError:
         pass
+    if sys.stdout and sys.stdout.isatty():
+        print("\n  The console restarted in the background (Quit in the console stops it). You can close this window.")
     if WINDOWS:
-        if background:   # no window, like the desktop shortcut
-            subprocess.Popen([str(WIN_CONHOST), "--headless", str(launcher), *args], cwd=str(HOME))
-        else:
-            subprocess.Popen(["cmd", "/c", "start", APP_NAME, str(launcher), *args], cwd=str(HOME))
+        subprocess.Popen([str(WIN_CONHOST), "--headless", str(launcher), *args], cwd=str(HOME))
         os._exit(0)
-    os.execv("/bin/bash", ["bash", str(launcher), *args])
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_DIR / "console-output.log", "ab") as out:
+        subprocess.Popen(["nohup", "bash", str(launcher), *args], cwd=str(HOME), stdin=subprocess.DEVNULL,
+                         stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    os._exit(0)
 
 
 def cmd_gui():
