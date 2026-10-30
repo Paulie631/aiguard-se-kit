@@ -7,6 +7,12 @@
   skip its own checks.
 - **Each scene says what actually happened:** ran, blocked before it ran, declined by Claude's own judgement, or
   stopped by a Claude Code permission prompt.
+- **Live feed finds the generator's real events.** Checked against a real Endpoint AI event: on a Mac the kit showed
+  the hostname `Mac`, while Endpoint AI records `Pauls-MacBook-Pro.local`. The generator's console now shows the name
+  Endpoint AI uses (the Mac's Bonjour name; the computer name on Windows), hostnames match with or without `.local`,
+  and if the API's host filter finds nothing the kit matches the hostname itself. Scene events are also recognised by
+  their working folder (`.aiguard-se-kit/eai-demo`), whoever Client Connector is signed in as. Session start/end
+  markers are left out of the feed, and file writes show the file and the start of what was written.
 - **Live feed says who it's watching.** With no generator hostname saved, it watches the ZIA test user, and now says
   so and to enter the hostname of the machine running the scenes.
 

@@ -19,6 +19,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -634,28 +635,44 @@ def evidence(t, cfg, hours=24, limit=50):
         return {"items": [], "matched": 0, "total": 0, "hosts": [], "patterns": {}}
     q = {"since": _since(hours), "limit": limit}
     if hosts:   # as typed, short and upper-case: Endpoint AI may record "EC2AMAZ-GEN1" for "ec2amaz-gen1.ec2.internal"
-        q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for x in (h, host_key(h), host_key(h).upper())))
+        q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for k in [host_key(h)]
+                                              for x in (h, k, k.upper(), f"{h.split('.')[0]}.local")))   # Macs: name.local
     elif emails:
         q["ef_user"] = ",".join(emails)
     body = t.get("/v1/events", **q)
-    if hosts:   # and only the generator's events, even if the API ignored the filter
+    if hosts:   # only the generator's events, even if the API ignored the filter or spells the host differently
         keys = {host_key(h) for h in hosts}
-        body = {"items": [ev for ev in _items(body, "events") if host_key(ev.get("hostname")) in keys]}
+        mine = [ev for ev in _items(body, "events") if host_key(ev.get("hostname")) in keys]
+        if not mine:   # the filter matched nothing: read the latest events and match the hostname here instead
+            q2 = {k: v for k, v in q.items() if k != "ef_host"}
+            mine = [ev for ev in _items(t.get("/v1/events", **{**q2, "limit": 200}), "events")
+                    if host_key(ev.get("hostname")) in keys]
+        body = {"items": mine}
     ids = {r["id"] for r in template()["rules"]}
     items = []
     for ev in _items(body, "events"):
         data = ev.get("data") or {}
-        cmd = data.get("tool_input")
-        cmd = cmd.get("command") if isinstance(cmd, dict) else cmd
+        etype = ev.get("event_type") or data.get("hook_event_name") or ""
+        tool = ev.get("tool_name") or data.get("tool_name") or ""
+        if not tool and etype in LIFECYCLE:   # session start/end and batch markers: noise in a demo feed
+            continue
+        ti = data.get("tool_input")
+        if isinstance(ti, dict):   # a shell command, or the file a Write/Read/Edit touched (and the start of its content)
+            cmd = ti.get("command") or " ".join(filter(None, [ti.get("file_path") or ti.get("path"),
+                                                              str(ti.get("content") or "")[:120]]))
+        else:
+            cmd = ti or data.get("prompt") or ""
+        cwd = str(data.get("cwd") or ev.get("cwd") or "")
         rule = data.get("rule_id") or data.get("rule") or ""
         verdict = (data.get("verdict") or ev.get("verdict") or "").lower()
-        items.append({"time": ev.get("timestamp"), "host": ev.get("hostname"), "user": ev.get("user_email"),
-                      "tool": ev.get("tool_name"), "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
-                      "command": str(cmd or "")[:300], "rule": rule,
+        items.append({"time": ev.get("timestamp"), "host": ev.get("hostname"),
+                      "user": ev.get("user_email") or data.get("email") or ev.get("email"),
+                      "tool": tool or etype, "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
+                      "command": str(cmd or "")[:300], "rule": rule, "cwd": cwd,
                       "patterns": [p.get("label") or p.get("pattern_id") for p in ev.get("pattern_tags") or []],
                       "mitre": [p.get("atlas") for p in ev.get("pattern_tags") or [] if p.get("atlas")],
                       "owasp": [p.get("owasp") for p in ev.get("pattern_tags") or [] if p.get("owasp")],
-                      "demo": bool(rule in ids or _is_demo(cmd))})
+                      "demo": bool(rule in ids or _is_demo(cmd) or DEMO_DIR in cwd.replace("\\", "/"))})
     matched = sum(1 for i in items if i["demo"])
     try:
         counts = t.get("/v1/events/counts", **{k: v for k, v in q.items() if k != "limit"})
@@ -667,6 +684,8 @@ def evidence(t, cfg, hours=24, limit=50):
     return {"items": items, "matched": matched, "total": total, "hosts": hosts, "emails": emails}
 
 
+DEMO_DIR = ".aiguard-se-kit/eai-demo"   # the scenes' working folder: every scene event carries it as cwd
+LIFECYCLE = {"SessionStart", "SessionEnd", "Stop", "SubagentStop", "PostToolBatch", "PreCompact", "Notification"}
 DEMO_MARKERS = re.compile(r"AKIAIOSFODNN7EXAMPLE|decoy-project|decoy-repo|SETUP-NOTES|4111111111111111|078-05-1120|"
                           r"example\.com/install\.sh|se-demo-unvetted")
 
@@ -1199,14 +1218,28 @@ def zcc_signin(cfg):
 
 
 def this_machine():
-    import socket
     running = None
     try:
         running = K.product("zia").traffic_module().zcc_running()
     except Exception as e:
         K.vlog(f"zcc running: {e}")
-    return {"hostname": host_key(socket.gethostname()).upper() if K.WINDOWS else socket.gethostname().split(".")[0],
-            "zcc_running": running}
+    return {"hostname": machine_name(), "zcc_running": running}
+
+
+def machine_name():
+    """The name Endpoint AI records for this machine: on a Mac the Bonjour name ('Pauls-MacBook-Pro'; Endpoint AI
+    shows it with .local), not the short name Python reports ('Mac'); on Windows the computer name."""
+    import socket
+    if K.WINDOWS:
+        return (os.environ.get("COMPUTERNAME") or socket.gethostname()).split(".")[0].upper()
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True, timeout=10).stdout.strip()
+            if name:
+                return name
+        except Exception as e:
+            K.vlog(f"scutil: {e}")
+    return socket.gethostname().split(".")[0]
 
 
 def claude_status():

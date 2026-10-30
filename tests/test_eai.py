@@ -1052,3 +1052,35 @@ def test_feed_says_it_is_watching_a_user_when_no_hostname(eenv):
     kit, e, _ = eenv("eai")
     out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     assert "watching user se-demo-traffic@acme.example" in out["notes"]["eai"]
+
+
+def test_real_event_shape_from_the_mac(eenv):
+    """As Endpoint AI showed it: host 'Pauls-MacBook-Pro.local', the Client Connector user, cwd the kit's demo folder."""
+    kit, e, fake = eenv("eai", zia_user=False)
+    cfg = kit.load_cfg()
+    cfg["eai"]["hosts"] = ["Pauls-MacBook-Pro"]
+    kit.save_cfg(cfg)
+    cwd = "/Users/paulaiuto/.aiguard-se-kit/eai-demo"
+    fake.events = [
+        {"id": "s", "timestamp": "2026-10-30T18:47:57Z", "hostname": "Pauls-MacBook-Pro.local", "event_type": "SessionEnd",
+         "data": {"verdict": "allow", "cwd": cwd, "email": "ztest@pyite.buzz", "tool_name": ""}},
+        {"id": "w", "timestamp": "2026-10-30T18:47:50Z", "hostname": "Pauls-MacBook-Pro.local", "event_type": "PreToolUse",
+         "tool_name": "Write", "data": {"verdict": "audit", "cwd": cwd, "email": "ztest@pyite.buzz",
+                                        "tool_input": {"file_path": cwd + "/.env", "content": "TEST_CARD=4111111111111111"}}},
+        {"id": "b", "timestamp": "2026-10-30T18:47:40Z", "hostname": "Pauls-MacBook-Pro.local", "event_type": "PreToolUse",
+         "tool_name": "Bash", "data": {"verdict": "allow", "cwd": "/Users/paulaiuto/work", "tool_input": {"command": "git status"}}},
+    ]
+    ev = e.evidence(e.connect(cfg), cfg)
+    assert sorted(i["tool"] for i in ev["items"]) == ["Bash", "Write"]          # SessionEnd dropped
+    w = next(i for i in ev["items"] if i["tool"] == "Write")
+    assert w["demo"] and w["user"] == "ztest@pyite.buzz" and ".env" in w["command"] and "4111" in w["command"]
+    assert not next(i for i in ev["items"] if i["tool"] == "Bash")["demo"] and ev["matched"] == 1
+
+
+def test_mac_hostname_is_the_bonjour_name(eenv, monkeypatch):
+    kit, e, _ = eenv("eai")
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    monkeypatch.setattr(e.sys, "platform", "darwin")
+    monkeypatch.setattr(e.subprocess, "run", lambda *a, **k: Proc("Pauls-MacBook-Pro\n"))
+    assert e.machine_name() == "Pauls-MacBook-Pro"
+    assert e.host_key("Pauls-MacBook-Pro") == e.host_key("Pauls-MacBook-Pro.local")
