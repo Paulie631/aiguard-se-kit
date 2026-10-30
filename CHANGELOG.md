@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.27
+- **Live feed has its own tab.** It moved from the Endpoint AI tab's step 4 to a **Live feed** tab, with more room
+  for rows; step 4 links to it and keeps the leave-behind PDF.
+
 ## 1.8.26
 - **Live feed on your laptop.** The Endpoint AI tab's step 4 is now a live feed for the computer you present from
   (no Client Connector needed there): the generator's Endpoint AI events and the AI Guard events this computer sent,

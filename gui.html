@@ -204,6 +204,7 @@ tr.feednew td{animation:feedflash 4s ease-out}
   <button data-t="logs">Logs<span class="tabcount" id="logerr" style="display:none"></span></button>
   <button data-t="zia">Internet Access (ZIA)</button>
   <button data-t="eai">Endpoint AI</button>
+  <button data-t="feed">Live feed</button>
 </nav>
 <div class="healthbar" id="healthbar">
   <div><b>This computer's demo setup needs a repair.</b><ul id="healthlist"></ul></div>
@@ -283,6 +284,17 @@ tr.feednew td{animation:feedflash 4s ease-out}
 </div>
 </div>
 
+<!-- ============ LIVE FEED ============ -->
+<div class="view" id="v-feed">
+<div class="wrap stack">
+  <div class="panel">
+    <h2>Live feed <span class="muted" style="font-weight:400;font-size:13px">· on the computer you present from; no Client Connector needed here</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">The traffic generator's Endpoint AI events and the AI Guard events this computer sent, newest first, refreshed every 20 seconds while this tab is open. New rows flash. ZIA has no near-live log API, so ZIA shows the Insights summary (about 2 days behind).</p>
+    <div id="feedtab"></div>
+  </div>
+</div>
+</div>
+
 <!-- ============ ENDPOINT AI ============ -->
 <div class="view" id="v-eai">
 <div class="wrap stack" style="max-width:1100px">
@@ -326,9 +338,9 @@ tr.feednew td{animation:feedflash 4s ease-out}
     <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
   </div>
   <div class="panel">
-    <h2>4 · Show what happened <span class="muted" style="font-weight:400;font-size:13px">· your laptop: a live feed, no Client Connector needed here</span></h2>
-    <div id="eaifeed"></div>
-    <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px">
+    <h2>4 · Show what happened <span class="muted" style="font-weight:400;font-size:13px">· your laptop</span></h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Watch the generator's events as they arrive on the <a href="#" id="eaitofeed">Live feed</a> tab.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap">
       <span class="lbl">Leave-behind</span><select id="eaiedition"><option value="executive">AI Security Executive Brief</option><option value="ai-asset">AI Asset Report</option></select>
       <button id="eaireport">Build PDF (last 7 days)</button><span id="eailastrep" class="muted" style="font-size:12px"></span></div>
     <div class="log" id="eairepl" style="display:none;margin-top:12px"></div>
@@ -550,7 +562,7 @@ async function loadManual(check){if(check)$("#manlist").insertAdjacentHTML("afte
   try{MAN=(await api("/api/manual"+(check?"?check=1":""))).steps||[];drawManual()}catch(e){$("#manlist").innerHTML=`<div class="notice" style="display:block">${esc(e.message)}</div>`}}
 async function markManual(id,done){try{await api("/api/manual/mark",{id,done});await loadManual(false)}catch(e){alert(e.message)}}
 $("#mandone").onchange=drawManual;$("#mancheck").onclick=()=>loadManual(true);
-$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup"){wizard();loadManual(true)}if(b.dataset.t=="zia")zia();if(b.dataset.t=="eai")eai()});
+$$("#tabs button").forEach(b=>b.onclick=()=>{$$("#tabs button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("on",v.id=="v-"+b.dataset.t));if(b.dataset.t=="demo"){if(S.policy==null)loadPolicy().then(()=>{if(demoOpen())drawStage()});drawStage()}if(b.dataset.t=="setup"){wizard();loadManual(true)}if(b.dataset.t=="zia")zia();if(b.dataset.t=="eai")eai();if(b.dataset.t=="feed")feedTab()});
 
 /* ---------- state ---------- */
 async function loadState(){
@@ -1340,13 +1352,13 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
   async function tick(now){clearTimeout(st.timer);if(!el.isConnected)return;
     if(st.on&&(now||vis())){try{draw(await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`))}catch(e){q("[data-fstat]").textContent=e.message}}
     st.timer=setTimeout(()=>tick(false),opt.every||20000)}
-  function draw(r){const errs=Object.entries(r.errors||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
+  function draw(r){if(!el.isConnected)return;const errs=Object.entries(r.errors||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
     q("[data-fstat]").textContent=`updated ${r.at}`+(st.on?" · every 20 s":" · paused")+(errs.length?" · "+errs.join("; "):"");
     const z=r.zia;q("[data-fzia]").innerHTML=st.src.includes("zia")?(z?(z.error?`<div class="muted" style="font-size:12.5px">ZIA (${esc(z.note)}): ${esc(z.error)}</div>`:`<div class="muted" style="font-size:12.5px"><b>ZIA</b> (${esc(z.note)}; ZIA has no live log API): ${z.panels.map(p=>`${esc(p.label)} ${p.total!=null?p.total.toLocaleString():"–"}`).join(" · ")}</div>`):`<div class="muted" style="font-size:12.5px">ZIA: not set up on this computer.</div>`):"";
     const items=r.items||[];
     if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}
     const bad=v=>/block|deny/.test(v||""),warn=v=>v=="audit";
-    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:52vh;overflow:auto"><table><tr><th>Time</th><th>Source</th><th>Verdict</th><th>Where / who</th><th>What</th><th>Detections</th></tr>${items.map(i=>{const fresh=!st.first&&!st.seen.has(i.id);
+    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:${opt.tall?72:52}vh;overflow:auto"><table><tr><th>Time</th><th>Source</th><th>Verdict</th><th>Where / who</th><th>What</th><th>Detections</th></tr>${items.map(i=>{const fresh=!st.first&&!st.seen.has(i.id);
       return `<tr class="${fresh?"feednew":""}"${i.demo?' style="font-weight:600"':""}><td>${esc(new Date(i.time).toLocaleTimeString())}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
       <td><span class="ic ${bad(i.verdict)?"fail":warn(i.verdict)?"warn":"ok"}">${bad(i.verdict)?ICON.fail:warn(i.verdict)?ICON.warn:ICON.ok}</span> ${esc(i.verdict||"")}</td>
       <td style="font-size:12px">${esc(i.who||"")}</td><td><code style="font-size:12px">${esc(i.what||"")}</code></td><td style="font-size:12px">${esc(i.detail||"")}</td></tr>`}).join("")}</table></div>`;
@@ -1355,9 +1367,10 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
 
 /* ---------- Endpoint AI ---------- */
 let EAI=null;
-let EAIFEED=null;
+let FEEDTAB=null;
+function feedTab(){if(!FEEDTAB)FEEDTAB=liveFeed($("#feedtab"),{minutes:60,tall:true})}
+$("#eaitofeed").onclick=e=>{e.preventDefault();$('#tabs button[data-t="feed"]').click()};
 async function eai(){
-  if(!EAIFEED||!$("#eaifeed").firstChild)EAIFEED=liveFeed($("#eaifeed"));
   try{const e=EAI=await api("/api/eai/state");if(e.error)throw new Error(e.error);
     $("#eaidomain").value=$("#eaidomain").value||e.domain;$("#eairegion").value=$("#eairegion").value||e.region;$("#eaicid").value=$("#eaicid").value||e.client_id;
     $("#eaipath").textContent=e.console_path;$("#eaigroup").textContent=e.group;$("#eaipol").textContent=e.policy;
