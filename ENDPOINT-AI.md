@@ -80,7 +80,7 @@ before it runs and tells the agent why.
 
 ## Showing the results
 
-- **Live feed** (Endpoint AI tab, step 4, on your laptop; no Client Connector needed there): refreshes every 20
+- **Live feed** (its own tab in the console, on your laptop; no Client Connector needed there): refreshes every 20
   seconds while you're looking at it, with new rows flashing. It merges the generator's Endpoint AI events (verdict,
   tool, command, OWASP Agentic and MITRE ATLAS tags) with the AI Guard events this computer sent, on one clock. ZIA
   has no near-live log API, so ZIA shows as the Insights summary (about 2 days behind). Pause, sources and window

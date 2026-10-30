@@ -958,7 +958,7 @@ def demo(log, scenes=None, runner=subprocess.run, cfg=None):
         if s["id"] == "destructive":
             work_dir()   # put the decoy back for the next run
     log("info", "Endpoint AI's own record is what counts: the events show in its console (Events) and on the kit's "
-                "Endpoint AI tab (step 4, live feed, on your laptop) within a few minutes.")
+                "Live feed tab on your laptop within a few minutes.")
     return out
 
 
