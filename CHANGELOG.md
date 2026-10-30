@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.23
+- **Endpoint AI tab, clearer on the generator.** A note at the top says which steps run on your laptop (1, 2, 4)
+  and which on the traffic generator VM (3). Step 3 now walks through the generator in order: (a) the Client
+  Connector sign-in, naming the test user and where its password is (with **Show password** on the computer that
+  created it), (b) **Install Claude Code**, a button that runs Anthropic's installer and checks its signature, and
+  (c) the scenes.
+- When no generator is found, setup and the status check say exactly what to do: the test user to sign in to Client
+  Connector as, the app profile that needs the Endpoint AI agent, and when to enter a hostname instead. The manual
+  step **Get the generator into Endpoint AI** lists the same steps.
+
 ## 1.8.22
 - **Endpoint AI setup fix.** Creating the `SE-Demo: traffic generator` device group failed with `400
   validation_failed: invalid request body`: the kit sent a description the API doesn't accept. It now sends the

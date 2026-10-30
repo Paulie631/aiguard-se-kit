@@ -785,3 +785,25 @@ def test_generator_instructions_name_the_user_and_app_profile(eenv):
     cfg = kit.load_cfg()
     cfg["zia"] = {"users": [{"email": "picked@acme.example"}]}   # their own test user: hostname needed
     assert "Generator hostnames" in e.generator_steps(cfg) and "picked@acme.example" not in e.generator_steps(cfg)
+
+
+def test_generator_panel_shows_the_client_connector_sign_in(eenv):
+    kit, e, _ = eenv("eai")
+    cfg = kit.load_cfg()
+    kit._kc["zia-test-user-password"] = "Gen3rated-pw!"
+    z = e.public_state(cfg)["zcc"]
+    assert z == {"email": "se-demo-traffic@acme.example", "has_password": True, "password_source": "Show password"}
+    assert "Gen3rated" not in json.dumps(e.public_state(cfg))     # the password itself only via /api/zia/password
+    cfg["zia"]["created_user"]["via"] = "zidentity"
+    assert "ZIdentity" in e.zcc_signin(cfg)["password_source"] and not e.zcc_signin(cfg)["has_password"]
+    assert e.zcc_signin({}) == {"email": None, "has_password": False, "password_source": ""}
+
+
+def test_console_install_button_runs_the_checked_installer(eenv, monkeypatch):
+    kit, e, _ = eenv("eai")
+    monkeypatch.setattr(e, "install_claude", lambda log: "C:/Users/se/.local/bin/claude.exe")
+    job, out = {}, []
+    assert e.api_job("/api/eai/install", {}, kit.load_cfg(), None, log_into(out), job)
+    assert job["verify"][0]["status"] == "ok" and any("sign Claude Code in" in m for _, m in out)
+    monkeypatch.setattr(e, "find_claude", lambda: None)
+    assert e.public_state(kit.load_cfg())["claude"] == {"installed": False, "path": ""}

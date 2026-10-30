@@ -983,6 +983,33 @@ def _values(args):
 
 
 # ---------------------------------------------------------------- console (gui.html Endpoint AI tab)
+def zcc_signin(cfg):
+    """Who to sign in to Client Connector as on the generator, and whether this computer can show the password."""
+    z = cfg.get("zia") or {}
+    made = z.get("created_user") or {}
+    email = made.get("email") or ((z.get("users") or [{}])[0].get("email"))
+    has_pw = False
+    if made.get("email") and made.get("via") != "zidentity":
+        try:
+            has_pw = bool(K.kc_get("zia-test-user-password"))
+        except K.KitError:
+            has_pw = False
+    if made.get("via") == "zidentity":
+        source = "the password you set for it in ZIdentity (Administration > Authentication > Users)"
+    elif has_pw:
+        source = "Show password"
+    elif email:
+        source = "Show password on the ZIA tab of the computer that ran ZIA setup"
+    else:
+        source = ""
+    return {"email": email, "has_password": has_pw, "password_source": source}
+
+
+def claude_status():
+    p = find_claude()
+    return {"installed": bool(p), "path": p or ""}
+
+
 def public_state(cfg):
     e = cfg.get("eai") or {}
     return {"domain": e.get("domain") or DEFAULT_DOMAIN, "region": e.get("region") or DEFAULT_REGION,
@@ -990,7 +1017,8 @@ def public_state(cfg):
             "credential": e.get("credential"), "state": e.get("state"), "hosts": e.get("hosts") or [],
             "shell_lock": bool(e.get("shell_lock")), "last_report": e.get("last_report"),
             "policy": policy_name(), "group": group_name(), "console_path": CONSOLE_PATH,
-            "scenes": [{"id": s["id"], "title": s["title"]} for s in SCENES]}
+            "scenes": [{"id": s["id"], "title": s["title"]} for s in SCENES],
+            "zcc": zcc_signin(cfg), "claude": claude_status(), "admin_machine": admin_machine(cfg)}
 
 
 def api_get(path, cfg, tenant):
@@ -1045,6 +1073,12 @@ def api_job(path, body, cfg, tenant, log, job):
         return True
     if path == "/api/eai/teardown":
         teardown(tenant(), cfg, log, devices=bool(body.get("devices")))
+        return True
+    if path == "/api/eai/install":
+        p = install_claude(log)
+        log("info", "Next: sign Claude Code in once. Open a new terminal, run `claude` and follow the browser sign-in "
+                    "(then type /exit), or save an Anthropic API key with `aiguard-kit eai demo --set-key`.")
+        job["verify"] = [_chk("claude-installed", "Claude Code installed", "ok", p)]
         return True
     if path == "/api/eai/demo":
         job["verify"] = [_chk(f"demo-{r['id']}", r["title"], "info" if r["exit"] == 0 else "fail",
