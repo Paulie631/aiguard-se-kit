@@ -312,8 +312,9 @@ def test_setup_scopes_everything_to_the_generator(eenv):
     pol = next(p for p in fake.policies if p["name"] == "SE-Demo: Agentic Guardrails")
     assert fake.assignments[pol["id"]] == {"device_groups": [grp["id"]]}
     assert {r["verdict"] for r in pol["rules"]} == {"audit"}  # Monitor first
-    assert [r["id"] for r in pol["rules"]] == ["r-sedemo-aws-key", "r-sedemo-destructive", "r-sedemo-ssh-key", "r-sedemo-pii",
-                                              "r-sedemo-pipe-shell", "r-sedemo-force-push", "r-sedemo-mcp"]
+    tpl = [r["id"] for r in json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"] if not r.get("optional")]
+    assert [r["id"] for r in pol["rules"]] == tpl and len(tpl) == 16
+    assert all(k not in r for r in pol["rules"] for k in ("title", "group", "scene", "optional"))   # kit labels stripped
     assert all("scene" not in r and "optional" not in r for r in pol["rules"])
     assert pol["priority"] == e.PRIORITY
     w = fake.writes()
@@ -943,7 +944,7 @@ def test_live_feed_keeps_going_when_a_source_fails(eenv, monkeypatch):
 def test_endpoint_ai_storyline_switches_monitor_then_block_then_back():
     lib = json.loads((ROOT / "tests.json").read_text(encoding="utf-8"))
     st = next(s for s in lib["stories"] if s["id"] == "endpoint-ai")
-    assert st["requires"] == "eai" and [s.get("eai_mode") for s in st["steps"]] == ["monitor", "monitor", "block", "monitor"]
+    assert st["requires"] == "eai" and [s.get("eai_mode") for s in st["steps"]] == ["monitor", "monitor", "secrets", "block", "monitor"]
     assert all(s["kind"] == "show" and s["where"] for s in st["steps"])
 
 
@@ -956,7 +957,9 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
     def pats(r):
         mt = r["match"]
         return [c["value"] for c in mt["any"]] if "any" in mt else [mt["value"]]
-    assert len(m.SCENES) == 8 and len({s["id"] for s in m.SCENES}) == 8
+    assert len(m.SCENES) == 17 and len({s["id"] for s in m.SCENES}) == 17
+    assert {s["group"] for s in m.SCENES} == {"Secrets & data", "Destructive actions", "Credentials & config", "Supply chain",
+                                             "Agent misuse", "Data exfiltration"}
     for s in m.SCENES:
         r = rules[s["rule"]]
         assert r["ruleType"] != "resource_control"
@@ -965,7 +968,12 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
             assert any(re.search(p, x) for p in pats(r)), (s["id"], x)
             assert m._is_demo(x), (s["id"], x)
             # nothing outside the kit's work folder, nothing real
-            assert not re.search(r"~|/home|C:\\Users|\.\.|https?://(?!example\.com)", x)
+            # nothing outside the kit's folders (the "outside" scene reads the kit's own second decoy folder), nothing real
+            if s["id"] == "outside":
+                assert "eai-other-project" in x and not re.search(r"\.\.[\\/]\.\.", x)
+            else:
+                assert not re.search(r"~|/home|C:\\Users|\.\.", x), (s["id"], x)
+            assert not re.search(r"https?://(?!example\.com|registry\.example\.com)", x), (s["id"], x)
         assert ("win" in s) != bool(s.get("write"))
 
 
@@ -1104,7 +1112,7 @@ def test_mac_device_found_when_the_exact_host_filter_misses(eenv):
             return real_route(method, path, {"host": "nope"}, body)
         return real_route(method, path, q, body)
     fake.route = route
-    fake.events = [{"id": "x", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "hostname": "Pauls-MacBook-Pro.local",
+    fake.events = [{"id": "x", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "hostname": "Pauls-MacBook-Pro.local",
                     "serial": "FNQNV30CXG", "tool_name": "Bash", "data": {"verdict": "allow"}}]
     devs = e.find_devices(e.connect(cfg), cfg)
     assert [d["id"] for d in devs] == ["dev-mac"]
@@ -1117,3 +1125,89 @@ def test_host_key_ignores_punctuation_and_suffix():
     assert m.host_key("Paul’s MacBook Pro") == m.host_key("Pauls-MacBook-Pro.local") == m.host_key("PAULS-MACBOOK-PRO")
     assert m.host_key("EC2AMAZ-GEN1") != m.host_key("EC2AMAZ-GEN2")
     assert "Pauls-MacBook-Pro.local" in m.host_spellings("Pauls-MacBook-Pro")
+
+
+def test_presets_block_the_right_groups():
+    spec = importlib.util.spec_from_file_location("eai_alone5", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    class K_:
+        KitError = Exception
+    m.K = K_
+    tpl = {r["id"]: r for r in json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"]}
+    assert set(m.preset_actions("monitor").values()) == {"audit"} and set(m.preset_actions("block").values()) == {"block"}
+    sec = m.preset_actions("secrets")
+    assert sec["r-sedemo-aws-key"] == sec["r-sedemo-cloud-creds"] == sec["r-sedemo-upload"] == "block"
+    assert sec["r-sedemo-destructive"] == sec["r-sedemo-typosquat"] == "audit"
+    des = m.preset_actions("destructive")
+    assert des["r-sedemo-destructive"] == des["r-sedemo-registry"] == des["r-sedemo-agent-settings"] == "block" and des["r-sedemo-pii"] == "audit"
+    for name in m.PRESETS:
+        assert m.preset_of(m.preset_actions(name)) == name
+    assert m.preset_of({**m.preset_actions("monitor"), "r-sedemo-mcp": "block"}) == "custom"
+    assert all(r.get("title") and r.get("group") for r in tpl.values())
+
+
+def test_per_rule_actions_reach_the_policy_and_status(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    out = []
+    e.set_actions(e.connect(kit.load_cfg()), kit.load_cfg(), {"r-sedemo-mcp": "block", "r-sedemo-outside": "allow"}, log_into(out))
+    pol = next(p for p in fake.policies if p["name"].startswith("SE-Demo"))
+    v = {r["id"]: r["verdict"] for r in pol["rules"]}
+    assert v["r-sedemo-mcp"] == "block" and v["r-sedemo-outside"] == "allow" and v["r-sedemo-aws-key"] == "audit"
+    assert any("1 block" in m and "1 allow" in m for _, m in out)
+    c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}
+    assert "Custom per-rule actions" in c["ready-eai-policy"]["detail"] and "1 blocking" in c["ready-eai-policy"]["detail"]
+    # a preset afterwards replaces the per-rule choices
+    e.set_mode(e.connect(kit.load_cfg()), kit.load_cfg(), "secrets", log_into([]))
+    v = {r["id"]: r["verdict"] for r in pol["rules"]}
+    assert v["r-sedemo-mcp"] == "audit" and v["r-sedemo-aws-key"] == "block"
+    assert kit.load_cfg()["eai"]["state"]["mode"] == "secrets"
+
+
+def test_per_rule_actions_refuse_unknown_rules_and_actions(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    for bad in ({"r-someone-elses": "block"}, {"r-sedemo-mcp": "quarantine"}):
+        with pytest.raises(kit.KitError, match="Unknown rule or action"):
+            e.set_actions(e.connect(kit.load_cfg()), kit.load_cfg(), bad, log_into([]))
+    assert all(r.get("ruleType") != "resource_control" for r in e.build_rules("block", True))
+
+
+def test_console_actions_job(eenv):
+    kit, e, fake = eenv("eai")
+    tenant = lambda: e.connect(kit.load_cfg())   # noqa: E731
+    e.setup(tenant(), kit.load_cfg(), log_into([]))
+    job = {}
+    assert e.api_job("/api/eai/actions", {"actions": {"r-sedemo-pii": "block"}}, kit.load_cfg(), tenant, log_into([]), job)
+    st = e.public_state(kit.load_cfg())
+    assert st["actions"]["r-sedemo-pii"] == "block" and len(st["rules"]) == 17 and [p["id"] for p in st["presets"]] == list(e.PRESETS)
+    assert {s["group"] for s in st["scenes"]} >= {"Data exfiltration", "Supply chain", "Agent misuse", "Credentials & config"}
+
+
+def test_feed_items_carry_rule_session_and_raw(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.events = [{"id": "b", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "hostname": "EC2AMAZ-GEN1",
+                    "tool_name": "Bash", "session_id": "sess-1", "serial": "SN1",
+                    "data": {"verdict": "block", "rule_id": "r-sedemo-destructive", "reason": "Recursive force-delete from an AI agent",
+                             "agent_message": "This command was blocked", "cwd": "/x/.aiguard-se-kit/eai-demo",
+                             "tool_input": {"command": "rm -rf ./decoy-project"}}}]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    i = out["items"][0]
+    assert i["rule"] == "Recursive force-delete" and i["reason"].startswith("Recursive") and i["message"].startswith("This command")
+    assert i["session"] == "sess-1" and i["serial"] == "SN1" and json.loads(i["raw"])["id"] == "b"
+
+
+def test_new_scenes_decoys(eenv):
+    kit, e, _ = eenv("eai")
+    d = e.work_dir()
+    assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" in (d / "decoy-project" / ".aws" / "credentials").read_text()
+    assert "4111111111111111" in (d / "decoy-project" / "customers.csv").read_text()
+    assert (d.parent / "eai-other-project" / "notes.txt").exists()
+    (d / ".claude").mkdir(exist_ok=True)
+    (d / ".claude" / "settings.json").write_text('{"permissions": {"defaultMode": "bypassPermissions"}}')
+    (d / "decoy-project" / ".bashrc").write_text("x")
+    e.work_dir()
+    assert not (d / ".claude" / "settings.json").exists() and not (d / "decoy-project" / ".bashrc").exists()

@@ -1,8 +1,10 @@
 {
-  "_about": "The SE demo kit's Endpoint AI policy. The kit sets every rule's verdict from the mode (monitor -> audit, block -> block), checks the rules with POST /v1/policies/validate, and assigns the policy only to the kit's device group. Rules marked optional are added only with the shell-lock option. 'scene' and 'optional' are the kit's own keys and are stripped before sending.",
+  "_about": "The SE demo kit's Endpoint AI policy. The kit sets every rule's verdict from the mode (monitor -> audit, block -> block), checks the rules with POST /v1/policies/validate, and assigns the policy only to the kit's device group. Rules marked optional are added only with the shell-lock option. 'scene' and 'optional' are the kit's own keys and are stripped before sending. 'title' and 'group' label each rule in the console's per-rule actions.",
   "rules": [
     {
       "id": "r-sedemo-aws-key",
+      "title": "Cloud access key in a tool call",
+      "group": "Secrets & data",
       "scene": "secret",
       "ruleType": "data_protection",
       "match": {
@@ -20,6 +22,8 @@
     },
     {
       "id": "r-sedemo-destructive",
+      "title": "Recursive force-delete",
+      "group": "Destructive actions",
       "scene": "destructive",
       "ruleType": "custom",
       "match": {
@@ -46,6 +50,8 @@
     },
     {
       "id": "r-sedemo-ssh-key",
+      "title": "Private SSH key read",
+      "group": "Credentials & config",
       "scene": "ssh-key",
       "ruleType": "data_protection",
       "match": {
@@ -63,6 +69,8 @@
     },
     {
       "id": "r-sedemo-pii",
+      "title": "Card number or SSN",
+      "group": "Secrets & data",
       "scene": "env-file",
       "ruleType": "data_protection",
       "match": {
@@ -80,6 +88,8 @@
     },
     {
       "id": "r-sedemo-pipe-shell",
+      "title": "Download piped into a shell",
+      "group": "Supply chain",
       "scene": "pipe-shell",
       "ruleType": "custom",
       "match": {
@@ -97,6 +107,8 @@
     },
     {
       "id": "r-sedemo-force-push",
+      "title": "Git force-push",
+      "group": "Destructive actions",
       "scene": "force-push",
       "ruleType": "custom",
       "match": {
@@ -114,6 +126,8 @@
     },
     {
       "id": "r-sedemo-mcp",
+      "title": "MCP server added by an agent",
+      "group": "Agent misuse",
       "scene": "mcp",
       "ruleType": "custom",
       "match": {
@@ -130,7 +144,180 @@
       "agent_message": "This action was blocked by policy: AI agents may not add MCP servers on their own. Do not retry it or work around it."
     },
     {
+      "id": "r-sedemo-archive",
+      "title": "Customer data archived",
+      "group": "Data exfiltration",
+      "scene": "exfil-zip",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\b(Compress-Archive|zip|tar|7z)\\b.*\\bcustomers?\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent archiving customer data",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not bundle customer data into archives.",
+      "agent_message": "This action was blocked by policy: AI agents may not bundle customer data into archives. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-upload",
+      "title": "Upload to an outside URL",
+      "group": "Data exfiltration",
+      "scene": "exfil-post",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\b(curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\\b.*(-X\\s*POST|--data|--upload-file|\\s-d\\s|\\s-F\\s|-Method\\s+Post|-InFile)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent uploading local data to a URL",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not upload local files to outside URLs.",
+      "agent_message": "This action was blocked by policy: AI agents may not upload local files to outside URLs. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-cloud-creds",
+      "title": "Cloud credentials file read",
+      "group": "Credentials & config",
+      "scene": "aws-creds",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)[\\\\/]\\.(aws[\\\\/]credentials|azure[\\\\/]|config[\\\\/]gcloud[\\\\/])"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent reading cloud credentials",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read cloud credential files.",
+      "agent_message": "This action was blocked by policy: AI agents may not read cloud credential files. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-startup-file",
+      "title": "Shell startup file edited",
+      "group": "Credentials & config",
+      "scene": "persistence",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)[\\\\/]?\\.(bashrc|zshrc|bash_profile|zprofile|profile)\\b|Microsoft\\.PowerShell_profile\\.ps1|LaunchAgents"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent editing a shell startup file",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not change shell startup files.",
+      "agent_message": "This action was blocked by policy: AI agents may not change shell startup files. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-git-hooks",
+      "title": "Git hooks switched off",
+      "group": "Credentials & config",
+      "scene": "git-hooks",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)core\\.hooksPath|--no-verify\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent switching off git hooks",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not switch off git hooks.",
+      "agent_message": "This action was blocked by policy: AI agents may not switch off git hooks. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-typosquat",
+      "title": "Typo-squatted package",
+      "group": "Supply chain",
+      "scene": "typosquat",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\b(pip3?|npm|yarn|pnpm)\\s+(install|i|add)\\b.*\\b(reqeusts|requets|colourama|python-dateutils|crossenv|loadsh|electorn|discordd)\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent installing a look-alike package",
+      "user_message": "Blocked by your organization's AI policy: this package name looks like a typo-squat of a popular one.",
+      "agent_message": "This action was blocked by policy: this package name looks like a typo-squat of a popular one. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-registry",
+      "title": "Unknown package registry",
+      "group": "Supply chain",
+      "scene": "registry",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)(--registry|--index-url|--extra-index-url)\\s*=?\\s*https?://(?!registry\\.npmjs\\.org|pypi\\.org)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent installing from an unknown registry",
+      "user_message": "Blocked by your organization's AI policy: AI agents may only install from approved registries.",
+      "agent_message": "This action was blocked by policy: AI agents may only install from approved registries. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-agent-settings",
+      "title": "Agent switches off its own checks",
+      "group": "Agent misuse",
+      "scene": "bypass",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)bypassPermissions|dangerously-skip-permissions|\\\"defaultMode\\\""
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent turning off its permission checks",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not change their own permission settings.",
+      "agent_message": "This action was blocked by policy: AI agents may not change their own permission settings. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-outside",
+      "title": "Reaching outside the project",
+      "group": "Agent misuse",
+      "scene": "outside",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?:^|[\\s'\\\"=(])\\.\\.[\\\\/]"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Agent reading files outside its project",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read files outside their project folder.",
+      "agent_message": "This action was blocked by policy: AI agents may not read files outside their project folder. Do not retry it or work around it."
+    },
+    {
       "id": "r-sedemo-shell-lock",
+      "title": "Shell lock: every shell command",
+      "group": "Agent misuse",
       "optional": true,
       "ruleType": "custom",
       "match": {
