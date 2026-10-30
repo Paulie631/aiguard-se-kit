@@ -1353,7 +1353,8 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     if(st.on&&(now||vis())){try{draw(await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`))}catch(e){q("[data-fstat]").textContent=e.message}}
     st.timer=setTimeout(()=>tick(false),opt.every||20000)}
   function draw(r){if(!el.isConnected)return;const errs=Object.entries(r.errors||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
-    q("[data-fstat]").textContent=`updated ${r.at}`+(st.on?" · every 20 s":" · paused")+(errs.length?" · "+errs.join("; "):"");
+    const notes=Object.entries(r.notes||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
+    q("[data-fstat]").textContent=`updated ${r.at}`+(st.on?" · every 20 s":" · paused")+((r.eai_hosts||[]).length?` · watching ${r.eai_hosts.join(", ")}`:"")+(errs.concat(notes).length?" · "+errs.concat(notes).join("; "):"");
     const z=r.zia;q("[data-fzia]").innerHTML=st.src.includes("zia")?(z?(z.error?`<div class="muted" style="font-size:12.5px">ZIA (${esc(z.note)}): ${esc(z.error)}</div>`:`<div class="muted" style="font-size:12.5px"><b>ZIA</b> (${esc(z.note)}; ZIA has no live log API): ${z.panels.map(p=>`${esc(p.label)} ${p.total!=null?p.total.toLocaleString():"–"}`).join(" · ")}</div>`):`<div class="muted" style="font-size:12.5px">ZIA: not set up on this computer.</div>`):"";
     const items=r.items||[];
     if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}

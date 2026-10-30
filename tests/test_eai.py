@@ -312,7 +312,8 @@ def test_setup_scopes_everything_to_the_generator(eenv):
     pol = next(p for p in fake.policies if p["name"] == "SE-Demo: Agentic Guardrails")
     assert fake.assignments[pol["id"]] == {"device_groups": [grp["id"]]}
     assert {r["verdict"] for r in pol["rules"]} == {"audit"}  # Monitor first
-    assert [r["id"] for r in pol["rules"]] == ["r-sedemo-aws-key", "r-sedemo-destructive"]
+    assert [r["id"] for r in pol["rules"]] == ["r-sedemo-aws-key", "r-sedemo-destructive", "r-sedemo-ssh-key", "r-sedemo-pii",
+                                              "r-sedemo-pipe-shell", "r-sedemo-force-push", "r-sedemo-mcp"]
     assert all("scene" not in r and "optional" not in r for r in pol["rules"])
     assert pol["priority"] == e.PRIORITY
     w = fake.writes()
@@ -547,7 +548,7 @@ def test_demo_runs_claude_headless_with_safe_commands_and_the_key_in_env_only(ee
         blocked = "Remove-Item" in cmd[2]
         return Proc(json.dumps({"result": "RESULT: BLOCKED\nPreToolUse hook: recursive force-deletes are not allowed." if blocked else
                                 "RESULT: RAN\nWrote demo-credentials.txt; no policy blocked it."}))
-    res = e.demo(log_into([]), runner=runner, cfg={})
+    res = e.demo(log_into([]), scenes=["secret", "destructive"], runner=runner, cfg={})
     assert [r["id"] for r in res] == ["secret", "destructive"]
     assert [r["blocked"] for r in res] == [False, True]
     cmd, cwd, env = seen[0]
@@ -942,3 +943,76 @@ def test_endpoint_ai_storyline_switches_monitor_then_block_then_back():
     st = next(s for s in lib["stories"] if s["id"] == "endpoint-ai")
     assert st["requires"] == "eai" and [s.get("eai_mode") for s in st["steps"]] == ["monitor", "monitor", "block", "monitor"]
     assert all(s["kind"] == "show" and s["where"] for s in st["steps"])
+
+
+
+def test_every_scene_trips_its_own_rule_on_both_shells():
+    spec = importlib.util.spec_from_file_location("eai_alone2", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    rules = {r["id"]: r for r in json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"]}
+    def pats(r):
+        mt = r["match"]
+        return [c["value"] for c in mt["any"]] if "any" in mt else [mt["value"]]
+    assert len(m.SCENES) == 8 and len({s["id"] for s in m.SCENES}) == 8
+    for s in m.SCENES:
+        r = rules[s["rule"]]
+        assert r["ruleType"] != "resource_control"
+        for k in ("win", "posix"):
+            assert any(re.search(p, s[k]) for p in pats(r)), (s["id"], k)
+            assert m._is_demo(s[k]) or s["id"] == "pipe-shell" and "example.com/install.sh" in s[k]
+        # nothing outside the kit's work folder, nothing real
+        assert not re.search(r"~|/home|C:\\Users|\.\.|https?://(?!example\.com)", s["win"] + s["posix"])
+
+
+def test_scenes_never_pass_their_own_rule_on_a_harmless_command():
+    rules = json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"]
+    for harmless in ("git status", "Get-Content README.txt", "echo hello", "ls -la", "npm test"):
+        for r in rules:
+            if r.get("optional"):
+                continue
+            mt = r["match"]
+            for p in ([c["value"] for c in mt["any"]] if "any" in mt else [mt["value"]]):
+                assert not re.search(p, harmless), (r["id"], harmless)
+
+
+def test_work_dir_builds_and_resets_the_decoys(eenv, monkeypatch):
+    kit, e, _ = eenv("eai")
+    d = e.work_dir()
+    assert "SE-DEMO-FAKE-KEY" in (d / "decoy-project" / ".ssh" / "id_rsa").read_text()
+    notes = (d / "decoy-project" / "SETUP-NOTES.md").read_text()
+    assert "AKIAIOSFODNN7EXAMPLE" in notes
+    (d / ".mcp.json").write_text("{}")
+    (d / ".env").write_text("x")
+    e.work_dir()
+    assert not (d / ".mcp.json").exists() and not (d / ".env").exists()
+    if e.shutil.which("git"):
+        assert (d / "decoy-repo" / ".git").exists() and (d / "decoy-remote.git").exists()
+
+
+def test_scene_needing_git_is_skipped_without_it(eenv, monkeypatch):
+    kit, e, _ = eenv("eai", "demo")
+    monkeypatch.setattr(e, "find_claude", lambda: "/usr/bin/claude")
+    real = e.shutil.which
+    monkeypatch.setattr(e.shutil, "which", lambda n: None if n == "git" else real(n))
+    out, ran = [], []
+    e.demo(log_into(out), scenes=["force-push", "pipe-shell"], cfg={},
+           runner=lambda cmd, **k: ran.append(cmd) or Proc(json.dumps({"result": "RESULT: RAN"})))
+    assert len(ran) == 1 and any(lv == "warn" and "git isn't installed" in m for lv, m in out)
+
+
+def test_injection_scene_reads_the_file_and_only_the_key_command_is_allowed(eenv, monkeypatch):
+    kit, e, _ = eenv("eai", "demo")
+    monkeypatch.setattr(e, "find_claude", lambda: "/usr/bin/claude")
+    seen = []
+    e.demo(log_into([]), scenes=["injection"], cfg={}, runner=lambda cmd, **k: seen.append(cmd) or Proc(json.dumps({"result": "RESULT: RAN"})))
+    cmd = seen[0]
+    assert "SETUP-NOTES.md" in cmd[2] and "AKIA" not in cmd[2]
+    allowed = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--allowedTools"]
+    assert all("AKIAIOSFODNN7EXAMPLE" in a for a in allowed)
+
+
+def test_feed_says_when_no_generator_is_saved(eenv):
+    kit, e, _ = eenv("eai", zia_user=False)
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert "Create or update" in out["notes"]["eai"]

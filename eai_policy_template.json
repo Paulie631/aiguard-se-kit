@@ -5,8 +5,14 @@
       "id": "r-sedemo-aws-key",
       "scene": "secret",
       "ruleType": "data_protection",
-      "match": {"field": "tool_input", "op": "regex", "value": "AKIA[0-9A-Z]{16}"},
-      "events": ["PreToolUse"],
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "AKIA[0-9A-Z]{16}"
+      },
+      "events": [
+        "PreToolUse"
+      ],
       "verdict": "audit",
       "reason": "AWS access key in a tool call",
       "user_message": "Blocked by your organization's AI policy: this command contains what looks like an AWS access key.",
@@ -16,25 +22,134 @@
       "id": "r-sedemo-destructive",
       "scene": "destructive",
       "ruleType": "custom",
-      "match": {"any": [
-        {"field": "tool_input", "op": "regex", "value": "(?i)\\brm\\s+-[a-z]*r[a-z]*f|\\brm\\s+-[a-z]*f[a-z]*r"},
-        {"field": "tool_input", "op": "regex", "value": "(?i)Remove-Item\\b.*-Recurse"}
-      ]},
-      "events": ["PreToolUse"],
+      "match": {
+        "any": [
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)\\brm\\s+-[a-z]*r[a-z]*f|\\brm\\s+-[a-z]*f[a-z]*r"
+          },
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)Remove-Item\\b.*-Recurse"
+          }
+        ]
+      },
+      "events": [
+        "PreToolUse"
+      ],
       "verdict": "audit",
       "reason": "Recursive force-delete from an AI agent",
       "user_message": "Blocked by your organization's AI policy: AI agents may not run recursive force-deletes.",
       "agent_message": "This command was blocked: recursive force-deletes are not allowed for AI agents. Do not retry it."
     },
     {
+      "id": "r-sedemo-ssh-key",
+      "scene": "ssh-key",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)[\\\\/]\\.ssh[\\\\/]id_(rsa|ed25519|ecdsa|dsa)\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent reading a private SSH key",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read private SSH keys.",
+      "agent_message": "This action was blocked by policy: AI agents may not read private SSH keys. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-pii",
+      "scene": "env-file",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "\\b(?:4\\d{15}|5[1-5]\\d{14})\\b|\\b\\d{3}-\\d{2}-\\d{4}\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Card number or SSN in a tool call",
+      "user_message": "Blocked by your organization's AI policy: this contains what looks like a card number or SSN.",
+      "agent_message": "This action was blocked by policy: this contains what looks like a card number or SSN. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-pipe-shell",
+      "scene": "pipe-shell",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\b(curl|wget|iwr|Invoke-WebRequest|irm|Invoke-RestMethod)\\b[^|\\n]*\\|\\s*(ba|z)?sh\\b|\\|\\s*iex\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Downloaded content piped into a shell",
+      "user_message": "Blocked by your organization's AI policy: piping downloaded content into a shell isn't allowed.",
+      "agent_message": "This action was blocked by policy: piping downloaded content into a shell isn't allowed. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-force-push",
+      "scene": "force-push",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bgit\\b.*\\bpush\\b.*(--force\\b|\\s-f\\b|--force-with-lease)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Force-push from an AI agent",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not force-push.",
+      "agent_message": "This action was blocked by policy: AI agents may not force-push. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-mcp",
+      "scene": "mcp",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)mcpServers|\\bmcp\\s+add\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent adding an MCP server",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not add MCP servers on their own.",
+      "agent_message": "This action was blocked by policy: AI agents may not add MCP servers on their own. Do not retry it or work around it."
+    },
+    {
       "id": "r-sedemo-shell-lock",
       "optional": true,
       "ruleType": "custom",
-      "match": {"any": [
-        {"field": "tool_name", "op": "equals", "value": "Bash"},
-        {"field": "tool_name", "op": "equals", "value": "PowerShell"}
-      ]},
-      "events": ["PreToolUse"],
+      "match": {
+        "any": [
+          {
+            "field": "tool_name",
+            "op": "equals",
+            "value": "Bash"
+          },
+          {
+            "field": "tool_name",
+            "op": "equals",
+            "value": "PowerShell"
+          }
+        ]
+      },
+      "events": [
+        "PreToolUse"
+      ],
       "verdict": "audit",
       "reason": "Shell access for AI agents is locked on this device",
       "user_message": "Blocked by your organization's AI policy: AI agents can't run shell commands on this device.",
