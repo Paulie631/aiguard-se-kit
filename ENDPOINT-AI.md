@@ -104,6 +104,7 @@ before it runs and tells the agent why.
 | `forbidden` | The credential's role can't write. Create one with the Admin role (roles can't be edited). |
 | `token_invalid` | Wrong region for this tenant. Copy the API host from API Access. |
 | No generator device | The agent isn't on the generator yet (Client Connector app profile), or the generator is signed in as a different user. Enter its hostname and run setup again. |
+| Install Claude Code: can't write to `~/.local` | An earlier install ran with sudo, so the folder belongs to root. Run the command the kit shows (`sudo chown -R "$(whoami)" ~/.local`), then install again. Never run the installer with sudo. |
 | Scenes say Claude Code didn't run | Sign in with `claude`, or save an API key with `eai demo --set-key`. |
 | No events after the scenes | Events take a few minutes. Check the generator is online under Administration > Devices. |
 | `too_many_reports` | Five reports are already being built. Wait, then try again. |

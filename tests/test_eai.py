@@ -807,3 +807,32 @@ def test_console_install_button_runs_the_checked_installer(eenv, monkeypatch):
     assert job["verify"][0]["status"] == "ok" and any("sign Claude Code in" in m for _, m in out)
     monkeypatch.setattr(e, "find_claude", lambda: None)
     assert e.public_state(kit.load_cfg())["claude"] == {"installed": False, "path": ""}
+
+
+def test_install_stops_with_the_fix_when_local_is_owned_by_root(eenv, monkeypatch, tmp_path):
+    kit, e, _ = eenv("eai")
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    home = tmp_path / "home"
+    (home / ".local" / "state").mkdir(parents=True)
+    monkeypatch.setattr(e, "user_home", lambda: home)
+    real = e.os.access
+    monkeypatch.setattr(e.os, "access", lambda p, m: False if str(p).startswith(str(home / ".local")) else real(p, m))
+    ran = []
+    monkeypatch.setattr(e.subprocess, "run", lambda *a, **k: ran.append(a))
+    with pytest.raises(kit.KitError) as err:
+        e.install_claude(log_into([]))
+    assert f'sudo chown -R "$(whoami)" {home / ".local"}' in str(err.value) and not ran
+
+
+def test_failed_install_shows_the_installers_reason(eenv, monkeypatch, tmp_path):
+    kit, e, _ = eenv("eai")
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    monkeypatch.setattr(e, "user_home", lambda: tmp_path)
+    monkeypatch.setattr(e, "find_claude", lambda: None)
+    monkeypatch.setattr(e.subprocess, "run", lambda *a, **k: Proc("Setting up Claude Code...\n\x1b[31m✘ Installation failed\x1b[0m",
+                        1, "EACCES: permission denied, mkdir '/Users/se/.local/state/claude'"))
+    out = []
+    with pytest.raises(kit.KitError) as err:
+        e.install_claude(log_into(out))
+    assert "/Users/se/.local/state/claude" in str(err.value) and "sudo chown" in str(err.value)
+    assert any("installer: EACCES" in m for _, m in out) and not any("\x1b" in m for _, m in out)
