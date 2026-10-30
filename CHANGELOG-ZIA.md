@@ -3,6 +3,9 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.20
+- Endpoint AI uses the generator's existing Client Connector sign-in (see AI Guard kit CHANGELOG 1.8.25).
+
 ## 0.2.19
 - Install Claude Code checks folder permissions and shows why an install failed (see AI Guard kit CHANGELOG 1.8.24).
 

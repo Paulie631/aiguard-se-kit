@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.25
+- **Endpoint AI uses the generator's existing Client Connector sign-in.** The generator's console shows *This
+  machine: HOSTNAME* with a Copy button and whether Client Connector is running. Paste the hostname into **Generator
+  hostnames** on your laptop: setup reads who Client Connector is signed in as on that machine (OneAPI ZCC enrolled
+  devices, read-only), shows it in the log and the status check, and says when the hostname isn't registered in the
+  tenant. No password is read or stored. Devices are matched by hostname only, regardless of case or domain suffix.
+
 ## 1.8.24
 - **Install Claude Code, clearer when it can't.** The button checks first that this user can write to the folders
   Anthropic's installer uses (`~/.local`, `~/.claude`). If an earlier `sudo` install left them owned by root, it stops

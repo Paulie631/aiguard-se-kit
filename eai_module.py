@@ -335,9 +335,17 @@ def generator_steps(cfg):
     user = emails[0] if emails else None
     app = ctx.get("app_profile") or "SE-Demo traffic generator"
     pw = ctx.get("password_source") or "the test user's password"
-    if user:
+    signed = (cfg.get("eai") or {}).get("zcc_users") or {}
+    if signed:
+        who = ("Client Connector is already signed in on the generator (" + ", ".join(f"{h}: {u}" for h, u in signed.items())
+               + "): keep it that way, nothing to type. ")
+    elif hosts:
+        who = (f"On the generator ({', '.join(hosts)}), keep Client Connector signed in as whoever it is now"
+               + (f", or sign in as {user} (password: {pw})" if user else "") + ". ")
+    elif user:
         who = (f"On the traffic generator VM (never your own laptop), sign in to Client Connector as {user} "
-               f"(password: {pw}). ")
+               f"(password: {pw}), or, if Client Connector there is already signed in, copy the hostname shown in step 3 "
+               "on its console into Generator hostnames. ")
     else:
         who = ("You chose your own ZIA test user, so the kit can't tell which device is the generator: on the "
                "generator VM, sign in to Client Connector as that test user, then enter the generator's Windows "
@@ -354,15 +362,49 @@ def _device_users(d):
     return out
 
 
+def host_key(h):
+    """'Pauls-Mac.local', 'pauls-mac' and 'PAULS-MAC' are the same machine to the kit."""
+    return str(h or "").strip().lower().split(".")[0]
+
+
+ZCC_PAGES = 10   # 500 devices a page: enough for a demo tenant
+
+
+def zcc_signins(cfg, hosts):
+    """{hostname: user} for the generator hostnames, read from Client Connector's enrolled devices (OneAPI ZCC,
+    read-only). Empty when there's no OneAPI client on this computer or the lookup fails: it only informs."""
+    if not hosts or not (cfg.get("client_id") and K.kc_has("oneapi-client-secret")):
+        return {}
+    want = {host_key(h): h for h in hosts}
+    out = {}
+    try:
+        t = K.product("zia").connect(cfg)
+        for page in range(1, ZCC_PAGES + 1):
+            body = t.call("zcc.devices", "list_devices", query_params={"page": page, "page_size": 500})
+            rows = body if isinstance(body, list) else (body or {}).get("items") or []
+            for d in rows:
+                g = (lambda k, c: d.get(k) if k in d else d.get(c))
+                key = host_key(g("machineHostname", "machine_hostname"))
+                state = str(g("registrationState", "registration_state") or "")
+                if key in want and g("user", "user") and "unregistered" not in state.lower() and "removed" not in state.lower():
+                    out[want[key]] = g("user", "user")
+            if len(rows) < 500:
+                break
+    except Exception as e:
+        K.vlog(f"zcc devices: {e}")
+    return out
+
+
 def find_devices(t, cfg):
     """The generator's devices. Each one the API returns is checked against what was asked for, so a filter the
     API ignored can never pull other devices into the kit's group."""
     hosts, emails = generator_identities(cfg)
-    want_h, want_m = {h.lower() for h in hosts}, {m.lower() for m in emails}
+    want_h, want_m = {host_key(h) for h in hosts}, {m.lower() for m in emails}
     found = {}
-    for h in hosts:
+    asks = list(dict.fromkeys(x for h in hosts for x in (h, host_key(h), host_key(h).upper())))   # as typed, short, Windows-style
+    for h in asks:
         for d in _items(t.get("/v1/devices", host=h, limit=50), "devices"):
-            if str(d.get("hostname") or "").lower() in want_h:
+            if host_key(d.get("hostname")) in want_h:
                 found[d["id"]] = d
     for m in emails:
         for d in _items(t.get("/v1/devices", email=m, limit=50), "devices"):
@@ -453,6 +495,15 @@ def setup(t, cfg, log, mode=None):
     gid = ensure_group(t, cfg, log)
     devices = find_devices(t, cfg)
     e = ecfg(cfg)
+    hosts, _ = generator_identities(cfg)
+    signed = zcc_signins(cfg, hosts)
+    e["zcc_users"] = {host_key(h): u for h, u in signed.items()}
+    for h in hosts:
+        if h in signed:
+            log("ok", f"{h}: Client Connector signed in as {signed[h]}")
+        elif cfg.get("client_id"):
+            log("warn", f"{h}: not registered in this tenant's Client Connector. Check the hostname, and that Client "
+                        "Connector on it is signed in to this tenant.")
     if devices:
         add_members(t, gid, [d["id"] for d in devices], log)
         e["state"]["devices"] = [{"id": d["id"], "hostname": d.get("hostname")} for d in devices]
@@ -528,7 +579,9 @@ def status(t, cfg):
         out.append(_chk("ready-eai-device", "Generator enrolled in Endpoint AI", "fail", "no device in the group yet",
                         generator_steps(cfg)))
     else:
-        names = ", ".join(sorted(d.get("hostname") or d.get("id", "")[:8] for d in devices)) or f"{len(members)} device(s)"
+        signed = e.get("zcc_users") or {}
+        names = ", ".join(sorted((d.get("hostname") or d.get("id", "")[:8]) + (f" (Client Connector: {signed[host_key(d.get('hostname'))]})"
+                                  if host_key(d.get("hostname")) in signed else "") for d in devices)) or f"{len(members)} device(s)"
         out.append(_chk("ready-eai-device", "Generator enrolled in Endpoint AI", "ok" if online else "warn",
                         names + ("" if online else ": not seen in the last 24 hours"),
                         "" if online else "Start the generator and check Client Connector is signed in."))
@@ -1041,6 +1094,17 @@ def zcc_signin(cfg):
     return {"email": email, "has_password": has_pw, "password_source": source}
 
 
+def this_machine():
+    import socket
+    running = None
+    try:
+        running = K.product("zia").traffic_module().zcc_running()
+    except Exception as e:
+        K.vlog(f"zcc running: {e}")
+    return {"hostname": host_key(socket.gethostname()).upper() if K.WINDOWS else socket.gethostname().split(".")[0],
+            "zcc_running": running}
+
+
 def claude_status():
     p = find_claude()
     return {"installed": bool(p), "path": p or ""}
@@ -1054,7 +1118,8 @@ def public_state(cfg):
             "shell_lock": bool(e.get("shell_lock")), "last_report": e.get("last_report"),
             "policy": policy_name(), "group": group_name(), "console_path": CONSOLE_PATH,
             "scenes": [{"id": s["id"], "title": s["title"]} for s in SCENES],
-            "zcc": zcc_signin(cfg), "claude": claude_status(), "admin_machine": admin_machine(cfg)}
+            "zcc": zcc_signin(cfg), "claude": claude_status(), "admin_machine": admin_machine(cfg),
+            "this_machine": this_machine(), "zcc_users": e.get("zcc_users") or {}}
 
 
 def api_get(path, cfg, tenant):

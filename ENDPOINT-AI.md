@@ -46,6 +46,11 @@ generator devices setup itself added to the group, never devices someone added b
    more than three match, setup stops and asks for the exact hostname. A ZIA test user you picked yourself is never
    used to find devices (it could be a real person's laptop): enter the generator's hostname instead. If the agent
    isn't on yet, run setup again once it is.
+   **Client Connector already signed in on the generator?** Keep it. Step 3 of the generator's console shows
+   *This machine: HOSTNAME* with a Copy button: paste that under **Generator hostnames** on your laptop and click
+   **Create or update**. With the OneAPI client on your laptop, the kit reads who Client Connector is signed in as
+   (Client Connector's enrolled devices, read-only) and shows it; it never reads or stores a password. Devices are
+   matched by that hostname only, so the same user's other machines are never added.
 5. **Claude Code on the generator (manual, once).** Signed in to Windows on the generator as the user who will run
    the demo:
    - `C:\SE-Demo\eai.cmd demo --install` installs Claude Code with Anthropic's installer, for that user (no admin).

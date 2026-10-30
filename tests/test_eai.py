@@ -836,3 +836,71 @@ def test_failed_install_shows_the_installers_reason(eenv, monkeypatch, tmp_path)
         e.install_claude(log_into(out))
     assert "/Users/se/.local/state/claude" in str(err.value) and "sudo chown" in str(err.value)
     assert any("installer: EACCES" in m for _, m in out) and not any("\x1b" in m for _, m in out)
+
+
+class FakeZccTenant:
+    def __init__(self, rows):
+        self.rows, self.calls = rows, []
+
+    def call(self, resource, method, **kw):
+        self.calls.append((resource, method, kw))
+        assert (resource, method) == ("zcc.devices", "list_devices")   # read-only
+        page = kw["query_params"]["page"]
+        return self.rows if page == 1 else []
+
+
+def test_setup_reads_who_client_connector_is_signed_in_as(eenv, monkeypatch):
+    kit, e, fake = eenv("eai", zia_user=False)
+    cfg = kit.load_cfg()
+    cfg.update(client_id="abcd", vanity_domain="acme")
+    cfg["eai"]["hosts"] = ["ec2amaz-gen1.ec2.internal"]          # case and domain differ from both systems
+    kit.save_cfg(cfg)
+    kit._kc["oneapi-client-secret"] = "s3cret"
+    zcc = FakeZccTenant([{"machineHostname": "EC2AMAZ-GEN1", "user": "paul.demo@acme.example", "registrationState": "Registered"},
+                         {"machineHostname": "MBP-JLEE", "user": "jordan@acme.example", "registrationState": "Registered"}])
+    monkeypatch.setattr(kit.product("zia"), "connect", lambda c: zcc)
+    out = []
+    checks = e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(out))
+    assert any("Client Connector signed in as paul.demo@acme.example" in m for _, m in out)
+    assert next(g for g in fake.groups if g["name"].startswith("SE-Demo"))["members"] == ["dev-gen"]   # by hostname only
+    assert "jordan" not in json.dumps(kit.load_cfg()["eai"])
+    dev = next(c for c in checks if c["id"] == "ready-eai-device")
+    assert "paul.demo@acme.example" in dev["detail"]
+
+
+def test_unregistered_hostname_is_reported(eenv, monkeypatch):
+    kit, e, fake = eenv("eai", zia_user=False)
+    cfg = kit.load_cfg()
+    cfg.update(client_id="abcd", vanity_domain="acme")
+    cfg["eai"]["hosts"] = ["NOT-THERE"]
+    kit.save_cfg(cfg)
+    kit._kc["oneapi-client-secret"] = "s3cret"
+    monkeypatch.setattr(kit.product("zia"), "connect", lambda c: FakeZccTenant([]))
+    out = []
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(out))
+    assert any(lv == "warn" and "NOT-THERE: not registered" in m for lv, m in out)
+
+
+def test_zcc_lookup_failure_or_no_oneapi_changes_nothing(eenv, monkeypatch):
+    kit, e, _ = eenv("eai")
+    assert e.zcc_signins(kit.load_cfg(), ["EC2AMAZ-GEN1"]) == {}            # no OneAPI client on this computer
+    cfg = kit.load_cfg()
+    cfg.update(client_id="abcd")
+    kit._kc["oneapi-client-secret"] = "s3cret"
+
+    def boom(c):
+        raise kit.KitError("network")
+    monkeypatch.setattr(kit.product("zia"), "connect", boom)
+    assert e.zcc_signins(cfg, ["EC2AMAZ-GEN1"]) == {}
+
+
+def test_generator_console_shows_its_hostname(eenv, monkeypatch):
+    kit, e, _ = eenv("eai")
+    import socket
+    monkeypatch.setattr(socket, "gethostname", lambda: "Pauls-Mac.local")
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    assert e.public_state(kit.load_cfg())["this_machine"]["hostname"] == "Pauls-Mac"
+    assert e.host_key("Pauls-Mac.local") == e.host_key("PAULS-MAC")
+    cfg = kit.load_cfg()
+    cfg["eai"]["zcc_users"] = {"EC2AMAZ-GEN1": "paul.demo@acme.example"}
+    assert "already signed in" in e.generator_steps(cfg) and "nothing to type" in e.generator_steps(cfg)
