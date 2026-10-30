@@ -880,7 +880,7 @@ def test_unregistered_hostname_is_reported(eenv, monkeypatch):
     monkeypatch.setattr(kit.product("zia"), "connect", lambda c: FakeZccTenant([]))
     out = []
     e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(out))
-    assert any(lv == "warn" and "NOT-THERE: not registered" in m for lv, m in out)
+    assert any(lv == "info" and "NOT-THERE: not found in this tenant's Client Connector" in m for lv, m in out)
 
 
 def test_zcc_lookup_failure_or_no_oneapi_changes_nothing(eenv, monkeypatch):
@@ -1085,3 +1085,35 @@ def test_mac_hostname_is_the_bonjour_name(eenv, monkeypatch):
     monkeypatch.setattr(e.subprocess, "run", lambda *a, **k: Proc("Pauls-MacBook-Pro\n"))
     assert e.machine_name() == "Pauls-MacBook-Pro"
     assert e.host_key("Pauls-MacBook-Pro") == e.host_key("Pauls-MacBook-Pro.local")
+
+
+def test_mac_device_found_when_the_exact_host_filter_misses(eenv):
+    """Endpoint AI had events from Pauls-MacBook-Pro.local but /v1/devices?host=Pauls-MacBook-Pro found nothing."""
+    kit, e, fake = eenv("eai", zia_user=False)
+    cfg = kit.load_cfg()
+    cfg["eai"]["hosts"] = ["Pauls-MacBook-Pro"]
+    kit.save_cfg(cfg)
+    fake.devices.append({"id": "dev-mac", "hostname": "Pauls-MacBook-Pro.lan", "serial_number": "FNQNV30CXG",
+                         "status": "active", "users": []})
+    real_route = fake.route
+
+    def route(method, path, q, body):   # host filter exact and unknown spellings; serial filter works
+        if path == "/v1/devices" and method == "GET" and q.get("serial"):
+            return real_route(method, path, {}, body).__class__(200, {"devices": [d for d in fake.devices if d.get("serial_number") == q["serial"]]})
+        if path == "/v1/devices" and method == "GET":
+            return real_route(method, path, {"host": "nope"}, body)
+        return real_route(method, path, q, body)
+    fake.route = route
+    fake.events = [{"id": "x", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "hostname": "Pauls-MacBook-Pro.local",
+                    "serial": "FNQNV30CXG", "tool_name": "Bash", "data": {"verdict": "allow"}}]
+    devs = e.find_devices(e.connect(cfg), cfg)
+    assert [d["id"] for d in devs] == ["dev-mac"]
+
+
+def test_host_key_ignores_punctuation_and_suffix():
+    spec = importlib.util.spec_from_file_location("eai_alone4", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m.host_key("Paul’s MacBook Pro") == m.host_key("Pauls-MacBook-Pro.local") == m.host_key("PAULS-MACBOOK-PRO")
+    assert m.host_key("EC2AMAZ-GEN1") != m.host_key("EC2AMAZ-GEN2")
+    assert "Pauls-MacBook-Pro.local" in m.host_spellings("Pauls-MacBook-Pro")

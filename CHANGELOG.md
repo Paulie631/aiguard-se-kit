@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.30
+- **Endpoint AI finds the Mac generator's device.** Its events came in, but setup said "no device in the group yet"
+  because Endpoint AI's exact hostname filter didn't match. Setup now also asks for `name.local`, then searches
+  devices by name, then looks the device up by the serial number Endpoint AI reports on its events.
+- **Hostnames compare ignoring case, domain suffix, spaces and punctuation**, so Client Connector's "Paul's MacBook
+  Pro" matches `Pauls-MacBook-Pro.local`. A generator Client Connector doesn't list is now a note, not a warning:
+  Endpoint AI finds the machine on its own.
+
 ## 1.8.29
 - **Endpoint AI scenes that write files now run.** On a Mac they used `echo … > file`, and Claude Code stops for
   approval on any output redirection. They now use Claude Code's Write tool, allowed for the kit's work folder only.
