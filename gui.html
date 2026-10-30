@@ -1317,8 +1317,10 @@ async function eai(){
     const c=e.credential||{};
     $("#eaicred").textContent=e.saved?`Saved: ${e.client_id}`+(c.name?` (${c.name}${c.roles?", "+c.roles.filter(Boolean).join(", "):""}${c.expires_at?", expires "+String(c.expires_at).slice(0,10):""})`:"")+(e.state&&e.state.set_up?` · demo policy set up ${e.state.set_up}, ${(e.state.mode||"monitor")} mode`:" · connected; demo policy not created yet (step 2)"):"Not connected yet.";
     if(e.state&&e.state.mode)$("#eaimode").value=e.state.mode;
-    const z=e.zcc||{};
-    $("#eaizcc").innerHTML=z.email?`Sign in as <code>${esc(z.email)}</code>${z.password_source&&!z.has_password?` · password: ${esc(z.password_source)}`:""}. In the Endpoint AI console this machine should then appear under Administration &gt; Devices.`:"Sign in as the ZIA test user (the ZIA tab on your laptop shows it). This machine should then appear under Administration &gt; Devices in the Endpoint AI console.";
+    const z=e.zcc||{},m=e.this_machine||{};
+    const here=m.hostname?`This machine: <code>${esc(m.hostname)}</code> <button id="eaihostcp" style="font-size:12px;padding:2px 8px">Copy</button> · Client Connector ${m.zcc_running===true?"running":m.zcc_running===false?"<b>not running</b>":"status unknown"}. <b>Already signed in?</b> Keep it: paste this hostname into <b>Generator hostnames</b> on your laptop and click Create or update; the kit reads who it's signed in as from Client Connector. <b>Not signed in?</b> `:"";
+    $("#eaizcc").innerHTML=here+(z.email?`Sign in as <code>${esc(z.email)}</code>${z.password_source&&!z.has_password?` · password: ${esc(z.password_source)}`:""}. In the Endpoint AI console this machine should then appear under Administration &gt; Devices.`:"Sign in as the ZIA test user (the ZIA tab on your laptop shows it). This machine should then appear under Administration &gt; Devices in the Endpoint AI console.");
+    const hc=$("#eaihostcp");if(hc)hc.onclick=()=>navigator.clipboard.writeText(m.hostname);
     $("#eaizccpw").style.display=z.has_password?"":"none";
     const cl=e.claude||{};
     $("#eaiclaude").innerHTML=cl.installed?`Installed (<code>${esc(cl.path)}</code>). Signed in? Run <code>claude</code> once in a terminal and follow the browser sign-in.`:"Not installed on this machine.";
