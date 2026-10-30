@@ -773,18 +773,54 @@ def find_claude():
     return shutil.which("claude")
 
 
+INSTALL_DIRS = (".local", ".local/bin", ".local/share", ".local/state", ".claude")
+
+
+def install_blockers(home=None):
+    """Folders the installer must write to but can't (usually left owned by root by an earlier `sudo` install)."""
+    home = Path(home or user_home())
+    bad = []
+    for rel in INSTALL_DIRS:
+        p = home / rel
+        if p.exists() and not os.access(p, os.W_OK):
+            bad.append(p)
+    return bad
+
+
+def fix_command(bad, home=None):
+    if K.WINDOWS:
+        return ("Give your Windows user Full control of " + ", ".join(map(str, bad)) + " (right-click > Properties > "
+                "Security), or in an Administrator PowerShell: icacls \"" + str(bad[0]) + "\" /grant \"$env:USERNAME:(OI)(CI)F\" /T")
+    home = Path(home or user_home())
+    top = next((home / d for d in (".local", ".claude") if any(str(b).startswith(str(home / d)) for b in bad)), bad[0])
+    return f'sudo chown -R "$(whoami)" {top}' + (" ~/.claude" if top.name == ".local" and any(".claude" in str(b) for b in bad) else "")
+
+
 def install_claude(log):
     """Anthropic's own installer, for this Windows user (no admin needed); then the binary's signature is checked."""
     if K.WINDOWS:
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://claude.ai/install.ps1 | iex"]
     else:
         cmd = ["bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"]
+    bad = install_blockers()
+    if bad:
+        raise K.KitError("Claude Code can't install yet: this user can't write to " + ", ".join(map(str, bad)) +
+                         " (usually left owned by root by an earlier install run with sudo). Fix it once in a terminal: "
+                         + fix_command(bad) + "  Then click Install Claude Code again. Don't run the installer with sudo.")
     log("info", "Installing Claude Code with Anthropic's installer")
-    subprocess.run(cmd, check=False, timeout=600, env=user_env())
+    r = subprocess.run(cmd, check=False, timeout=600, env=user_env(), capture_output=True, text=True)
+    out = K.redact(((r.stdout or "") + "\n" + (r.stderr or "")).strip())
+    for line in [x for x in out.splitlines() if x.strip()][-8:]:
+        log("info", "installer: " + re.sub(r"\x1b\[[0-9;]*m", "", line)[:300])
     p = find_claude()
     if not p:
-        raise K.KitError("Claude Code didn't install. Install it by hand (https://code.claude.com/docs/en/setup), "
-                         "then run the demo again.")
+        why = ""
+        m = re.search(r"EACCES[^\n]*?'([^']+)'", out)
+        if m:
+            why = (f" The installer couldn't write to {m.group(1)}: fix the folder's owner in a terminal with "
+                   + fix_command([Path(m.group(1))]) + ", then try again.")
+        raise K.KitError("Claude Code didn't install." + (why or " The installer's last lines are above. Install it by hand "
+                         "(https://code.claude.com/docs/en/setup) if they don't say why.") + " Don't run the installer with sudo.")
     if K.WINDOWS:
         sig = subprocess.run(["powershell", "-NoProfile", "-Command",   # the path goes in through the environment:
                               "$s = Get-AuthenticodeSignature $env:EAI_CLAUDE_PATH; "   # no quoting to break

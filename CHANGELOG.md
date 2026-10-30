@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.24
+- **Install Claude Code, clearer when it can't.** The button checks first that this user can write to the folders
+  Anthropic's installer uses (`~/.local`, `~/.claude`). If an earlier `sudo` install left them owned by root, it stops
+  and gives the one command to fix it (`sudo chown -R "$(whoami)" ~/.local`, or the Windows equivalent). A failed
+  install now shows the installer's own last lines and, for a permissions error, the folder and the fix.
+
 ## 1.8.23
 - **Endpoint AI tab, clearer on the generator.** A note at the top says which steps run on your laptop (1, 2, 4)
   and which on the traffic generator VM (3). Step 3 now walks through the generator in order: (a) the Client
