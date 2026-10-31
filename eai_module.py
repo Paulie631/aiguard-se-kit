@@ -1757,7 +1757,9 @@ def machine_name():
 
 def claude_status():
     p = find_claude()
-    return {"installed": bool(p), "path": p or ""}
+    bad = install_blockers()   # folders the installer (or Claude Code itself) can't write: shown before anyone clicks
+    return {"installed": bool(p), "path": p or "", "blocked": [str(b) for b in bad],
+            "fix": fix_command(bad) if bad else ""}
 
 
 def public_state(cfg):

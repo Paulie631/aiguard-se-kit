@@ -832,7 +832,7 @@ def test_console_install_button_runs_the_checked_installer(eenv, monkeypatch):
     assert e.api_job("/api/eai/install", {}, kit.load_cfg(), None, log_into(out), job)
     assert job["verify"][0]["status"] == "ok" and any("sign Claude Code in" in m for _, m in out)
     monkeypatch.setattr(e, "find_claude", lambda: None)
-    assert e.public_state(kit.load_cfg())["claude"] == {"installed": False, "path": ""}
+    assert e.public_state(kit.load_cfg())["claude"] == {"installed": False, "path": "", "blocked": [], "fix": ""}
 
 
 def test_install_stops_with_the_fix_when_local_is_owned_by_root(eenv, monkeypatch, tmp_path):
@@ -1590,3 +1590,16 @@ def test_setup_says_all_rules_were_accepted(eenv):
     log = []
     e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(log))
     assert any("Endpoint AI accepted all 42 rules" in str(m) for m in log)
+
+
+def test_console_shows_the_install_fix_before_anyone_clicks(eenv, tmp_path, monkeypatch):
+    kit, e, _ = eenv("eai")
+    home = tmp_path / "home"
+    (home / ".local" / "state").mkdir(parents=True)
+    monkeypatch.setattr(e, "user_home", lambda: home)
+    monkeypatch.setattr(e, "find_claude", lambda: None)
+    monkeypatch.setattr(e.os, "access", lambda p, mode: not str(p).endswith("state"))   # .local/state not writable
+    st = e.claude_status()
+    assert st["blocked"] == [str(home / ".local" / "state")] and "chown" in st["fix"] and not st["installed"]
+    monkeypatch.setattr(e.os, "access", lambda p, mode: True)
+    assert e.claude_status()["blocked"] == [] and e.claude_status()["fix"] == ""

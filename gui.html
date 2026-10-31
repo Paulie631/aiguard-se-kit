@@ -1560,7 +1560,9 @@ async function eai(){
     const hc=$("#eaihostcp");if(hc)hc.onclick=()=>navigator.clipboard.writeText(m.hostname);
     $("#eaizccpw").style.display=z.has_password?"":"none";
     const cl=e.claude||{};
-    $("#eaiclaude").innerHTML=cl.installed?`Installed (<code>${esc(cl.path)}</code>). Signed in? Run <code>claude</code> once in a terminal and follow the browser sign-in.`:"Not installed on this machine.";
+    $("#eaiclaude").innerHTML=(cl.installed?`Installed (<code>${esc(cl.path)}</code>). Signed in? Run <code>claude</code> once in a terminal and follow the browser sign-in.`:"Not installed on this machine.")
+      +((cl.blocked||[]).length?`<div class="notice" style="display:block;margin:8px 0 0">This user can't write to ${cl.blocked.map(b=>`<code>${esc(b)}</code>`).join(", ")} (usually left owned by root by an earlier <code>sudo</code> install), so ${cl.installed?"Claude Code may fail to save its sign-in":"the install will fail"}. Fix it once in a terminal, then reload this tab:<br><code id="eaifixcmd">${esc(cl.fix)}</code> <button id="eaifixcp" style="font-size:12px;padding:2px 8px">Copy</button></div>`:"");
+    const fx=$("#eaifixcp");if(fx)fx.onclick=()=>navigator.clipboard.writeText(cl.fix);
     $("#eaiinstall").textContent=cl.installed?"Reinstall":"Install Claude Code";
     drawScenes(e);
     $("#eailastrep").innerHTML=e.last_report?`Last: <a href="#" data-rep="${esc(e.last_report.file)}">${esc(e.last_report.file)}</a>`:"";
