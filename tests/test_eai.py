@@ -1508,3 +1508,44 @@ def test_feed_flags_whether_this_computer_has_endpoint_ai(eenv):
     cfg = kit.load_cfg(); cfg["eai"].pop("client_id"); kit.save_cfg(cfg)
     out = kit.feed(kit.load_cfg(), ("eai", "aiguard"), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     assert out["eai_connected"] is False           # the generator has none
+
+
+def _real_shape(eid, ts, raw):
+    """An event shaped like the one Endpoint AI returned from the Mac (fields as seen in its raw view)."""
+    return {"id": eid, "timestamp": ts, "arrived_at": ts, "event_timestamp": ts, "category": "hook",
+            "event_type": "PreToolUse", "severity": "info", "user_email": "ztest@pyite.buzz",
+            "hostname": "Pauls-MacBook-Pro.local", "tool_name": "Bash", "session_id": "af684b13", "source": "claude",
+            "os": "macos",
+            "data": {"access_method": "cli", "cwd": "/Users/paulaiuto/.aiguard-se-kit/eai-demo", "hook_category": "tool",
+                     "machine_serial": "FNQNV30CXG", "permission_mode": "default", "process_lineage": [], "raw": raw},
+            "pattern_tags": [{"label": "macOS Keychain Dump", "owasp": "ASI02,ASI03", "atlas": "AML.T0037,AML.T0055"}]}
+
+
+def test_real_event_shape_reads_the_hook_payload_from_data_raw(eenv):
+    """Endpoint AI keeps the hook's tool_input inside data.raw (a dict, or a JSON string), not data.tool_input."""
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    cmd = "echo 'security dump-keychain -d  # sedemo'"
+    as_dict = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}}
+    fake.events = [dict(_real_shape("d1", now, as_dict), hostname="EC2AMAZ-GEN1"),
+                   dict(_real_shape("d2", now, json.dumps(as_dict)), hostname="EC2AMAZ-GEN1"),
+                   dict(_real_shape("d3", now, {"effort": {"level": "medium"}}), hostname="EC2AMAZ-GEN1")]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    by = {i["id"]: i for i in out["items"]}
+    for k in ("eai-d1", "eai-d2"):
+        assert by[k]["what"] == cmd and by[k]["rule"] == "OS credential store read" and by[k]["group"] == "Machine & OS"
+        assert by[k]["rule_by"] == "kit" and by[k]["demo"]
+    assert by["eai-d3"]["what"] == "" and by["eai-d3"]["demo"]          # no tool_input anywhere: still a demo event
+    assert by["eai-d3"]["patterns"] == ["macOS Keychain Dump"]           # Endpoint AI's own detection still shows
+
+
+def test_raw_detail_keeps_long_events(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    ev = dict(_real_shape("long", now, {"tool_input": {"command": "ls"}, "note": "x" * 9000}), hostname="EC2AMAZ-GEN1")
+    fake.events = [ev]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    raw = kit.feed_raw(out["items"][0]["id"])
+    assert '"tool_input"' in raw and len(raw) > 9000   # was cut off at 4,000 characters

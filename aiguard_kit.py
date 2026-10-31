@@ -2636,7 +2636,7 @@ def _zia_feed(cfg):
 
 
 FEED_RAW = {}        # item id -> raw event JSON, for the row detail: the feed itself stays small
-FEED_RAW_MAX = 6000
+FEED_RAW_MAX = 3000
 
 
 def feed_raw(item_id):

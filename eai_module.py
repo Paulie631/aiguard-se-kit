@@ -790,6 +790,32 @@ def all_events(t, q, info=None):
     return out
 
 
+RAW_MAX = 16000   # the raw event shown in a row's detail (loaded on demand; real events carry a long process lineage)
+
+
+def _hook(ev):
+    """The original Claude Code hook payload, where this build of Endpoint AI keeps it: data.raw, as a dict or a JSON
+    string. Empty if there is none."""
+    raw = (ev.get("data") or {}).get("raw")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _first(keys, *objs):
+    """The first non-empty value of any of keys, looking through objs in order."""
+    for o in objs:
+        if isinstance(o, dict):
+            for k in keys:
+                v = o.get(k)
+                if v not in (None, "", [], {}):
+                    return v
+    return None
+
+
 def evidence(t, cfg, hours=24, limit=50, minutes=None):
     """The generator's recent AI activity, newest first (limit: how many to return; None for all of them)."""
     hosts, emails = generator_identities(cfg)
@@ -817,25 +843,28 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
     items = []
     for ev in _items(body, "events"):
         data = ev.get("data") or {}
-        etype = ev.get("event_type") or data.get("hook_event_name") or ""
-        tool = ev.get("tool_name") or data.get("tool_name") or ""
+        hook = _hook(ev)
+        etype = ev.get("event_type") or data.get("hook_event_name") or hook.get("hook_event_name") or ""
+        tool = ev.get("tool_name") or data.get("tool_name") or hook.get("tool_name") or ""
         if not tool and etype in LIFECYCLE:   # session start/end and batch markers: noise in a demo feed
             continue
-        ti = data.get("tool_input")
+        ti = _first(("tool_input",), data, hook, ev)
         if isinstance(ti, dict):   # a shell command, or the file a Write/Read/Edit touched (and the start of its content)
             cmd = ti.get("command") or " ".join(filter(None, [ti.get("file_path") or ti.get("path"),
                                                               str(ti.get("content") or "")[:120]]))
         else:
-            cmd = ti or data.get("prompt") or ""
-        cwd = str(data.get("cwd") or ev.get("cwd") or "")
-        rule = data.get("rule_id") or data.get("rule") or ev.get("rule_id") or ""
+            cmd = ti or data.get("prompt") or hook.get("prompt") or ""
+        cwd = str(data.get("cwd") or ev.get("cwd") or hook.get("cwd") or "")
+        rule = _first(("rule_id", "rule", "matched_rule_id", "policy_rule_id"), data, hook, ev) or ""
+        rule = rule if isinstance(rule, str) else str((rule or {}).get("id") or "") if isinstance(rule, dict) else ""
         rule_by = "endpoint-ai" if rule else ""
         if not rule and ti:   # Endpoint AI didn't name a rule: say which demo rule the call matches (the kit's own check)
             hit = classify(tool, ti)
             rule, rule_by = (hit["id"], "kit") if hit else ("", "")
-        verdict = (data.get("verdict") or ev.get("verdict") or "").lower()
-        reason = data.get("reason") if data.get("reason") not in (None, "", "other") else ev.get("reason") or ""
-        message = data.get("agent_message") or data.get("user_message") or data.get("message") or ""
+        verdict = str(_first(("verdict",), data, ev, hook) or "").lower()
+        reason = _first(("reason",), data, ev, hook)
+        reason = "" if reason in (None, "other") else reason
+        message = _first(("agent_message", "user_message", "message"), data, hook) or ""
         raw = json.dumps(K.redact(ev), ensure_ascii=False, default=str)
         items.append({"time": utc_iso(ev.get("timestamp") or ev.get("event_timestamp") or ev.get("arrived_at")
                                       or data.get("timestamp")) or "", "raw_time": ev.get("timestamp"), "event_id": ev.get("id"), "host": ev.get("hostname"),
@@ -846,7 +875,7 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
                       "reason": str(reason or "")[:200], "message": str(message or "")[:300], "cwd": cwd,
                       "session": ev.get("session_id") or data.get("session_id") or "", "event_type": etype,
                       "serial": ev.get("serial") or ev.get("serial_number") or data.get("serial") or "",
-                      "raw": raw[:4000] + ("…" if len(raw) > 4000 else ""),
+                      "raw": raw[:RAW_MAX] + ("…" if len(raw) > RAW_MAX else ""),
                       "patterns": [p.get("label") or p.get("pattern_id") for p in ev.get("pattern_tags") or []],
                       "mitre": [p.get("atlas") for p in ev.get("pattern_tags") or [] if p.get("atlas")],
                       "owasp": [p.get("owasp") for p in ev.get("pattern_tags") or [] if p.get("owasp")],
