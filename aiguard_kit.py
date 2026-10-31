@@ -2645,7 +2645,7 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
             ev = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=max(1, -(-minutes // 60)), limit=100)
             cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - minutes * 60))
             for i in ev["items"]:
-                if str(i.get("time") or "")[:19] >= cutoff[:19]:
+                if not i.get("time") or str(i["time"])[:19] >= cutoff[:19]:   # unreadable time: the API's own window decides
                     items.append({"source": "eai", "time": i.get("time"), "verdict": i.get("verdict"), "what": i.get("command"),
                                   "who": i.get("host") or i.get("user") or "", "detail": " · ".join(
                                       filter(None, [*(i.get("patterns") or []), *(i.get("owasp") or []), *(i.get("mitre") or [])])),
@@ -2657,6 +2657,13 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
                                   "patterns": i.get("patterns") or [], "owasp": i.get("owasp") or [], "mitre": i.get("mitre") or [],
                                   "id": f"eai-{i.get('time')}-{i.get('command', '')[:30]}"})
             out["eai_hosts"] = ev.get("hosts") or []
+            if not any(i["source"] == "eai" for i in items) and minutes < 1440:   # empty window: say what's just outside it
+                day = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=24, limit=100)
+                if day["items"]:
+                    out.setdefault("notes", {})["eai"] = (f"nothing in this window, but {len(day['items'])} events in the last "
+                                                          f"24 hours ({day['matched']} from the demo, newest "
+                                                          f"{str(day['items'][0].get('time') or '?')[:16].replace('T', ' ')} UTC): "
+                                                          "choose Last 24 hours")
             if not ev.get("hosts") and ev.get("emails"):
                 out.setdefault("notes", {})["eai"] = (
                     "watching user " + ", ".join(ev["emails"]) + " (no generator hostname saved). If the scenes run on a "

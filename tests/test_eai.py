@@ -1269,3 +1269,26 @@ def test_status_keeps_the_mode_when_rules_come_back_without_ids(eenv):
         r.pop("id")
     e.status(e.connect(kit.load_cfg()), kit.load_cfg())
     assert kit.load_cfg()["eai"]["state"]["mode"] == "block"
+
+
+def test_timestamps_in_any_format_reach_the_feed(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.time()
+    fmts = [int(now * 1000) - 60000, int(now) - 120,
+            time.strftime("%Y-%m-%dT%H:%M:%S.123456789+00:00", time.gmtime(now - 180)),
+            time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 240)), "not a time"]
+    fake.events = [{"id": f"t{i}", "timestamp": ts, "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+                    "data": {"verdict": "audit", "tool_input": {"command": "rm -rf ./decoy-project"}}} for i, ts in enumerate(fmts)]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert len(out["items"]) == 5
+    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", i["time"]) for i in out["items"][:4])
+
+
+def test_empty_window_points_to_older_events(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.events = [{"id": "old", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 3600)),
+                    "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash", "data": {"verdict": "audit", "tool_input": {"command": "rm -rf ./decoy-project"}}}]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert not out["items"] and "1 events in the last 24 hours" in out["notes"]["eai"] and "Last 24 hours" in out["notes"]["eai"]

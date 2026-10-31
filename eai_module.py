@@ -718,6 +718,28 @@ def _recent(stamp, hours):
         return False
 
 
+def utc_iso(ts):
+    """Any timestamp Endpoint AI may send (ISO with Z, an offset or fractions, a space instead of T, or epoch seconds or
+    milliseconds) as 'YYYY-MM-DDTHH:MM:SSZ'; None when it can't be read."""
+    import datetime as dt
+    if ts in (None, ""):
+        return None
+    try:
+        if isinstance(ts, (int, float)) or re.fullmatch(r"\d{9,13}(\.\d+)?", str(ts)):
+            v = float(ts)
+            v = v / 1000 if v > 1e11 else v
+            return dt.datetime.fromtimestamp(v, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        t = str(ts).strip().replace(" ", "T", 1)
+        t = re.sub(r"Z$", "+00:00", t)
+        t = re.sub(r"(\.\d{1,6})\d*", r"\1", t)   # Python 3.10 reads at most 6 fraction digits
+        d = dt.datetime.fromisoformat(t)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=dt.timezone.utc)
+        return d.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def _since(hours):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * 3600))
 
@@ -763,7 +785,8 @@ def evidence(t, cfg, hours=24, limit=50):
         reason = data.get("reason") if data.get("reason") not in (None, "", "other") else ev.get("reason") or ""
         message = data.get("agent_message") or data.get("user_message") or data.get("message") or ""
         raw = json.dumps(K.redact(ev), ensure_ascii=False, default=str)
-        items.append({"time": ev.get("timestamp"), "host": ev.get("hostname"),
+        items.append({"time": utc_iso(ev.get("timestamp") or ev.get("event_timestamp") or ev.get("arrived_at")
+                                      or data.get("timestamp")) or "", "raw_time": ev.get("timestamp"), "host": ev.get("hostname"),
                       "user": ev.get("user_email") or data.get("email") or ev.get("email"),
                       "tool": tool or etype, "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
                       "command": str(cmd or "")[:300], "rule": rule, "rule_title": titles.get(rule) or data.get("rule_name") or "",
