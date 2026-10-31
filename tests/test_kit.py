@@ -1071,3 +1071,38 @@ def test_restart_and_installers_bring_the_console_up_without_a_terminal(monkeypa
     win = (ROOT / "Install AI Guard Kit.cmd").read_text(encoding="utf-8")
     assert 'nohup "$HOME/.aiguard-se-kit/app/aiguard-kit" gui --background' in mac and "Keep this window open" not in mac
     assert 'conhost.exe" --headless' in win and "gui --background" in win and "Keep this window open" not in win
+
+
+def test_feed_raw_route_serves_one_event_and_needs_the_token(monkeypatch, tmp_path):
+    import socket
+    import threading
+    import time
+    import urllib.error
+    import urllib.request
+    kit = load_kit(monkeypatch, tmp_path, ["gui", "--background", "--no-browser"])
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    monkeypatch.setattr(kit, "ARGS", ["gui", "--background", "--no-browser", "--port", str(port)])
+    monkeypatch.setattr(kit, "update_check", lambda: None)
+    t = threading.Thread(target=kit.cmd_gui, daemon=True)
+    t.start()
+    for _ in range(300):
+        if kit.console_file().exists() or not t.is_alive():
+            break
+        time.sleep(0.1)
+    base = f"http://127.0.0.1:{port}"
+    html = urllib.request.urlopen(base + "/").read().decode()
+    tok = (re.search(r'TOKEN\s*=\s*"([^"]+)"', html) or re.search(r'TOKEN="([^"]+)"', html)).group(1)
+    get = lambda u, h=None: urllib.request.urlopen(urllib.request.Request(base + u, headers=h or {}))  # noqa: E731
+    kit.FEED_RAW["eai-ev 1"] = '{"id": "ev 1"}'
+    assert json.loads(get("/api/feed/raw?id=eai-ev%201", {"X-Kit-Token": tok}).read())["raw"] == '{"id": "ev 1"}'
+    with pytest.raises(urllib.error.HTTPError) as gone:
+        get("/api/feed/raw?id=eai-nope", {"X-Kit-Token": tok})
+    assert gone.value.code == 404
+    with pytest.raises(urllib.error.HTTPError):   # no token, no data
+        get("/api/feed/raw?id=eai-ev%201")
+    req = urllib.request.Request(base + "/api/quit", data=b"{}", method="POST",
+                                 headers={"X-Kit-Token": tok, "Content-Type": "application/json"})
+    urllib.request.urlopen(req).read()
+    t.join(5)

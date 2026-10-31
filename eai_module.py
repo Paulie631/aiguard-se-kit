@@ -772,9 +772,10 @@ EVENT_PAGE = 200
 EVENT_PAGES = 15   # up to 3,000 events in a window: plenty for a demo generator
 
 
-def all_events(t, q):
+def all_events(t, q, info=None):
     """Every event in the window, following next_cursor, newest first. One scene run logs well over 100 events (session
-    start, prompt, before and after each tool, stop), so a single page can miss the newest ones."""
+    start, prompt, before and after each tool, stop), so a single page can miss the newest ones. Stops at
+    EVENT_PAGES pages (a runaway filter can't hammer the API); info["capped"] then says more were left."""
     out, cursor = [], None
     for _ in range(EVENT_PAGES):
         body = t.get("/v1/events", **{**q, "limit": EVENT_PAGE, **({"cursor": cursor} if cursor else {})})
@@ -782,27 +783,30 @@ def all_events(t, q):
         cursor = body.get("next_cursor") if isinstance(body, dict) else None
         if not cursor:
             break
+    if info is not None:
+        info["capped"] = bool(cursor) or info.get("capped", False)
     out.sort(key=lambda ev: utc_iso(ev.get("timestamp")) or "", reverse=True)
     return out
 
 
 def evidence(t, cfg, hours=24, limit=50, minutes=None):
-    """The generator's recent AI activity, newest first (limit: how many to return)."""
+    """The generator's recent AI activity, newest first (limit: how many to return; None for all of them)."""
     hosts, emails = generator_identities(cfg)
     hosts = hosts or [d.get("hostname") for d in (ecfg(cfg).get("state") or {}).get("devices") or [] if d.get("hostname")]
     if not hosts and not emails:
-        return {"items": [], "matched": 0, "total": 0, "hosts": [], "patterns": {}}
+        return {"items": [], "matched": 0, "total": 0, "hosts": [], "patterns": {}, "capped": False}
+    info = {}
     q = {"since": _since(minutes / 60 if minutes else hours)}
     if hosts:   # as typed, short and upper-case: Endpoint AI may record "EC2AMAZ-GEN1" for "ec2amaz-gen1.ec2.internal"
         q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for x in host_spellings(h)))
     elif emails:
         q["ef_user"] = ",".join(emails)
-    evs = all_events(t, q)
+    evs = all_events(t, q, info)
     if hosts:   # only the generator's events, even if the API ignored the filter or spells the host differently
         keys = {host_key(h) for h in hosts}
         mine = [ev for ev in evs if host_key(ev.get("hostname")) in keys]
         if not mine:   # the filter matched nothing: read the latest events and match the hostname here instead
-            mine = [ev for ev in all_events(t, {k: v for k, v in q.items() if k != "ef_host"})
+            mine = [ev for ev in all_events(t, {k: v for k, v in q.items() if k != "ef_host"}, info)
                     if host_key(ev.get("hostname")) in keys]
         evs = mine
     body = {"items": evs}
@@ -833,7 +837,7 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
         message = data.get("agent_message") or data.get("user_message") or data.get("message") or ""
         raw = json.dumps(K.redact(ev), ensure_ascii=False, default=str)
         items.append({"time": utc_iso(ev.get("timestamp") or ev.get("event_timestamp") or ev.get("arrived_at")
-                                      or data.get("timestamp")) or "", "raw_time": ev.get("timestamp"), "host": ev.get("hostname"),
+                                      or data.get("timestamp")) or "", "raw_time": ev.get("timestamp"), "event_id": ev.get("id"), "host": ev.get("hostname"),
                       "user": ev.get("user_email") or data.get("email") or ev.get("email"),
                       "tool": tool or etype, "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
                       "command": str(cmd or "")[:300], "rule": rule, "rule_title": titles.get(rule) or data.get("rule_name") or "",
@@ -853,9 +857,10 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
     except Exception:
         total = len(items)
     items.sort(key=lambda i: str(i["time"] or ""), reverse=True)   # newest first; keep the newest `limit`
-    items = items[:limit]
+    items = items[:limit] if limit else items
     items.sort(key=lambda i: not i["demo"])   # the demo's own events on top (the live feed re-sorts by time)
-    return {"items": items, "matched": matched, "total": total, "hosts": hosts, "emails": emails}
+    return {"items": items, "matched": matched, "total": total, "hosts": hosts, "emails": emails,
+            "capped": bool(info.get("capped"))}
 
 
 DEMO_DIR = ".aiguard-se-kit/eai-demo"   # the scenes' working folder: every scene event carries it as cwd

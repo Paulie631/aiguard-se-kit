@@ -61,7 +61,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "1.8.33"
+VERSION = "1.8.34"
 HERE = Path(__file__).resolve().parent
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
@@ -2635,6 +2635,14 @@ def _zia_feed(cfg):
     return out
 
 
+FEED_RAW = {}        # item id -> raw event JSON, for the row detail: the feed itself stays small
+FEED_RAW_MAX = 6000
+
+
+def feed_raw(item_id):
+    return FEED_RAW.get(item_id)
+
+
 def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
     """One list for the console's live feed: Endpoint AI events from the generator and the AI Guard events this
     computer sent, newest first, plus the ZIA Insights summary (lagged). Read-only; each source fails on its own."""
@@ -2642,7 +2650,7 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
     if "eai" in sources and (cfg.get("eai") or {}).get("client_id"):
         try:
             em = product("eai")
-            ev = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, minutes=minutes, limit=300)
+            ev = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, minutes=minutes, limit=None)   # all of them (up to EVENT_PAGES pages)
             cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - minutes * 60))
             for i in ev["items"]:
                 if not i.get("time") or str(i["time"])[:19] >= cutoff[:19]:   # unreadable time: the API's own window decides
@@ -2657,8 +2665,13 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
                                   "event_type": i.get("event_type") or "", "user": i.get("user") or "", "host": i.get("host") or "",
                                   "cwd": i.get("cwd") or "", "serial": i.get("serial") or "", "raw": i.get("raw") or "",
                                   "patterns": i.get("patterns") or [], "owasp": i.get("owasp") or [], "mitre": i.get("mitre") or [],
-                                  "id": f"eai-{i.get('time')}-{i.get('command', '')[:30]}"})
+                                  "id": f"eai-{i['event_id']}" if i.get("event_id") else f"eai-{i.get('time')}-{i.get('command', '')[:30]}"})
             out["eai_hosts"] = ev.get("hosts") or []
+            if ev.get("capped"):
+                out["capped"] = True
+                out.setdefault("notes", {})["eai"] = (f"showing the newest {len([i for i in items if i['source'] == 'eai']):,} events in "
+                                                      "this window (the most the kit reads at once); counts and charts cover those. "
+                                                      "Choose a shorter window to see all of it")
             acts = (cfg.get("eai") or {}).get("actions") or {}
             out["rule_actions"] = {r["title"]: acts.get(r["id"], "audit") for r in em.rule_catalog()}   # for the rules chart
             out["groups"] = list(dict.fromkeys(r["group"] for r in em.rule_catalog() if not r["optional"]))
@@ -2683,7 +2696,16 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
     if "zia" in sources:
         out["zia"] = _zia_feed(cfg)
     items.sort(key=lambda r: str(r.get("time") or "")[:19], reverse=True)
-    out.update(items=items[:150], errors=errors, at=time.strftime("%H:%M:%S"))
+    for i in reversed(items):   # the raw event goes to the row detail on request; oldest first, so the newest stay longest
+        raw = i.pop("raw", "")
+        if raw:
+            FEED_RAW.pop(i["id"], None)
+            FEED_RAW[i["id"]] = raw
+    while len(FEED_RAW) > FEED_RAW_MAX:   # oldest first
+        FEED_RAW.pop(next(iter(FEED_RAW)))
+    for i in items:
+        i["has_raw"] = i["id"] in FEED_RAW
+    out.update(items=items, errors=errors, at=time.strftime("%H:%M:%S"))
     return out
 
 
@@ -3079,6 +3101,11 @@ def cmd_gui():
                 srcs = tuple(x for x in qs.get("sources", ",".join(FEED_SOURCES)).split(",") if x in FEED_SOURCES)
                 minutes = max(5, min(int(qs.get("minutes", "60") or 60) if qs.get("minutes", "60").isdigit() else 60, 24 * 60))
                 return self._send(200, feed(c, srcs, minutes, lambda: eai_tenant(c)))
+            if path == "/api/feed/raw":
+                from urllib.parse import parse_qs, urlsplit
+                fid = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0]
+                raw = feed_raw(fid)
+                return self._send(200, {"raw": raw}) if raw else self._send(404, {"error": "that event has left the feed; refresh"})
             if path.startswith("/api/eai/report-file"):
                 name = (self.path.split("name=", 1)[1:] or [""])[0].split("&")[0]
                 f = product("eai").report_file(name)
