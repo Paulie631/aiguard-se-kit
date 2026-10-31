@@ -182,6 +182,23 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 tr.feednew td{animation:feedflash 4s ease-out}
 .fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:12px;margin-top:10px}
 .fchart{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel)}
+.scgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-top:4px}
+.sccard{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.schead{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--panel2,rgba(0,0,0,.03));border-bottom:1px solid var(--line)}
+.schead b{font-size:13px}.schead .cnt{color:var(--muted);font-size:11.5px;font-weight:400}
+.schead .sp{margin-left:auto;display:flex;gap:4px}
+.schead button{font-size:11px;padding:1px 7px}
+.scrow{display:flex;align-items:center;gap:7px;padding:5px 10px;font-size:12.5px;border-top:1px solid var(--line);cursor:pointer}
+.scrow:first-of-type{border-top:0}
+.scrow input{margin:0}
+.scrow .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scrow .nw{font-size:9.5px;font-weight:700;color:var(--accent,#4f46e5);border:1px solid currentColor;border-radius:4px;padding:0 3px;letter-spacing:.3px}
+.sctag{font-size:10px;font-weight:600;border-radius:5px;padding:1px 6px;white-space:nowrap}
+.sct-block{background:rgba(180,35,24,.14);color:var(--v-block,#b42318)}
+.sct-audit{background:rgba(209,154,0,.16);color:var(--v-audit,#8a6d00)}
+.sct-allow{background:rgba(125,134,150,.18);color:var(--v-allow,#5b6270)}
+.sclast{font-size:10px;color:var(--muted);white-space:nowrap}
+.sclast.b{color:var(--v-block,#b42318)}.sclast.r{color:var(--muted)}
 .fchart h4{margin:0 0 2px;font-size:13px}.fchart .sub{color:var(--muted);font-size:12px;margin-bottom:6px}
 .fchart svg{display:block;width:100%;height:auto;overflow:visible}.fchart svg text{fill:var(--muted);font-size:11px}
 .fchart svg text.v{fill:var(--ink)}.fchart .grid{stroke:var(--line);stroke-width:1}
@@ -345,7 +362,10 @@ tr.feednew td{animation:feedflash 4s ease-out}
     <div id="eaizccout"></div>
     <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"><span class="lbl">b · Claude Code</span>
       <span id="eaiclaude" style="font-size:13px"></span><button id="eaiinstall">Install Claude Code</button></div>
-    <div><span class="lbl">c · Scenes</span> <span class="muted" style="font-size:12px">· tick a group to tick all its scenes</span><div id="eaiscenes" style="margin:6px 0 8px"></div><button class="primary" id="eaidemo">Run scenes on this machine</button></div>
+    <div><span class="lbl">c · Scenes</span> <span class="muted" style="font-size:12px">· pick what the agent should attempt</span>
+      <div id="eaiquick" class="row" style="gap:6px;flex-wrap:wrap;margin:6px 0 4px"></div>
+      <div id="eaiscenes" style="margin:4px 0 10px"></div>
+      <button class="primary" id="eaidemo">Run scenes on this machine</button></div>
     <div id="eaidemoout"></div>
     <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
   </div>
@@ -1471,7 +1491,8 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
       +tile(items.filter(i=>i.demo).length,"from the demo scenes")+tile(new Set(items.map(i=>i.session).filter(Boolean)).size,"agent sessions")
       +(tp.length?`<div class="panel" style="padding:8px 14px;margin:0;max-width:420px"><div class="muted" style="font-size:12px">Top risk patterns</div><div style="font-size:12.5px">${tp.slice(0,3).map(([k,n])=>`${esc(k)} <b>${n}</b>`).join(" · ")}</div>${to.length||tm.length?`<div class="muted" style="font-size:12px;margin-top:4px">${to.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}${to.length&&tm.length?" · ":""}${tm.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}</div>`:""}</div>`:"");
     drawCharts(el,items,r,st.min);
-    if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}
+    if(!items.length){const gen=st.src.includes("eai")&&r.eai_connected===false;
+      q("[data-fbody]").innerHTML=`<div class="muted">${gen?"This computer isn't connected to Endpoint AI — it looks like the traffic generator. Open the Live feed on the laptop that holds the Endpoint AI credential to watch events there.":`Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.`}</div>`;st.first=false;return}
     const head=`<tr><th>Time</th><th>Source</th><th>Verdict</th><th>Rule</th><th>Where / who</th><th>What</th><th>Detections</th></tr>`;
     let body,total,shown;
     if(st.view=="sessions"){const groups={};items.forEach(i=>{const k=i.session||(i.source=="aiguard"?"AI Guard (this computer)":"no session");(groups[k]=groups[k]||[]).push(i)});
@@ -1490,6 +1511,35 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
 
 /* ---------- Endpoint AI ---------- */
 let EAI=null;
+let EAISEL=null;   // Set of selected scene ids; null until the first draw (then defaults to all)
+const SCTAG={block:"Block",audit:"Audit",allow:"Allow"},SCLAST={ran:"ran",blocked:"blocked",declined:"declined","needs-approval":"prompt",unclear:"unclear",error:"error"};
+function drawScenes(e){
+  const scenes=e.scenes||[],acts=e.actions||{},last=(e.last_run||{}).results||{};
+  if(!EAISEL)EAISEL=new Set(scenes.map(s=>s.id));
+  const groups=[...new Set(scenes.map(s=>s.group))];
+  const act=s=>acts[s.rule]||"audit";
+  $("#eaiscenes").innerHTML=`<div class="scgrid">${groups.map(g=>{const gs=scenes.filter(s=>s.group==g),on=gs.filter(s=>EAISEL.has(s.id)).length;
+    return `<div class="sccard"><div class="schead"><b>${esc(g)}</b> <span class="cnt">${on}/${gs.length}</span>
+      <span class="sp"><button data-sg="${esc(g)}" data-v="1">All</button><button data-sg="${esc(g)}" data-v="0">None</button></span></div>
+      ${gs.map(s=>{const a=act(s),lr=last[s.id];return `<label class="scrow" title="${esc(s.why||"")}"><input type="checkbox" data-es="${esc(s.id)}" data-g="${esc(g)}" ${EAISEL.has(s.id)?"checked":""}>
+        <span class="t">${esc(s.title)}${s.new?' <span class="nw">NEW</span>':""}</span>
+        ${lr?`<span class="sclast ${lr=="blocked"?"b":"r"}">${esc(SCLAST[lr]||lr)}</span>`:""}
+        <span class="sctag sct-${a}">${SCTAG[a]}</span></label>`}).join("")}</div>`}).join("")}</div>`;
+  $$("#eaiscenes [data-es]").forEach(c=>c.onchange=()=>{c.checked?EAISEL.add(c.dataset.es):EAISEL.delete(c.dataset.es);drawScenes(EAI)});
+  $$("#eaiscenes [data-sg]").forEach(b=>b.onclick=()=>{scenes.filter(s=>s.group==b.dataset.sg).forEach(s=>b.dataset.v=="1"?EAISEL.add(s.id):EAISEL.delete(s.id));drawScenes(EAI)});
+  const picks=[["all","All"],["none","None"],["one","One per group"],["new","Only new"]];
+  if(Object.values(last).some(v=>v=="blocked"))picks.push(["blocked","Last run's blocked"]);
+  $("#eaiquick").innerHTML=picks.map(([k,l])=>`<button data-qp="${k}" style="font-size:12px;padding:3px 9px">${l}</button>`).join("")
+    +`<span class="muted" id="eaiselcnt" style="font-size:12px;margin-left:4px"></span>`;
+  $$("#eaiquick [data-qp]").forEach(b=>b.onclick=()=>{const k=b.dataset.qp;EAISEL=new Set();
+    if(k=="all")scenes.forEach(s=>EAISEL.add(s.id));
+    else if(k=="new")scenes.filter(s=>s.new).forEach(s=>EAISEL.add(s.id));
+    else if(k=="blocked")scenes.filter(s=>last[s.id]=="blocked").forEach(s=>EAISEL.add(s.id));
+    else if(k=="one"){const seen=new Set();scenes.forEach(s=>{if(!seen.has(s.group)){seen.add(s.group);EAISEL.add(s.id)}})}
+    drawScenes(EAI)});
+  const n=EAISEL.size;$("#eaiselcnt").textContent=`${n} selected`;
+  $("#eaidemo").disabled=!n;$("#eaidemo").textContent=n?`Run ${n} scene${n>1?"s":""} on this machine`:"Pick at least one scene";
+}
 let FEEDTAB=null;
 function feedTab(){if(!FEEDTAB)FEEDTAB=liveFeed($("#feedtab"),{minutes:60,tall:true})}
 $("#eaitofeed").onclick=e=>{e.preventDefault();$('#tabs button[data-t="feed"]').click()};
@@ -1511,10 +1561,7 @@ async function eai(){
     const cl=e.claude||{};
     $("#eaiclaude").innerHTML=cl.installed?`Installed (<code>${esc(cl.path)}</code>). Signed in? Run <code>claude</code> once in a terminal and follow the browser sign-in.`:"Not installed on this machine.";
     $("#eaiinstall").textContent=cl.installed?"Reinstall":"Install Claude Code";
-    if(!$("#eaiscenes").children.length){const groups=[...new Set(e.scenes.map(s=>s.group))];
-      $("#eaiscenes").innerHTML=groups.map(g=>`<div style="width:100%"><label class="lbl" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-esg="${esc(g)}" checked>${esc(g)}</label>
-        <div class="row" style="gap:10px;flex-wrap:wrap;margin:2px 0 6px 18px">${e.scenes.filter(s=>s.group==g).map(s=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-es="${s.id}" data-g="${esc(g)}" checked>${esc(s.title)}</label>`).join("")}</div></div>`).join("");
-      $$("[data-esg]").forEach(c=>c.onchange=()=>$$(`[data-es][data-g="${CSS.escape(c.dataset.esg)}"]`).forEach(x=>x.checked=c.checked))}
+    drawScenes(e);
     $("#eailastrep").innerHTML=e.last_report?`Last: <a href="#" data-rep="${esc(e.last_report.file)}">${esc(e.last_report.file)}</a>`:"";
   }catch(err){$("#eaicred").textContent=err.message}
 }
@@ -1544,8 +1591,8 @@ $("#eaizccpw").onclick=async()=>{const b=$("#eaizccpw");if(b.dataset.on){$("#eai
   $("#eaipwcp").onclick=()=>navigator.clipboard.writeText(r.password)}catch(err){alert(err.message)}};
 $("#eaiinstall").onclick=()=>{if(!confirm("Install Claude Code for this computer's user with Anthropic's installer (claude.ai/install)? Only on the traffic generator VM. No admin rights needed; the kit checks the download is signed by Anthropic."))return;
   $("#eaidemoout").innerHTML="";runJob("/api/eai/install",{},$("#eaidemolog"),j=>{eai();if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
-$("#eaidemo").onclick=()=>{const scenes=$$("[data-es]").filter(x=>x.checked).map(x=>x.dataset.es);if(!scenes.length)return;
-  if(!confirm("Run the scenes on THIS machine? Only on the traffic generator VM, never a corporate laptop: Claude Code will try to write AWS's example key to a file and delete the kit's decoy folder."))return;
+$("#eaidemo").onclick=()=>{const scenes=[...(EAISEL||[])];if(!scenes.length)return;
+  if(!confirm(`Run ${scenes.length} scene${scenes.length>1?"s":""} on THIS machine? Only on the traffic generator VM, never a corporate laptop: Claude Code will try to write AWS's example key to a file and delete the kit's decoy folder.`))return;
   $("#eaidemoout").innerHTML="";runJob("/api/eai/demo",{scenes},$("#eaidemolog"),j=>{if(j.verify)$("#eaidemoout").innerHTML=checksHTML(j.verify)})};
 $("#eaireport").onclick=()=>{runJob("/api/eai/report",{edition:$("#eaiedition").value,days:7},$("#eairepl"),j=>{eai();const f=((j.notes||[])[0]||{}).file;
   if(f)$("#eairepl").insertAdjacentHTML("beforeend",`<div class="h"><a href="#" data-rep="${esc(f)}">Download ${esc(f)}</a></div>`)})};
