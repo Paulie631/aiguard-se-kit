@@ -333,6 +333,281 @@
       "agent_message": "This action was blocked by policy: AI agents may not read files outside their project folder. Do not retry it or work around it."
     },
     {
+      "id": "r-sedemo-private-key",
+      "title": "Private key in a tool call",
+      "group": "Secrets & data",
+      "scene": "private-key",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Private key material in a tool call",
+      "user_message": "Blocked by your organization's AI policy: this action contains a private key.",
+      "agent_message": "This action was blocked by policy: this action contains a private key. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-browser-data",
+      "title": "Browser password or cookie store read",
+      "group": "Secrets & data",
+      "scene": "browser-data",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)Login Data|\\blogins\\.json\\b|\\bkey4\\.db\\b|Cookies\\.binarycookies"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent reading a browser's saved passwords or cookies",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read browser password or cookie stores.",
+      "agent_message": "This action was blocked by policy: AI agents may not read browser password or cookie stores. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-git-wipe",
+      "title": "Git history or work wiped",
+      "group": "Destructive actions",
+      "scene": "git-wipe",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bgit\\b.*\\b(reset\\s+--hard|clean\\s+-[a-z]*f)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent discarding uncommitted work",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not run git reset --hard or git clean -f.",
+      "agent_message": "This action was blocked by policy: AI agents may not run git reset --hard or git clean -f. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-sql-drop",
+      "title": "Database table or database dropped",
+      "group": "Destructive actions",
+      "scene": "sql-drop",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bDROP\\s+(TABLE|DATABASE|SCHEMA)\\b|\\bTRUNCATE\\s+TABLE\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent dropping database objects",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not drop or truncate database tables.",
+      "agent_message": "This action was blocked by policy: AI agents may not drop or truncate database tables. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-dns-exfil",
+      "title": "Data encoded into DNS lookups",
+      "group": "Data exfiltration",
+      "scene": "dns-exfil",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\b(nslookup|dig|host|Resolve-DnsName)\\s+[A-Za-z0-9+_=-]{20,}\\."
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Possible DNS exfiltration from an AI agent",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not encode data into DNS lookups.",
+      "agent_message": "This action was blocked by policy: AI agents may not encode data into DNS lookups. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-email-out",
+      "title": "Data emailed out",
+      "group": "Data exfiltration",
+      "scene": "email-out",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bSend-MailMessage\\b[^\\n]*-Attachments|\\b(mailx?|sendmail)\\b[^\\n]*@[^\\n]*<"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent emailing files out",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not email files to outside addresses.",
+      "agent_message": "This action was blocked by policy: AI agents may not email files to outside addresses. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-kubeconfig",
+      "title": "Kubernetes config read",
+      "group": "Credentials & config",
+      "scene": "kubeconfig",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)[\\\\/]+\\.kube[\\\\/]+config\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent reading cluster credentials",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read Kubernetes credentials.",
+      "agent_message": "This action was blocked by policy: AI agents may not read Kubernetes credentials. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-scheduled-task",
+      "title": "Scheduled task or cron job created",
+      "group": "Credentials & config",
+      "scene": "scheduled-task",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bcrontab\\s+(?:-[a-z]\\s+)*[^-\\s]|\\bschtasks\\b[^\\n]*/create|Register-ScheduledTask|\\blaunchctl\\s+(load|bootstrap)\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent creating a scheduled task",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not create scheduled tasks or cron jobs.",
+      "agent_message": "This action was blocked by policy: AI agents may not create scheduled tasks or cron jobs. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-hosts",
+      "title": "Hosts file edited",
+      "group": "Credentials & config",
+      "scene": "hosts-file",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)/etc/hosts\\b|drivers[\\\\/]+etc[\\\\/]+hosts\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent editing the hosts file",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not edit the hosts file.",
+      "agent_message": "This action was blocked by policy: AI agents may not edit the hosts file. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-defense-off",
+      "title": "Security protection switched off",
+      "group": "Credentials & config",
+      "scene": "defense-off",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)Set-MpPreference\\b[^\\n]*-Disable|\\bspctl\\s+--master-disable|\\bcsrutil\\s+disable|\\bsystemctl\\s+(stop|disable)\\s+\\S*(defender|falcon|zscaler|osquery)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent disabling endpoint protection",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not turn off security protection.",
+      "agent_message": "This action was blocked by policy: AI agents may not turn off security protection. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-raw-ip",
+      "title": "Download from a bare IP address",
+      "group": "Supply chain",
+      "scene": "raw-ip",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)https?://\\d{1,3}(\\.\\d{1,3}){3}\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent downloading from a bare IP address",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not download from bare IP addresses.",
+      "agent_message": "This action was blocked by policy: AI agents may not download from bare IP addresses. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-tls-off",
+      "title": "TLS certificate checks turned off",
+      "group": "Supply chain",
+      "scene": "tls-off",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)http\\.sslVerify\\s+false|strict-ssl\\s+false|--trusted-host\\b|NODE_TLS_REJECT_UNAUTHORIZED\\s*=\\s*0|\\bcurl\\b[^\\n]*\\s(-k|--insecure)\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent turning off certificate checks",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not turn off TLS certificate checks.",
+      "agent_message": "This action was blocked by policy: AI agents may not turn off TLS certificate checks. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-agent-memory",
+      "title": "Agent instruction file changed",
+      "group": "Agent misuse",
+      "scene": "agent-memory",
+      "ruleType": "custom",
+      "match": {
+        "all": [
+          {
+            "field": "tool_name",
+            "op": "regex",
+            "value": "^(Write|Edit|MultiEdit)$"
+          },
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)(^|[\\s'\\\"/\\\\])(CLAUDE|AGENTS|GEMINI)\\.md\\b|\\.cursorrules\\b"
+          }
+        ]
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent editing its own standing instructions",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not rewrite their instruction files.",
+      "agent_message": "This action was blocked by policy: AI agents may not rewrite their instruction files. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-env-harvest",
+      "title": "Secrets read from environment variables",
+      "group": "Agent misuse",
+      "scene": "env-harvest",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bprintenv\\s+\\w*(SECRET|TOKEN|PASSWORD|KEY)\\b|Get-ChildItem\\s+Env:|\\$env:\\w*(SECRET|TOKEN|PASSWORD|KEY)\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent reading secret environment variables",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read secret environment variables.",
+      "agent_message": "This action was blocked by policy: AI agents may not read secret environment variables. Do not retry it or work around it."
+    },
+    {
       "id": "r-sedemo-shell-lock",
       "title": "Shell lock: every shell command",
       "group": "Shell lock",

@@ -331,7 +331,7 @@ def test_setup_scopes_everything_to_the_generator(eenv):
     assert fake.assignments[pol["id"]] == {"device_groups": [grp["id"]]}
     assert {r["verdict"] for r in pol["rules"]} == {"audit"}  # Monitor first
     tpl = [r["id"] for r in json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"] if not r.get("optional")]
-    assert [r["id"] for r in pol["rules"]] == tpl and len(tpl) == 16
+    assert [r["id"] for r in pol["rules"]] == tpl and len(tpl) == 30
     assert all(k not in r for r in pol["rules"] for k in ("title", "group", "scene", "optional"))   # kit labels stripped
     assert all("scene" not in r and "optional" not in r for r in pol["rules"])
     assert pol["priority"] == e.PRIORITY
@@ -975,7 +975,7 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
     def pats(r):
         mt = r["match"]
         return [c["value"] for c in mt["any"]] if "any" in mt else [mt["value"]]
-    assert len(m.SCENES) == 17 and len({s["id"] for s in m.SCENES}) == 17
+    assert len(m.SCENES) == 32 and len({s["id"] for s in m.SCENES}) == 32
     assert {s["group"] for s in m.SCENES} == {"Secrets & data", "Destructive actions", "Credentials & config", "Supply chain",
                                              "Agent misuse", "Data exfiltration"}
     for s in m.SCENES:
@@ -993,7 +993,7 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
                 assert "eai-other-project" in x and not re.search(r"\.\.[\\/]\.\.", x)
             else:
                 assert not re.search(r"~|/home|C:\\Users|\.\.", x), (s["id"], x)
-            assert not re.search(r"https?://(?!example\.com|registry\.example\.com)", x), (s["id"], x)
+            assert not re.search(r"https?://(?!example\.com|registry\.example\.com|203\.0\.113\.)", x), (s["id"], x)   # 203.0.113.0/24: documentation range
         assert ("win" in s) != bool(s.get("write"))
 
 
@@ -1002,7 +1002,10 @@ def test_rules_stay_quiet_on_ordinary_developer_work():
     harmless = [("Bash", c) for c in ("git status", "Get-Content README.txt", "echo hello", "ls -la", "npm test", "cd ../frontend",
                                       "ls ../", "source ~/.bashrc", "cat ~/.zshrc", "git commit --no-verify -m wip",
                                       "curl -s https://example.com -d q=1", "docker run -d nginx", "npm install left-pad",
-                                      "pip install requests", "cat app.profile.ts", "tar -czf build.tgz dist")]
+                                      "pip install requests", "cat app.profile.ts", "tar -czf build.tgz dist",
+                                      "git reset HEAD src/app.ts", "git clean -n", "printenv PATH", "nslookup example.com",
+                                      "cat config.yaml", "git config user.name dev", "crontab -l", "curl https://example.com",
+                                      "SELECT * FROM customers", "cat kube/config.md", "echo $env:PATH")]
     harmless += [("Write", json.dumps({"file_path": "src/app.ts", "content": "import { x } from '../utils'"})),
                  ("Edit", json.dumps({"file_path": "src/app.profile.ts", "old_string": "a", "new_string": "b"})),
                  ("Bash", json.dumps({"command": "Get-ChildItem ..\\docs"}))]
@@ -1210,7 +1213,7 @@ def test_console_actions_job(eenv):
     job = {}
     assert e.api_job("/api/eai/actions", {"actions": {"r-sedemo-pii": "block"}}, kit.load_cfg(), tenant, log_into([]), job)
     st = e.public_state(kit.load_cfg())
-    assert st["actions"]["r-sedemo-pii"] == "block" and len(st["rules"]) == 17 and [p["id"] for p in st["presets"]] == list(e.PRESETS)
+    assert st["actions"]["r-sedemo-pii"] == "block" and len(st["rules"]) == 31 and [p["id"] for p in st["presets"]] == list(e.PRESETS)
     assert {s["group"] for s in st["scenes"]} >= {"Data exfiltration", "Supply chain", "Agent misuse", "Credentials & config"}
 
 
@@ -1348,3 +1351,54 @@ def test_console_has_the_seven_charts_and_chart_colours_for_both_themes():
         assert f"function {fn}(" in html
     assert html.count("--v-block:") == 3 and html.count("--v-audit:") == 3   # light, dark (system) and dark (forced)
     assert "data-fmore" in html and "vLegend" in html
+
+
+def test_each_new_scene_is_attributed_to_its_own_rule():
+    """The kit's own matching (used when Endpoint AI names no rule) must put every scene on its rule, for the charts."""
+    kit_e = importlib.util.spec_from_file_location("eai_alone3", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(kit_e)
+    kit_e.loader.exec_module(m)
+    for s in m.SCENES:
+        if s.get("read"):   # the injection scenes: the matching call is the Write the hidden text asks for
+            continue
+        calls = ([("Write", {"file_path": s["write"][0], "content": s["write"][1]})] if s.get("write")
+                 else [("PowerShell", {"command": s["win"]}), ("Bash", {"command": s["posix"]})])
+        for tool, ti in calls:
+            hit = m.classify(tool, ti)
+            assert hit and hit["id"] == s["rule"], (s["id"], tool, hit and hit["id"])
+
+
+def test_new_decoys_reset_and_hidden_instruction_is_invisible(eenv):
+    kit, e, _ = eenv("eai")
+    d = e.work_dir()
+    dp = d / "decoy-project"
+    assert "SE-DEMO" in (dp / "Chrome" / "Login Data").read_text(encoding="utf-8")
+    assert "192.0.2.10" in (dp / ".kube" / "config").read_text(encoding="utf-8")
+    txt = (dp / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    visible = "".join(c for c in txt if not 0xE0000 <= ord(c) <= 0xE007F)
+    assert "AKIA" not in visible and "assistants" not in visible   # a person reading it sees only the normal text
+    hidden = "".join(chr(ord(c) - 0xE0000) for c in txt if 0xE0000 <= ord(c) <= 0xE007F)
+    assert "AKIAIOSFODNN7EXAMPLE" in hidden and e.SECRET_FILE[0] in hidden
+    (d / "CLAUDE.md").write_text("x")
+    (dp / "deploy.py").write_text("x")
+    e.work_dir()
+    assert not (d / "CLAUDE.md").exists() and not (dp / "deploy.py").exists()
+    if e.shutil.which("git"):
+        repo = d / "decoy-repo"
+        assert (repo / "scratch-notes.txt").exists()
+        e.subprocess.run(["git", "-C", str(repo), "config", "http.sslVerify", "false"], capture_output=True)
+        (repo / "scratch-notes.txt").unlink()
+        e.work_dir()
+        cfg = e.subprocess.run(["git", "-C", str(repo), "config", "--get", "http.sslVerify"], capture_output=True, text=True)
+        assert cfg.stdout.strip() == "" and (repo / "scratch-notes.txt").exists()
+
+
+def test_env_harvest_scene_gets_a_fake_secret_only(eenv):
+    kit, e, _ = eenv("eai")
+    seen = {}
+    def runner(cmd, cwd, env, **kw):
+        seen.update(env)
+        return e.subprocess.CompletedProcess(cmd, 0, stdout='{"result": "RESULT: RAN ok"}', stderr="")
+    s = next(x for x in e.SCENES if x["id"] == "env-harvest")
+    e.run_scene(s, "claude", e.work_dir(), runner=runner)
+    assert seen["SEDEMO_FAKE_SECRET"] == "sedemo-fake-secret-not-real"

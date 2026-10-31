@@ -7,6 +7,13 @@
   details and a legend, and work in light and dark mode (verdict colours checked for colour-blind separation).
 - Events Endpoint AI reports without a rule are matched to the kit's demo rules, so the rule column and the charts
   fill in; the row's detail says when the match is the kit's own.
+- **Fifteen more Endpoint AI scenes (32 in all)**, each with its own rule: a private key hard-coded in source, a
+  browser password store read, `git clean -fdx`, a dropped database table, data smuggled out in DNS lookups or by
+  email, a Kubernetes config read, a scheduled task, a hosts-file edit, malware protection switched off, a download
+  from a bare IP address, TLS checks turned off, the agent rewriting its own CLAUDE.md, secrets harvested from
+  environment variables, and instructions hidden in invisible Unicode. Same safety rules as before: decoys the kit
+  creates and puts back, or commands that are only printed. Click **Create or update** once to add the new rules to
+  an existing policy.
 
 ## 1.8.32
 - **Live feed reads every timestamp format.** Endpoint AI events whose time wasn't a plain ISO string (epoch
