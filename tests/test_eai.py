@@ -1599,8 +1599,10 @@ def test_console_shows_the_install_fix_before_anyone_clicks(eenv, tmp_path, monk
     monkeypatch.setattr(e, "user_home", lambda: home)
     monkeypatch.setattr(e, "find_claude", lambda: None)
     monkeypatch.setattr(e.os, "access", lambda p, mode: not str(p).endswith("state"))   # .local/state not writable
-    st = e.claude_status()
-    assert st["blocked"] == [str(home / ".local" / "state")] and "chown" in st["fix"] and not st["installed"]
+    for windows, tool in ((False, "chown"), (True, "icacls")):   # the fix is the platform's own command
+        monkeypatch.setattr(kit, "WINDOWS", windows)
+        st = e.claude_status()
+        assert st["blocked"] == [str(home / ".local" / "state")] and tool in st["fix"] and not st["installed"]
     monkeypatch.setattr(e.os, "access", lambda p, mode: True)
     assert e.claude_status()["blocked"] == [] and e.claude_status()["fix"] == ""
 
