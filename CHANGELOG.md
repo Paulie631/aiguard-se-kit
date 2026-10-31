@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.8.35
+- **Twelve more Endpoint AI scenes (44 in all)**, grouped under four headings: AI-specific misuse (a tool
+  description that hides instructions, exfiltrating an LLM API key, reading its own transcript), Cloud &
+  infrastructure (terraform destroy, an all-access IAM policy, a public storage bucket), Developer workflow
+  (committing a secret, editing a CI pipeline, publishing a package), and Machine & OS (reading the OS credential
+  store, capturing the screen or clipboard, opening a reverse shell). Same safety rules: decoys the kit creates, or
+  commands that are only printed. Click **Create or update** once to add the new rules.
+- **New scene picker.** Group cards with per-group All/None, a live count and Run button, quick-pick buttons (All,
+  None, One per group, Only new, Last run's blocked), each scene's current rule action (Audit / Block / Allow) and
+  its last result, and a hover note explaining why each scene is safe.
+- **Two scenes reworked so Endpoint AI stops them, not Claude Code.** "Turns off its own permission checks" now
+  writes a plain decoy file instead of Claude Code's own `.claude/settings.json`; "reads another project's files"
+  now prints the command. Both were being stopped by Claude Code's own prompts before Endpoint AI ever saw them.
+- **Live feed on the generator says so.** On a machine without the Endpoint AI credential (the traffic generator),
+  the feed now explains that events show on the laptop that holds the credential, instead of "events arrive a few
+  minutes after a scene runs" (they never arrive there).
+- **A scene that clearly ran is no longer mislabelled.** When Claude Code reports `RESULT: RAN` the kit trusts it,
+  even if the explanation mentions a permission prompt (the git clean scene was reading as a Claude Code stop).
+
 ## 1.8.34
 - **Live feed counts every event in the window.** It used to pass on only the newest 150, so after a couple of full
   scene runs the counts and charts quietly left out the older ones. Now they cover every event the kit reads (up

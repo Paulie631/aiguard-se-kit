@@ -2705,6 +2705,7 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
         FEED_RAW.pop(next(iter(FEED_RAW)))
     for i in items:
         i["has_raw"] = i["id"] in FEED_RAW
+    out["eai_connected"] = bool((cfg.get("eai") or {}).get("client_id"))   # this computer can read Endpoint AI (the laptop, not the generator)
     out.update(items=items, errors=errors, at=time.strftime("%H:%M:%S"))
     return out
 

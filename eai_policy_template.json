@@ -608,6 +608,252 @@
       "agent_message": "This action was blocked by policy: AI agents may not read secret environment variables. Do not retry it or work around it."
     },
     {
+      "id": "r-sedemo-mcp-poison",
+      "title": "Instructions hidden in a tool description",
+      "group": "Agent misuse",
+      "scene": "mcp-poison",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)ignore (all )?(previous|prior)\\s+instructions|disregard (all )?(previous|prior)\\s+instructions"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "Prompt-injection text in a tool or file",
+      "user_message": "Blocked by your organization's AI policy: a tool description or file contains instructions aimed at the agent.",
+      "agent_message": "This action was blocked by policy: a tool description or file contains instructions aimed at the agent. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-llm-key",
+      "title": "LLM API key in a tool call",
+      "group": "Secrets & data",
+      "scene": "llm-key",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bsk-ant-[a-z0-9-]{6,}|\\bsk-[a-zA-Z0-9]{32,}"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "LLM API key in a tool call",
+      "user_message": "Blocked by your organization's AI policy: this action contains an LLM API key.",
+      "agent_message": "This action was blocked by policy: this action contains an LLM API key. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-transcript",
+      "title": "Agent transcript or history read",
+      "group": "Data exfiltration",
+      "scene": "transcript-leak",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)(claude[-_]?)?(transcript|history)\\.jsonl\\b|[\\\\/]+\\.claude[\\\\/]+(history|projects)[\\\\/]"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent reading its own transcript",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read their own chat transcripts.",
+      "agent_message": "This action was blocked by policy: AI agents may not read their own chat transcripts. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-tf-destroy",
+      "title": "Terraform teardown",
+      "group": "Cloud & infrastructure",
+      "scene": "tf-destroy",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bterraform\\s+destroy\\b|\\bterraform\\s+apply\\b[^\\n]*-destroy\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent tearing down infrastructure",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not run terraform destroy.",
+      "agent_message": "This action was blocked by policy: AI agents may not run terraform destroy. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-iam-star",
+      "title": "All-access IAM policy",
+      "group": "Cloud & infrastructure",
+      "scene": "iam-star",
+      "ruleType": "data_protection",
+      "match": {
+        "all": [
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)Action[\\\\\":\\s]*\\*"
+          },
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)Resource[\\\\\":\\s]*\\*"
+          }
+        ]
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent writing an all-access IAM policy",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not grant blanket IAM access.",
+      "agent_message": "This action was blocked by policy: AI agents may not grant blanket IAM access. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-bucket-public",
+      "title": "Storage bucket made public",
+      "group": "Cloud & infrastructure",
+      "scene": "bucket-public",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)--acl\\s+public-read\\b|put-bucket-acl\\b[^\\n]*public|add-iam-policy-binding[^\\n]*allUsers|Set-AzStorageContainerAcl[^\\n]*-Permission\\s+(Blob|Container)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent exposing a storage bucket",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not make storage buckets public.",
+      "agent_message": "This action was blocked by policy: AI agents may not make storage buckets public. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-commit-secret",
+      "title": "Secret committed to git",
+      "group": "Developer workflow",
+      "scene": "commit-secret",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bgit\\s+(add|commit)\\b[^\\n]*(\\.env\\b|secret|credential|password|\\.pem\\b|id_rsa\\b|\\.p12\\b)"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent committing a secret to git",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not commit secrets to git.",
+      "agent_message": "This action was blocked by policy: AI agents may not commit secrets to git. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-ci-edit",
+      "title": "CI pipeline file changed",
+      "group": "Developer workflow",
+      "scene": "ci-edit",
+      "ruleType": "custom",
+      "match": {
+        "all": [
+          {
+            "field": "tool_name",
+            "op": "regex",
+            "value": "^(Write|Edit|MultiEdit)$"
+          },
+          {
+            "field": "tool_input",
+            "op": "regex",
+            "value": "(?i)(^|[\\s'\\\"/\\\\])\\.github[\\\\/]+workflows[\\\\/]|\\.gitlab-ci\\.yml\\b|(^|[\\s'\\\"/\\\\])\\.circleci[\\\\/]|azure-pipelines\\.yml\\b|(^|[\\s'\\\"/\\\\])Jenkinsfile\\b"
+          }
+        ]
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent editing a CI pipeline",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not change CI pipeline files.",
+      "agent_message": "This action was blocked by policy: AI agents may not change CI pipeline files. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-npm-publish",
+      "title": "Package published to a registry",
+      "group": "Developer workflow",
+      "scene": "npm-publish",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\b(npm|yarn|pnpm)\\s+publish\\b|\\btwine\\s+upload\\b|\\bgem\\s+push\\b|\\bcargo\\s+publish\\b|\\bdotnet\\s+nuget\\s+push\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent publishing a package",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not publish packages.",
+      "agent_message": "This action was blocked by policy: AI agents may not publish packages. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-keychain",
+      "title": "OS credential store read",
+      "group": "Machine & OS",
+      "scene": "keychain",
+      "ruleType": "data_protection",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bsecurity\\s+(dump-keychain|find-(generic|internet)-password)\\b|\\bcmdkey\\s+/list\\b|\\bvaultcmd\\b|[\\\\/]+login\\.keychain(-db)?\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent reading the OS credential store",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not read the OS credential store.",
+      "agent_message": "This action was blocked by policy: AI agents may not read the OS credential store. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-screencap",
+      "title": "Screen or clipboard captured",
+      "group": "Machine & OS",
+      "scene": "screencap",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)\\bscreencapture\\b|\\bpbpaste\\b|\\bGet-Clipboard\\b|CopyFromScreen\\b|\\bimport\\s+-window\\b|\\bscrot\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent capturing the screen or clipboard",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not capture the screen or clipboard.",
+      "agent_message": "This action was blocked by policy: AI agents may not capture the screen or clipboard. Do not retry it or work around it."
+    },
+    {
+      "id": "r-sedemo-reverse-shell",
+      "title": "Reverse shell",
+      "group": "Machine & OS",
+      "scene": "reverse-shell",
+      "ruleType": "custom",
+      "match": {
+        "field": "tool_input",
+        "op": "regex",
+        "value": "(?i)/dev/tcp/|\\bNet\\.Sockets\\.TCPClient\\b|\\bnc\\b[^\\n]*\\s-e\\b|\\bncat\\b[^\\n]*--exec\\b|\\bbash\\s+-i\\b"
+      },
+      "events": [
+        "PreToolUse"
+      ],
+      "verdict": "audit",
+      "reason": "AI agent opening a reverse shell",
+      "user_message": "Blocked by your organization's AI policy: AI agents may not open reverse shells.",
+      "agent_message": "This action was blocked by policy: AI agents may not open reverse shells. Do not retry it or work around it."
+    },
+    {
       "id": "r-sedemo-shell-lock",
       "title": "Shell lock: every shell command",
       "group": "Shell lock",

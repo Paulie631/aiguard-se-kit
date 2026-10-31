@@ -331,7 +331,7 @@ def test_setup_scopes_everything_to_the_generator(eenv):
     assert fake.assignments[pol["id"]] == {"device_groups": [grp["id"]]}
     assert {r["verdict"] for r in pol["rules"]} == {"audit"}  # Monitor first
     tpl = [r["id"] for r in json.loads((ROOT / "eai_policy_template.json").read_text(encoding="utf-8"))["rules"] if not r.get("optional")]
-    assert [r["id"] for r in pol["rules"]] == tpl and len(tpl) == 30
+    assert [r["id"] for r in pol["rules"]] == tpl and len(tpl) == 42
     assert all(k not in r for r in pol["rules"] for k in ("title", "group", "scene", "optional"))   # kit labels stripped
     assert all("scene" not in r and "optional" not in r for r in pol["rules"])
     assert pol["priority"] == e.PRIORITY
@@ -975,9 +975,10 @@ def test_every_scene_trips_its_own_rule_on_both_shells():
     def pats(r):
         mt = r["match"]
         return [c["value"] for c in mt["any"]] if "any" in mt else [mt["value"]]
-    assert len(m.SCENES) == 32 and len({s["id"] for s in m.SCENES}) == 32
+    assert len(m.SCENES) == 44 and len({s["id"] for s in m.SCENES}) == 44
     assert {s["group"] for s in m.SCENES} == {"Secrets & data", "Destructive actions", "Credentials & config", "Supply chain",
-                                             "Agent misuse", "Data exfiltration"}
+                                             "Agent misuse", "Data exfiltration", "Cloud & infrastructure", "Developer workflow",
+                                             "Machine & OS"}
     for s in m.SCENES:
         r = rules[s["rule"]]
         assert r["ruleType"] != "resource_control"
@@ -1005,9 +1006,14 @@ def test_rules_stay_quiet_on_ordinary_developer_work():
                                       "pip install requests", "cat app.profile.ts", "tar -czf build.tgz dist",
                                       "git reset HEAD src/app.ts", "git clean -n", "printenv PATH", "nslookup example.com",
                                       "cat config.yaml", "git config user.name dev", "crontab -l", "curl https://example.com",
-                                      "SELECT * FROM customers", "cat kube/config.md", "echo $env:PATH")]
+                                      "SELECT * FROM customers", "cat kube/config.md", "echo $env:PATH",
+                                      "terraform plan", "terraform apply", "aws s3 ls s3://bucket", "kubectl get pods",
+                                      "npm run build", "git add src/app.ts && git commit -m wip", "security find-certificate -a",
+                                      "docker run -d -p 80:80 nginx", "git commit -m 'add Action and Resource docs'")]
     harmless += [("Write", json.dumps({"file_path": "src/app.ts", "content": "import { x } from '../utils'"})),
                  ("Edit", json.dumps({"file_path": "src/app.profile.ts", "old_string": "a", "new_string": "b"})),
+                 ("Write", json.dumps({"file_path": "docs/iam.md", "content": "describe Action and Resource wildcards"})),
+                 ("Write", json.dumps({"file_path": "src/deploy.ts", "content": "// deploy to github pages"})),
                  ("Bash", json.dumps({"command": "Get-ChildItem ..\\docs"}))]
     for r in rules:
         if r.get("optional"):
@@ -1213,7 +1219,7 @@ def test_console_actions_job(eenv):
     job = {}
     assert e.api_job("/api/eai/actions", {"actions": {"r-sedemo-pii": "block"}}, kit.load_cfg(), tenant, log_into([]), job)
     st = e.public_state(kit.load_cfg())
-    assert st["actions"]["r-sedemo-pii"] == "block" and len(st["rules"]) == 31 and [p["id"] for p in st["presets"]] == list(e.PRESETS)
+    assert st["actions"]["r-sedemo-pii"] == "block" and len(st["rules"]) == 43 and [p["id"] for p in st["presets"]] == list(e.PRESETS)
     assert {s["group"] for s in st["scenes"]} >= {"Data exfiltration", "Supply chain", "Agent misuse", "Credentials & config"}
 
 
@@ -1451,3 +1457,54 @@ def test_raw_cache_stays_bounded(eenv, monkeypatch):
     out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     assert len(kit.FEED_RAW) == 50 and len(out["items"]) == 120
     assert kit.feed_raw(out["items"][0]["id"])   # the newest are the ones kept
+
+
+def test_reworked_scenes_are_printed_or_decoy_not_claude_code_gated():
+    """bypass writes to a plain decoy file (not Claude Code's own .claude/settings.json) and outside only prints,
+    so Endpoint AI is what stops them, not a Claude Code permission prompt."""
+    spec = importlib.util.spec_from_file_location("eai_rw", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    byp = next(s for s in m.SCENES if s["id"] == "bypass")
+    assert byp["write"][0] == "decoy-project/agent-settings.json" and ".claude/settings.json" not in byp["write"][0]
+    out = next(s for s in m.SCENES if s["id"] == "outside")
+    assert out["posix"].startswith("echo ") and out["win"].startswith("Write-Output ") and "eai-other-project" in out["posix"]
+
+
+def test_new_scenes_are_flagged_and_carry_rule_and_note(eenv):
+    kit, e, _ = eenv("eai")
+    st = e.public_state(kit.load_cfg())
+    byid = {s["id"]: s for s in st["scenes"]}
+    for sid in ("mcp-poison", "reverse-shell", "iam-star", "commit-secret", "keychain"):
+        assert byid[sid]["new"] and byid[sid]["rule"] and byid[sid]["why"], sid
+    assert sum(1 for s in st["scenes"] if s["new"]) == 12
+    assert not byid["secret"]["new"]   # an original scene isn't flagged new
+
+
+def test_demo_records_each_scenes_last_outcome(eenv, monkeypatch):
+    kit, e, fake = eenv("eai")
+    cfg = kit.load_cfg(); cfg["eai"].pop("client_id", None); kit.save_cfg(cfg)   # a generator (no credential)
+    def runner(cmd, cwd, env, **kw):
+        txt = "RESULT: BLOCKED a PreToolUse policy hook stopped it" if "reqeusts" not in " ".join(cmd) else "RESULT: RAN printed it"
+        return e.subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"result": txt}), stderr="")
+    monkeypatch.setattr(e, "find_claude", lambda: "claude")
+    e.demo(log_into([]), scenes=["secret", "typosquat"], runner=runner, cfg=kit.load_cfg())
+    lr = (kit.load_cfg()["eai"].get("last_run") or {}).get("results") or {}
+    assert lr["secret"] == "blocked" and lr["typosquat"] == "ran"
+    assert e.public_state(kit.load_cfg())["last_run"]["results"]["secret"] == "blocked"
+
+
+def test_git_clean_style_answer_counts_as_ran():
+    spec = importlib.util.spec_from_file_location("eai_oc", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    t = "RESULT: RAN The command ran and removed only the untracked scratch file; it asked for no further permission."
+    assert m.outcome(t, 0) == "ran"
+    assert m.outcome("RESULT: BLOCKED the write needs approval / permission to use the tool", 0) == "needs-approval"
+
+
+def test_feed_flags_whether_this_computer_has_endpoint_ai(eenv):
+    kit, e, _ = eenv("eai")
+    out = kit.feed(kit.load_cfg(), ("eai", "aiguard"), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert out["eai_connected"] is True            # the fixture has a client_id
+    cfg = kit.load_cfg(); cfg["eai"].pop("client_id"); kit.save_cfg(cfg)
+    out = kit.feed(kit.load_cfg(), ("eai", "aiguard"), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert out["eai_connected"] is False           # the generator has none
