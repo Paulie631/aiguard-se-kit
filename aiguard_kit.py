@@ -2651,6 +2651,7 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
                                       filter(None, [*(i.get("patterns") or []), *(i.get("owasp") or []), *(i.get("mitre") or [])])),
                                   "tool": i.get("tool"), "demo": i.get("demo"),
                                   "rule": i.get("rule_title") or i.get("rule") or "", "group": i.get("rule_group") or "",
+                                  "rule_by": i.get("rule_by") or "",
                                   "reason": i.get("reason") or "",
                                   "message": i.get("message") or "", "session": i.get("session") or "",
                                   "event_type": i.get("event_type") or "", "user": i.get("user") or "", "host": i.get("host") or "",

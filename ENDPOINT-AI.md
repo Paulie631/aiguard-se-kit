@@ -136,6 +136,15 @@ before it runs and tells the agent why.
   serial, session and the raw event. **Sessions** groups events by Claude session with the prompt that started it.
   **Demo events only** hides everything else. AI Guard events this computer sent are merged in on the same clock;
   ZIA shows the Insights summary (about 2 days behind, as ZIA has no near-live log API).
+- **Charts on the live feed**, refreshed with it. Always shown: **Blocked vs audited over time** (stacked per
+  minute, 5 minutes or hour; switch Monitor to Block and watch amber turn red) and **Risk categories** (what the
+  agent attempted by scene group, blocked vs audited). Under **More charts**: **OWASP Agentic and MITRE ATLAS**
+  coverage, **Rules that fired** (coloured by each rule's current action), **What the agent used** (tool calls by
+  tool), **AI Guard next to Endpoint AI** (prompts stopped at the model vs actions stopped on the machine), and a
+  **Session timeline** (one lane per Claude session, one dot per action). Blocked, audited and allowed always come
+  with a legend and icons, and the event table below holds every value. When Endpoint AI doesn't name the rule an
+  event matched, the kit checks the event against its own demo rules; the row's detail says when the match is the
+  kit's.
 - **Guided demo storyline "AI agents on the endpoint"**: five steps with a talk track. Each step switches the
   Endpoint AI policy for you, one risk at a time: Monitor, Monitor, Block secrets & data theft, Block everything,
   then back to Monitor. The live feed sits beside each step.

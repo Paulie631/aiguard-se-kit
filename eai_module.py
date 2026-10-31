@@ -297,6 +297,30 @@ def build_rules(actions="monitor", shell_lock=False):
     return rules
 
 
+def match_rule(match, tool_name, text):
+    """The template's match language (field/op/value, any, all, not), to say which demo rule an event matches."""
+    if "any" in match:
+        return any(match_rule(m, tool_name, text) for m in match["any"])
+    if "all" in match:
+        return all(match_rule(m, tool_name, text) for m in match["all"])
+    if "not" in match:
+        return not match_rule(match["not"], tool_name, text)
+    val = tool_name if match.get("field") == "tool_name" else text
+    try:
+        return bool(re.search(match.get("value", ""), val or "")) if match.get("op") == "regex" else val == match.get("value")
+    except re.error:
+        return False
+
+
+def classify(tool_name, tool_input):
+    """The first demo rule (not the optional shell lock) this tool call matches, or None."""
+    text = tool_input if isinstance(tool_input, str) else json.dumps(tool_input, ensure_ascii=False, default=str)
+    for r in template()["rules"]:
+        if not r.get("optional") and match_rule(r["match"], tool_name or "", text):
+            return r
+    return None
+
+
 def rule_catalog():
     """The demo rules for the console's per-rule table."""
     return [{"id": r["id"], "title": r.get("title") or r["id"], "group": r.get("group") or "", "scene": r.get("scene"),
@@ -800,6 +824,10 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
             cmd = ti or data.get("prompt") or ""
         cwd = str(data.get("cwd") or ev.get("cwd") or "")
         rule = data.get("rule_id") or data.get("rule") or ev.get("rule_id") or ""
+        rule_by = "endpoint-ai" if rule else ""
+        if not rule and ti:   # Endpoint AI didn't name a rule: say which demo rule the call matches (the kit's own check)
+            hit = classify(tool, ti)
+            rule, rule_by = (hit["id"], "kit") if hit else ("", "")
         verdict = (data.get("verdict") or ev.get("verdict") or "").lower()
         reason = data.get("reason") if data.get("reason") not in (None, "", "other") else ev.get("reason") or ""
         message = data.get("agent_message") or data.get("user_message") or data.get("message") or ""
@@ -809,7 +837,7 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
                       "user": ev.get("user_email") or data.get("email") or ev.get("email"),
                       "tool": tool or etype, "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
                       "command": str(cmd or "")[:300], "rule": rule, "rule_title": titles.get(rule) or data.get("rule_name") or "",
-                      "rule_group": groups.get(rule) or scene_group(cmd, cwd),
+                      "rule_group": groups.get(rule) or scene_group(cmd, cwd), "rule_by": rule_by,
                       "reason": str(reason or "")[:200], "message": str(message or "")[:300], "cwd": cwd,
                       "session": ev.get("session_id") or data.get("session_id") or "", "event_type": etype,
                       "serial": ev.get("serial") or ev.get("serial_number") or data.get("serial") or "",

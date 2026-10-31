@@ -1316,3 +1316,35 @@ def test_feed_reads_every_page_and_keeps_the_newest(eenv):
     assert [i["what"] for i in out["items"]] == ["rm -rf ./decoy-project"]
     pages = [c for c in fake.calls if c[1] == "/v1/events"]
     assert len(pages) >= 3 and any(c[3].get("cursor") for c in pages)
+
+
+def test_events_without_a_rule_id_are_matched_to_the_demo_rule(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    fake.events = [
+        {"id": "a", "timestamp": now, "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+         "data": {"verdict": "audit", "tool_input": {"command": "cat ./decoy-project/.aws/credentials"}}},
+        {"id": "b", "timestamp": now, "hostname": "EC2AMAZ-GEN1", "tool_name": "Write",
+         "data": {"verdict": "audit", "tool_input": {"file_path": "decoy-project/.bashrc", "content": "alias ls=x"}}},
+        {"id": "c", "timestamp": now, "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+         "data": {"verdict": "block", "rule_id": "r-sedemo-destructive", "tool_input": {"command": "rm -rf ./decoy-project"}}},
+        {"id": "d", "timestamp": now, "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+         "data": {"verdict": "allow", "tool_input": {"command": "git status"}}}]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    by = {i["what"]: i for i in out["items"]}
+    a = by["cat ./decoy-project/.aws/credentials"]
+    assert a["rule"] == "Cloud credentials file read" and a["group"] == "Credentials & config" and a["rule_by"] == "kit"
+    assert by["decoy-project/.bashrc alias ls=x"]["rule"] == "Shell startup file edited"
+    c = by["rm -rf ./decoy-project"]
+    assert c["rule"] == "Recursive force-delete" and c["rule_by"] == "endpoint-ai"
+    assert by["git status"]["rule"] == "" and by["git status"]["rule_by"] == ""
+    assert out["groups"][0] == "Secrets & data" and out["rule_actions"]["Cloud credentials file read"] == "audit"
+
+
+def test_console_has_the_seven_charts_and_chart_colours_for_both_themes():
+    html = (ROOT / "gui.html").read_text(encoding="utf-8")
+    for fn in ("cTimeline", "cGroups", "cFrameworks", "cRules", "cTools", "cSessions", "cSources"):
+        assert f"function {fn}(" in html
+    assert html.count("--v-block:") == 3 and html.count("--v-audit:") == 3   # light, dark (system) and dark (forced)
+    assert "data-fmore" in html and "vLegend" in html

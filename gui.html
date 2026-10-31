@@ -8,17 +8,17 @@
 :root{
   --bg:#f6f7f9;--panel:#fff;--ink:#14171c;--muted:#5d6673;--line:#e3e6eb;--soft:#eef1f5;
   --accent:#1f5eff;--accent-ink:#fff;--ok:#127a3e;--ok-bg:#e3f4ea;--warn:#9a5b00;--warn-bg:#fdf1dc;
-  --bad:#b42318;--bad-bg:#fde8e6;--chip:#eef2ff;--chip-ink:#2a3f99;
+  --v-block:#b42318;--v-audit:#d19a00;--v-allow:#7d8696;--bad:#b42318;--bad-bg:#fde8e6;--chip:#eef2ff;--chip-ink:#2a3f99;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0f1115;--panel:#171a20;--ink:#e8eaee;--muted:#9aa3b0;--line:#2a2f38;--soft:#1f232b;
   --accent:#5b8cff;--accent-ink:#0b0d12;--ok:#4cc77f;--ok-bg:#16301f;--warn:#e6a23c;--warn-bg:#33270f;
-  --bad:#ff7a6e;--bad-bg:#3a1714;--chip:#1e2747;--chip-ink:#a9bcff;}}
+  --v-block:#e5534b;--v-audit:#c9a227;--v-allow:#7d8696;--bad:#ff7a6e;--bad-bg:#3a1714;--chip:#1e2747;--chip-ink:#a9bcff;}}
 :root[data-theme="dark"]{
   --bg:#0f1115;--panel:#171a20;--ink:#e8eaee;--muted:#9aa3b0;--line:#2a2f38;--soft:#1f232b;
   --accent:#5b8cff;--accent-ink:#0b0d12;--ok:#4cc77f;--ok-bg:#16301f;--warn:#e6a23c;--warn-bg:#33270f;
-  --bad:#ff7a6e;--bad-bg:#3a1714;--chip:#1e2747;--chip-ink:#a9bcff;}
+  --v-block:#e5534b;--v-audit:#c9a227;--v-allow:#7d8696;--bad:#ff7a6e;--bad-bg:#3a1714;--chip:#1e2747;--chip-ink:#a9bcff;}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
 header{display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
@@ -180,6 +180,14 @@ details.how ul{margin:0;padding-left:18px}details.how code{font:12px var(--mono)
 @media (max-width:900px){main,.demo{grid-template-columns:1fr;padding:16px}.wrap{padding:16px}aside.panel{position:static;max-height:none}header{padding:12px 16px}nav.tabs{padding:0 12px;top:0;position:static}.stage{padding:18px}}
 @keyframes feedflash{from{background:rgba(255,196,0,.35)}to{background:transparent}}
 tr.feednew td{animation:feedflash 4s ease-out}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:12px;margin-top:10px}
+.fchart{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel)}
+.fchart h4{margin:0 0 2px;font-size:13px}.fchart .sub{color:var(--muted);font-size:12px;margin-bottom:6px}
+.fchart svg{display:block;width:100%;height:auto;overflow:visible}.fchart svg text{fill:var(--muted);font-size:11px}
+.fchart svg text.v{fill:var(--ink)}.fchart .grid{stroke:var(--line);stroke-width:1}
+.clegend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--ink);margin-top:4px}.clegend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.ftip{position:fixed;z-index:50;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 8px;border-radius:6px;max-width:340px;display:none;white-space:pre-line}
+.fchips{display:flex;flex-wrap:wrap;gap:6px}.fchips span{border-radius:6px;padding:4px 8px;font-size:12px;color:var(--ink);border:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -1342,6 +1350,73 @@ $("#ziatd").onclick=()=>{if($("#ziatdc").value!="DELETE")return alert("Type DELE
 
 /* ---------- live feed (Endpoint AI, AI Guard, ZIA) ---------- */
 const FEEDSRC={eai:"Endpoint AI",aiguard:"AI Guard",zia:"ZIA"};
+/* ---------- live feed charts: verdict colours are the console's status tokens, always with icon + label ---------- */
+const VK=v=>/block|deny/.test(v||"")?"block":v=="audit"?"audit":"allow";
+// chart-only verdict colours (--v-*), checked for colour-blind and normal-vision separation in light and dark
+const VC={block:"var(--v-block)",audit:"var(--v-audit)",allow:"var(--v-allow)"}, VL={block:"✕ Blocked",audit:"! Audited (ran, recorded)",allow:"✓ Allowed / no rule"};
+const vLegend=(keys=["block","audit","allow"])=>`<div class="clegend">${keys.map(k=>`<span><i style="background:${VC[k]}"></i>${VL[k]}</span>`).join("")}</div>`;
+const tipAttr=t=>`data-tip="${esc(t)}"`;
+let FTIP=null;
+function ensureTip(){if(FTIP)return;FTIP=document.createElement("div");FTIP.className="ftip";document.body.appendChild(FTIP);
+  document.addEventListener("mouseover",e=>{const t=e.target.closest&&e.target.closest("[data-tip]");if(!t){FTIP.style.display="none";return}FTIP.textContent=t.dataset.tip;FTIP.style.display="block"});
+  document.addEventListener("mousemove",e=>{if(FTIP.style.display=="block"){FTIP.style.left=Math.min(e.clientX+14,innerWidth-360)+"px";FTIP.style.top=(e.clientY+14)+"px"}})}
+function roundTop(x,y,w,h,r){r=Math.min(r,w/2,h);return h<=0?"":`M${x},${y+h}V${y+r}Q${x},${y} ${x+r},${y}H${x+w-r}Q${x+w},${y} ${x+w},${y+r}V${y+h}Z`}
+function roundRight(x,y,w,h,r){r=Math.min(r,h/2,w);return w<=0?"":`M${x},${y}H${x+w-r}Q${x+w},${y} ${x+w},${y+r}V${y+h-r}Q${x+w},${y+h} ${x+w-r},${y+h}H${x}Z`}
+function niceMax(n){if(n<=4)return Math.max(n,1);const p=Math.pow(10,Math.floor(Math.log10(n)));return Math.ceil(n/p*2)/2*p}
+function buckets(min){const size=min<=15?1:min<=60?5:60,n=Math.ceil(min/size),end=Date.now(),start=end-n*size*60000;return{size,n,start,end}}
+const tlabel=ms=>new Date(ms).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+function cTimeline(items,min){const B=buckets(min),W=600,H=170,L=30,Bm=22,cw=(W-L)/B.n,bw=Math.min(24,cw*.62);
+  const cols=[...Array(B.n)].map(()=>({block:0,audit:0,allow:0}));
+  items.forEach(i=>{const t=Date.parse(i.time);if(isNaN(t))return;const k=Math.floor((t-B.start)/(B.size*60000));if(k>=0&&k<B.n)cols[k][VK(i.verdict)]++});
+  const mx=niceMax(Math.max(1,...cols.map(c=>c.block+c.audit+c.allow))),sy=v=>(H-Bm)*v/mx;
+  let g=[0,mx/2,mx].map(v=>`<line class="grid" x1="${L}" x2="${W}" y1="${H-Bm-sy(v)}" y2="${H-Bm-sy(v)}"/><text x="${L-6}" y="${H-Bm-sy(v)+4}" text-anchor="end">${Math.round(v)}</text>`).join("");
+  cols.forEach((c,k)=>{const x=L+k*cw+(cw-bw)/2;let y=H-Bm;const order=["block","audit","allow"].filter(v=>c[v]);
+    order.forEach((v,j)=>{const h=sy(c[v]),gap=j?2:0;y-=h;const top=j==order.length-1;
+      g+=top?`<path d="${roundTop(x,y,bw,h-gap,4)}" fill="${VC[v]}"/>`:`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(0,h-gap)}" fill="${VC[v]}"/>`});
+    const t0=B.start+k*B.size*60000;g+=`<rect x="${L+k*cw}" y="0" width="${cw}" height="${H-Bm}" fill="transparent" ${tipAttr(`${tlabel(t0)}–${tlabel(t0+B.size*60000)}\n${c.block} blocked · ${c.audit} audited · ${c.allow} allowed`)}/>`});
+  [0,Math.floor(B.n/2),B.n-1].forEach(k=>g+=`<text x="${L+k*cw+cw/2}" y="${H-6}" text-anchor="middle">${tlabel(B.start+k*B.size*60000)}</text>`);
+  return `<h4>Blocked vs audited over time</h4><div class="sub">${B.size==60?"Per hour":`Per ${B.size} minute${B.size>1?"s":""}`} · switch Monitor to Block and watch amber turn red</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Events per interval by verdict">${g}</svg>${vLegend()}`}
+function hbars(rows,labelW){   // rows: {label, segs:[{v,k|color}], value, tip}; HTML so text stays readable at any width
+  const mx=Math.max(1,...rows.map(r=>r.segs.reduce((a,x)=>a+x.v,0)));
+  return `<div style="display:grid;grid-template-columns:${labelW}px 1fr;gap:6px 10px;align-items:center;font-size:12px">${rows.map(r=>{const t=r.segs.reduce((a,x)=>a+x.v,0),segs=r.segs.filter(x=>x.v);
+    return `<div style="text-align:right;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.label)}">${esc(r.label)}</div>
+    <div style="display:flex;align-items:center;gap:6px;min-width:0" ${tipAttr(r.tip)}><div style="display:flex;gap:2px;width:${(80*t/mx).toFixed(1)}%;height:14px">${segs.map((x,j)=>`<span style="flex:${x.v};background:${x.color||VC[x.k]};border-radius:${j==segs.length-1?"0 4px 4px 0":"0"}"></span>`).join("")}</div><span style="color:var(--ink);white-space:nowrap">${r.value}</span></div>`}).join("")}</div>`}
+function cGroups(items,r){const groups=(r.groups&&r.groups.length?r.groups:[...new Set(items.map(i=>i.group).filter(Boolean))]);
+  if(!groups.length)return `<h4>Risk categories</h4><div class="sub">No Endpoint AI events in this window.</div>`;
+  const rows=groups.map(g=>{const c={block:0,audit:0,allow:0};items.filter(i=>i.group==g).forEach(i=>c[VK(i.verdict)]++);const t=c.block+c.audit+c.allow;
+    return{label:g,segs:["block","audit","allow"].map(k=>({k,v:c[k]})),value:t||"–",tip:`${g}\n${c.block} blocked · ${c.audit} audited · ${c.allow} allowed`}});
+  return `<h4>Risk categories</h4><div class="sub">What the agent attempted, by scene group · a dash means not attempted in this window</div>${hbars(rows,150)}${vLegend()}`}
+function cRules(items,r){const acts=r.rule_actions||{},c={};items.forEach(i=>{if(i.rule)c[i.rule]=(c[i.rule]||0)+1});const e=Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if(!e.length)return `<h4>Rules that fired</h4><div class="sub">No demo rule matched in this window.</div>`;
+  const rows=e.map(([k,n])=>{const a=["block","audit","allow"].includes(acts[k])?acts[k]:"audit";
+    return{label:k,segs:[{k:a,v:n}],value:`${n} · ${a=="block"?"✕ block":a=="allow"?"✓ allow":"! audit"}`,tip:`${k}\n${n} event${n>1?"s":""} · rule set to ${a}`}});
+  return `<h4>Rules that fired</h4><div class="sub">Hits per demo rule, coloured by its current action (change it under Per-rule actions)</div>${hbars(rows,170)}${vLegend()}`}
+function cTools(items){const c={};items.filter(i=>i.source=="eai"&&i.tool&&!/UserPromptSubmit/i.test(i.tool)).forEach(i=>c[i.tool]=(c[i.tool]||0)+1);const e=Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  if(!e.length)return `<h4>What the agent used</h4><div class="sub">No tool calls in this window.</div>`;
+  return `<h4>What the agent used</h4><div class="sub">Tool calls by tool · agents act through ordinary tools, which is why tool-level policy matters</div>${hbars(e.map(([k,n])=>({label:k,segs:[{color:"var(--accent)",v:n}],value:n,tip:`${k}: ${n} call${n>1?"s":""}`})),90)}`}
+function cFrameworks(items){const row=(name,key)=>{const c={};items.forEach(i=>(i[key]||[]).forEach(x=>c[x]=(c[x]||0)+1));const e=Object.entries(c).sort((a,b)=>b[1]-a[1]),mx=Math.max(1,...e.map(x=>x[1]));
+    return `<div style="margin:6px 0 2px;font-size:12px" class="muted">${name}</div>`+(e.length?`<div class="fchips">${e.map(([k,n])=>`<span style="background:color-mix(in srgb,var(--accent) ${Math.round(12+60*n/mx)}%,transparent)" ${tipAttr(`${k}: ${n} event${n>1?"s":""}`)}>${esc(k)} <b>${n}</b></span>`).join("")}</div>`:`<div class="muted" style="font-size:12px">None in this window.</div>`)};
+  return `<h4>OWASP Agentic and MITRE ATLAS</h4><div class="sub">Framework codes Endpoint AI tagged · darker means more events</div>${row("OWASP Top 10 for Agentic Applications","owasp")}${row("MITRE ATLAS","mitre")}`}
+
+
+function cSessions(items,min){const S={};items.filter(i=>i.session).forEach(i=>(S[i.session]=S[i.session]||[]).push(i));
+  const ses=Object.entries(S).sort((a,b)=>String(b[1][0].time).localeCompare(String(a[1][0].time))).slice(0,8);
+  if(!ses.length)return `<h4>Session timeline</h4><div class="sub">No agent sessions in this window.</div>`;
+  const B=buckets(min),W=1000,L=170,rh=30,H=ses.length*rh+22,sx=t=>L+(W-L-10)*(t-B.start)/(B.end-B.start);let g="";
+  ses.forEach(([sid,list],j)=>{const y=j*rh+14;g+=`<line class="grid" x1="${L}" x2="${W-10}" y1="${y}" y2="${y}"/><text class="v" x="${L-8}" y="${y+4}" text-anchor="end">${esc((list[0].host||"").split(".")[0])} · ${esc(sid.slice(0,8))}</text>`;
+    list.forEach(i=>{const t=Date.parse(i.time);if(isNaN(t))return;const v=VK(i.verdict);g+=`<circle cx="${sx(t)}" cy="${y}" r="5" fill="${VC[v]}" stroke="var(--panel)" stroke-width="2" ${tipAttr(`${new Date(t).toLocaleTimeString()} · ${i.tool||""} · ${v}\n${String(i.what||"").slice(0,160)}`)}/>`})});
+  [0,.5,1].forEach(f=>{const t=B.start+(B.end-B.start)*f;g+=`<text x="${sx(t)}" y="${H-2}" text-anchor="middle">${tlabel(t)}</text>`});
+  return `<h4>Session timeline</h4><div class="sub">One lane per Claude session (newest 8), one dot per action · follow a session from prompt to blocked action</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Actions per session over time">${g}</svg>${vLegend()}`}
+function cSources(items,min){const B=buckets(min),panel=(src,name,what)=>{const list=items.filter(i=>i.source==src),bl=list.filter(i=>VK(i.verdict)=="block").length;
+    const cnt=[...Array(B.n)].map(()=>0);list.forEach(i=>{const k=Math.floor((Date.parse(i.time)-B.start)/(B.size*60000));if(k>=0&&k<B.n)cnt[k]++});
+    const W=260,H=44,mx=Math.max(1,...cnt),pts=cnt.map((c,k)=>`${(W*(k+.5)/B.n).toFixed(1)},${(H-2-(H-6)*c/mx).toFixed(1)}`).join(" ");
+    return `<div style="flex:1;min-width:200px"><div style="font-size:12px" class="muted">${name}</div><div style="font-size:22px;font-weight:700">${bl} <span style="font-size:12px;font-weight:400" class="muted">blocked of ${list.length} ${what}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:44px" role="img" aria-label="${name} events over time"><polyline vector-effect="non-scaling-stroke" points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></div>`};
+  return `<h4>AI Guard next to Endpoint AI</h4><div class="sub">Prompts stopped at the model, and actions stopped on the machine</div><div class="row" style="gap:16px;flex-wrap:wrap">${panel("aiguard","AI Guard (prompts this computer sent)","prompts")}${panel("eai","Endpoint AI (agent actions on the generator)","events")}</div>`}
+function drawCharts(el,items,r,min){ensureTip();const q=x=>el.querySelector(x),eai=items.filter(i=>i.source=="eai");
+  q("[data-c1]").innerHTML=cTimeline(items,min);q("[data-c2]").innerHTML=cGroups(eai,r);
+  if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c5]").innerHTML=cTools(items);
+    q("[data-c6]").innerHTML=cSessions(eai,min);q("[data-c7]").innerHTML=cSources(items,min)}}
 function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
   const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null,
     view:"events",demoOnly:false,open:new Set(),last:null};
@@ -1352,12 +1427,16 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     <label class="chk" style="margin:0"><input type="checkbox" data-fd>Demo events only</label>
     <button data-fp>Pause</button><span class="muted" data-fstat style="font-size:12px"></span></div>
     <div data-ftiles class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"></div>
+    <div class="fgrid"><div class="fchart" data-c1></div><div class="fchart" data-c2></div></div>
+    <details data-fmore style="margin-top:10px"><summary style="cursor:pointer"><b>More charts</b> <span class="muted" style="font-size:12.5px">· frameworks, rules, tools, sessions, AI Guard next to Endpoint AI</span></summary>
+      <div class="fgrid"><div class="fchart" data-c3></div><div class="fchart" data-c4></div><div class="fchart" data-c5></div><div class="fchart" data-c7></div><div class="fchart" data-c6 style="grid-column:1/-1"></div></div></details>
     <div data-fzia style="margin-top:8px"></div><div data-fbody style="margin-top:8px"></div>`;
   const q=x=>el.querySelector(x);
   el.querySelectorAll("[data-fs]").forEach(c=>c.onchange=()=>{st.src=[...el.querySelectorAll("[data-fs]")].filter(x=>x.checked).map(x=>x.dataset.fs);tick(true)});
   q("[data-fm]").onchange=()=>{st.min=+q("[data-fm]").value;tick(true)};
   el.querySelectorAll("[data-fv]").forEach(b=>b.onclick=()=>{st.view=b.dataset.fv;el.querySelectorAll("[data-fv]").forEach(x=>x.classList.toggle("on",x===b));st.last&&draw(st.last)});
   q("[data-fd]").onchange=()=>{st.demoOnly=q("[data-fd]").checked;st.last&&draw(st.last)};
+  q("[data-fmore]").addEventListener("toggle",()=>{st.last&&draw(st.last)});
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
   el.addEventListener("click",ev=>{const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
     const k=r.dataset.fid;st.open.has(k)?st.open.delete(k):st.open.add(k);st.last&&draw(st.last)});
@@ -1369,7 +1448,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
   const verdictCell=v=>`<span class="ic ${bad(v)?"fail":warn(v)?"warn":"ok"}">${bad(v)?ICON.fail:warn(v)?ICON.warn:ICON.ok}</span> ${esc(v||"")}`;
   const tile=(n,l,c)=>`<div class="panel" style="padding:8px 14px;min-width:110px;margin:0"><div style="font-size:22px;font-weight:700${c?";color:var(--"+c+")":""}">${n}</div><div class="muted" style="font-size:12px">${l}</div></div>`;
   function topOf(list){const c={};list.forEach(x=>{if(x)c[x]=(c[x]||0)+1});return Object.entries(c).sort((a,b)=>b[1]-a[1])}
-  function detail(i){const rows=[["Rule",i.rule],["Reason",i.reason],["Message to the agent",i.message],["Event",i.event_type],["Host",i.host],["User",i.user],
+  function detail(i){const rows=[["Rule",i.rule?(i.rule+(i.rule_by=="kit"?" (matched by the kit; Endpoint AI didn't name a rule)":"")):""],["Reason",i.reason],["Message to the agent",i.message],["Event",i.event_type],["Host",i.host],["User",i.user],
       ["Working folder",i.cwd],["Serial",i.serial],["Session",i.session],["Patterns",(i.patterns||[]).join(", ")],["OWASP",(i.owasp||[]).join(", ")],["MITRE ATLAS",(i.mitre||[]).join(", ")]].filter(([,v])=>v);
     return `<tr class="feeddetail"><td colspan="7" style="background:var(--panel2,rgba(0,0,0,.03))"><div style="display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:12.5px">${rows.map(([k,v])=>`<span class="muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>
       ${i.raw?`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Raw event</summary><pre style="white-space:pre-wrap;font-size:11.5px;max-height:30vh;overflow:auto">${esc((()=>{try{return JSON.stringify(JSON.parse(i.raw),null,2)}catch(e){return i.raw}})())}</pre></details>`:""}</td></tr>`}
@@ -1385,6 +1464,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     q("[data-ftiles]").innerHTML=tile(items.length,"events")+tile(items.filter(i=>bad(i.verdict)).length,"blocked","bad")+tile(items.filter(i=>warn(i.verdict)).length,"audited (ran, recorded)","warn")
       +tile(items.filter(i=>i.demo).length,"from the demo scenes")+tile(new Set(items.map(i=>i.session).filter(Boolean)).size,"agent sessions")
       +(tp.length?`<div class="panel" style="padding:8px 14px;margin:0;max-width:420px"><div class="muted" style="font-size:12px">Top risk patterns</div><div style="font-size:12.5px">${tp.slice(0,3).map(([k,n])=>`${esc(k)} <b>${n}</b>`).join(" · ")}</div>${to.length||tm.length?`<div class="muted" style="font-size:12px;margin-top:4px">${to.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}${to.length&&tm.length?" · ":""}${tm.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}</div>`:""}</div>`:"");
+    drawCharts(el,items,r,st.min);
     if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}
     const head=`<tr><th>Time</th><th>Source</th><th>Verdict</th><th>Rule</th><th>Where / who</th><th>What</th><th>Detections</th></tr>`;
     let body;

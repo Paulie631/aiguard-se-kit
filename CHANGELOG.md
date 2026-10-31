@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.33
+- **Seven charts on the live feed.** Blocked vs audited over time and Risk categories sit above the event table;
+  More charts holds OWASP Agentic / MITRE ATLAS coverage, Rules that fired (coloured by each rule's action), What
+  the agent used, AI Guard next to Endpoint AI, and a Session timeline. All refresh with the feed, have hover
+  details and a legend, and work in light and dark mode (verdict colours checked for colour-blind separation).
+- Events Endpoint AI reports without a rule are matched to the kit's demo rules, so the rule column and the charts
+  fill in; the row's detail says when the match is the kit's own.
+
 ## 1.8.32
 - **Live feed reads every timestamp format.** Endpoint AI events whose time wasn't a plain ISO string (epoch
   milliseconds, offsets, long fractions) could be dropped by the feed's time window even though setup counted them.
