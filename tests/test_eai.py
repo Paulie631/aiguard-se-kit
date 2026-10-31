@@ -163,7 +163,13 @@ class FakeEai:
                 return Resp(204)
         if path == "/v1/events":
             hosts = set(filter(None, (q.get("ef_host") or "").split(",")))
-            return Resp(200, {"items": [ev for ev in self.events if not hosts or ev.get("hostname") in hosts], "next_cursor": ""})
+            evs = [ev for ev in self.events if not hosts or ev.get("hostname") in hosts]
+            if getattr(self, "page_events", 0):   # like a cursor-paged API returning oldest first
+                start = int(q.get("cursor") or 0)
+                n = min(int(q.get("limit") or 50), self.page_events)
+                page = evs[start:start + n]
+                return Resp(200, {"items": page, "next_cursor": str(start + n) if start + n < len(evs) else ""})
+            return Resp(200, {"items": evs, "next_cursor": ""})
         if path == "/v1/events/counts":
             return Resp(200, {"events": len(self.events), "sessions": 1, "tool_calls": len(self.events)})
         if path == "/v1/reports" and method == "POST":
@@ -1269,3 +1275,44 @@ def test_status_keeps_the_mode_when_rules_come_back_without_ids(eenv):
         r.pop("id")
     e.status(e.connect(kit.load_cfg()), kit.load_cfg())
     assert kit.load_cfg()["eai"]["state"]["mode"] == "block"
+
+
+def test_timestamps_in_any_format_reach_the_feed(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.time()
+    fmts = [int(now * 1000) - 60000, int(now) - 120,
+            time.strftime("%Y-%m-%dT%H:%M:%S.123456789+00:00", time.gmtime(now - 180)),
+            time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 240)), "not a time"]
+    fake.events = [{"id": f"t{i}", "timestamp": ts, "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+                    "data": {"verdict": "audit", "tool_input": {"command": "rm -rf ./decoy-project"}}} for i, ts in enumerate(fmts)]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert len(out["items"]) == 5
+    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", i["time"]) for i in out["items"][:4])
+
+
+def test_empty_window_points_to_older_events(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.events = [{"id": "old", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 3600)),
+                    "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash", "data": {"verdict": "audit", "tool_input": {"command": "rm -rf ./decoy-project"}}}]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert not out["items"] and "1 events in the last 24 hours" in out["notes"]["eai"] and "Last 24 hours" in out["notes"]["eai"]
+
+
+
+def test_feed_reads_every_page_and_keeps_the_newest(eenv):
+    """One scene run logs >100 events; an oldest-first API page of 100 used to hide the last 15 minutes."""
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.time()
+    fake.page_events = 100
+    fake.events = [{"id": f"o{i}", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3000 + i)),
+                    "hostname": "EC2AMAZ-GEN1", "tool_name": "Read", "data": {"verdict": "allow"}} for i in range(250)]
+    fake.events.append({"id": "new", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)),
+                        "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+                        "data": {"verdict": "block", "tool_input": {"command": "rm -rf ./decoy-project"}}})
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=15, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert [i["what"] for i in out["items"]] == ["rm -rf ./decoy-project"]
+    pages = [c for c in fake.calls if c[1] == "/v1/events"]
+    assert len(pages) >= 3 and any(c[3].get("cursor") for c in pages)

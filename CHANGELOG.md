@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.32
+- **Live feed reads every timestamp format.** Endpoint AI events whose time wasn't a plain ISO string (epoch
+  milliseconds, offsets, long fractions) could be dropped by the feed's time window even though setup counted them.
+  Times are now read in any of those forms, and an event whose time can't be read is kept.
+- **Live feed shows the newest events.** It asked Endpoint AI for one page of 100 events, and one run of the 17
+  scenes logs more than that, so the most recent ones (the last 15 minutes) could be cut off. It now asks for exactly
+  the window you chose and reads every page, newest first.
+- **An empty window says what's just outside it:** "nothing in this window, but N events in the last 24 hours …
+  choose Last 24 hours".
+
 ## 1.8.31
 - **Seventeen Endpoint AI scenes**, grouped: data exfiltration (bundling customer data, uploading a file), credentials
   & config (cloud credentials file, shell startup file, git hooks off), supply chain (typo-squatted package, unknown
