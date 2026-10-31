@@ -175,6 +175,11 @@ before it runs and tells the agent why.
    policy rules that fired, Endpoint AI's own built-in detections, OWASP and MITRE ATLAS tags, and every risky
    action. Print it or save it as a PDF to leave with the customer.
 
+Endpoint AI blocks an action on the generator immediately, but its events take a few minutes to appear, in its
+own console as well as on the Live feed. The line under the feed's status shows how far behind Endpoint AI is, and
+after you switch the policy the feed checks every 5 seconds until the new events arrive. Tell the customer the
+block happened live; the record follows.
+
 The generator keeps each run's scenes and outcomes under **Recent runs on this machine**. Click **Check rules with
 Endpoint AI** under Per-rule actions to see, rule by rule, whether Endpoint AI accepts the demo rules (Create or
 update does the same check first, names any rule it rejects, and changes nothing if one is rejected).

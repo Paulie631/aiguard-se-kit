@@ -13,6 +13,7 @@ read-only admin data; <region>.api.<domain> serves everything else. Tokens last 
 """
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import random
@@ -777,8 +778,31 @@ def status(t, cfg):
     out.append(_chk("ready-eai-events", "Demo events from the generator (24 hours)", "ok" if hits["matched"] else "info",
                     f"{hits['matched']} matched the demo rules, {hits['total']} events in all",
                     "" if hits["matched"] else "Run the demo scenes on the generator: `aiguard-kit eai demo`."))
+    f = freshness(t, cfg, hits["items"])
+    a = f.get("agent") or {}
+    rs = reporting_settings(t)
+    bits = ([f"events reach Endpoint AI about {f['lag_s'] // 60} min {f['lag_s'] % 60} s after they happen"] if f.get("lag_s") is not None else []) \
+        + ([f"the generator's agent reports every {a['interval_s']} s ({a.get('agent_mode') or 'mode unknown'})"] if a.get("interval_s") else []) \
+        + ([f"tenant settings that may affect it: {', '.join(f'{k}={v}' for k, v in rs)}"] if rs else [])
+    out.append(_chk("ready-eai-latency", "How quickly events show up", "info", "; ".join(bits) or "no recent events to measure",
+                    "Blocking happens on the generator straight away; the Live feed shows each event once Endpoint AI has "
+                    "recorded it."))
     K.save_cfg(cfg)
     return out
+
+
+REPORTING_KEY = re.compile(r"(?i)interval|flush|batch|upload|report|sync|heartbeat|telemetry")
+
+
+def reporting_settings(t):
+    """Read-only: tenant settings whose names suggest how often the agent sends events (nothing is changed)."""
+    try:
+        body = t.get("/v1/settings")
+    except EaiError:
+        return []
+    items = body.get("settings") if isinstance(body.get("settings"), (dict, list)) else body
+    pairs = items.items() if isinstance(items, dict) else ((x.get("key"), x.get("value")) for x in items if isinstance(x, dict))
+    return [(k, v) for k, v in pairs if isinstance(k, str) and REPORTING_KEY.search(k) and not isinstance(v, (dict, list))][:8]
 
 
 def _recent(stamp, hours):
@@ -834,6 +858,45 @@ def all_events(t, q, info=None):
     if info is not None:
         info["capped"] = bool(cursor) or info.get("capped", False)
     out.sort(key=lambda ev: utc_iso(ev.get("timestamp")) or "", reverse=True)
+    return out
+
+
+def _epoch(iso):
+    try:
+        return calendar.timegm(time.strptime(str(iso)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
+
+
+_DEVICE_CACHE = {"key": None, "at": 0.0, "data": []}
+
+
+def freshness(t, cfg, items, now=None):
+    """How live Endpoint AI's record is: the age of the newest event, how long events typically take to reach Endpoint
+    AI (arrived_at minus when it happened), and when the generator's agent last reported and how often it does. The
+    device lookup is cached for a minute; everything else comes from events already read."""
+    now = now or time.time()
+    times = [x for x in (_epoch(i.get("time")) for i in items) if x]
+    lags = sorted(a - b for a, b in ((_epoch(i.get("arrived")), _epoch(i.get("time"))) for i in items) if a and b and a >= b)
+    out = {"newest_age_s": int(now - max(times)) if times else None, "lag_s": lags[len(lags) // 2] if lags else None}
+    ids = tuple(d.get("id") for d in (ecfg(cfg).get("state") or {}).get("devices") or [] if d.get("id"))
+    key = (ecfg(cfg).get("domain"), ids)
+    if ids and (_DEVICE_CACHE["key"] != key or now - _DEVICE_CACHE["at"] > 60):
+        devs = []
+        for did in ids:
+            try:
+                x = t.get(f"/v1/devices/{did}")
+            except EaiError:
+                continue
+            devs.append({"hostname": x.get("hostname"), "last_seen_at": utc_iso(x.get("last_seen_at")) or "",
+                         "interval_s": x.get("expected_interval_seconds"), "agent_mode": x.get("agent_mode"),
+                         "health": x.get("health")})
+        _DEVICE_CACHE.update(key=key, at=now, data=devs)
+    devs = _DEVICE_CACHE["data"] if _DEVICE_CACHE["key"] == key else []
+    if devs:
+        seen = [x for x in (_epoch(d["last_seen_at"]) for d in devs) if x]
+        d = devs[0]
+        out["agent"] = {**d, "last_seen_age_s": int(now - max(seen)) if seen else None}
     return out
 
 
@@ -914,7 +977,7 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
         message = _first(("agent_message", "user_message", "message"), data, hook) or ""
         raw = json.dumps(K.redact(ev), ensure_ascii=False, default=str)
         items.append({"time": utc_iso(ev.get("timestamp") or ev.get("event_timestamp") or ev.get("arrived_at")
-                                      or data.get("timestamp")) or "", "raw_time": ev.get("timestamp"), "event_id": ev.get("id"), "host": ev.get("hostname"),
+                                      or data.get("timestamp")) or "", "raw_time": ev.get("timestamp"), "arrived": utc_iso(ev.get("arrived_at")) or "", "event_id": ev.get("id"), "host": ev.get("hostname"),
                       "user": ev.get("user_email") or data.get("email") or ev.get("email"),
                       "tool": tool or etype, "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
                       "command": str(cmd or "")[:300], "rule": rule, "rule_title": titles.get(rule) or data.get("rule_name") or "",

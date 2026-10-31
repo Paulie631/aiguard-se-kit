@@ -2635,6 +2635,7 @@ def _zia_feed(cfg):
     return out
 
 
+_DAY_CACHE = {"key": None, "at": 0.0, "day": None}   # the empty-window 24-hour lookup, reused for two minutes
 FEED_RAW = {}        # item id -> raw event JSON, for the row detail: the feed itself stays small
 FEED_RAW_MAX = 3000
 
@@ -2675,13 +2676,23 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
             acts = (cfg.get("eai") or {}).get("actions") or {}
             out["rule_actions"] = {r["title"]: acts.get(r["id"], "audit") for r in em.rule_catalog()}   # for the rules chart
             out["groups"] = list(dict.fromkeys(r["group"] for r in em.rule_catalog() if not r["optional"]))
+            fresh_items = ev["items"]
             if not any(i["source"] == "eai" for i in items) and minutes < 1440:   # empty window: say what's just outside it
-                day = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=24, limit=100)
+                ck = (cfg["eai"].get("domain"), tuple(ev.get("hosts") or []))
+                if _DAY_CACHE["key"] != ck or time.time() - _DAY_CACHE["at"] > 120:   # 24 h of pages: not on every poll
+                    _DAY_CACHE.update(key=ck, at=time.time(),
+                                      day=em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=24, limit=100))
+                day = _DAY_CACHE["day"]
+                fresh_items = day["items"]
                 if day["items"]:
-                    out.setdefault("notes", {})["eai"] = (f"nothing in this window, but {len(day['items'])} events in the last "
-                                                          f"24 hours ({day['matched']} from the demo, newest "
-                                                          f"{str(day['items'][0].get('time') or '?')[:16].replace('T', ' ')} UTC): "
-                                                          "choose Last 24 hours")
+                    newest = max(str(i.get("time") or "") for i in day["items"])
+                    out.setdefault("notes", {})["eai"] = (f"nothing in this window, but {day['total']:,} events in the last "
+                                                          f"24 hours ({day['matched']:,} from the demo, newest "
+                                                          f"{newest[:16].replace('T', ' ')} UTC): choose Last 24 hours")
+            try:
+                out["eai_fresh"] = em.freshness(eai_tenant() if eai_tenant else em.connect(cfg), cfg, fresh_items)
+            except Exception as e:   # freshness is a nicety: never lose the feed over it
+                vlog(f"freshness: {e}")
             if not ev.get("hosts") and ev.get("emails"):
                 out.setdefault("notes", {})["eai"] = (
                     "watching user " + ", ".join(ev["emails"]) + " (no generator hostname saved). If the scenes run on a "

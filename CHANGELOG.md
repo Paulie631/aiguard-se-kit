@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.37
+- **The Live feed shows how live Endpoint AI's record is.** Blocking happens on the generator straight away, but
+  Endpoint AI takes a few minutes to record each event, even in its own console. A line under the feed's status now
+  shows the newest event's age, how long events typically take to reach Endpoint AI, and when the generator's agent
+  last reported. After a policy switch, a "waiting for Endpoint AI" note explains the gap until the new events arrive.
+- **Faster refresh after a switch:** the feed checks every 5 seconds for 10 minutes after you click Monitor or Block,
+  then goes back to every 20 seconds.
+- **Accurate "nothing in this window" note.** It counted at most 100 events ("100 events in the last 24 hours");
+  it now gives the real total. The 24-hour lookup behind it runs at most every two minutes instead of on every refresh.
+- **Check status** adds "How quickly events show up": the measured delay, the agent's reporting interval, and any
+  tenant settings whose names suggest they control reporting (read only; nothing is changed).
+
 ## 1.8.36
 - **Live feed fills in "What", "Rules that fired" and "Risk categories".** Endpoint AI keeps the agent's command
   inside the event's `data.raw` (the original hook payload), not `data.tool_input`, so those were empty on real

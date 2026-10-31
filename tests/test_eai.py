@@ -131,6 +131,8 @@ class FakeEai:
                 self.devices.remove(d)
                 return Resp(200, {})
             return Resp(200, d)
+        if path == "/v1/settings" and method == "GET":
+            return Resp(200, {"settings": getattr(self, "settings", {})})
         if path == "/v1/policies/validate":
             rej = [i for i, r in enumerate((body or {}).get("rules") or []) if r.get("id") in getattr(self, "reject_ids", ())]
             if rej:   # like an engine that rejects one pattern; errors either name the rule's index or don't
@@ -1635,3 +1637,54 @@ def test_demo_keeps_a_history_of_runs(eenv, monkeypatch):
     runs = kit.load_cfg()["eai"]["runs"]
     assert len(runs) == 20 and runs[-1]["results"] == [{"id": "secret", "title": "Agent writes a cloud access key to disk", "outcome": "blocked"}]
     assert len(e.public_state(kit.load_cfg())["runs"]) == 10
+
+
+def test_freshness_reports_lag_newest_event_and_agent_check_in(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.time()
+    iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
+    fake.devices[0].update(last_seen_at=iso(now - 45), expected_interval_seconds=60, agent_mode="daemon")
+    fake.events = [{"id": f"f{k}", "timestamp": iso(now - 600 + k * 60), "arrived_at": iso(now - 600 + k * 60 + 180),
+                    "hostname": "EC2AMAZ-GEN1", "tool_name": "Bash",
+                    "data": {"verdict": "block", "tool_input": {"command": "rm -rf ./decoy-project"}}} for k in range(5)]
+    e._DEVICE_CACHE.update(key=None)
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    f = out["eai_fresh"]
+    assert f["lag_s"] == 180 and 350 <= f["newest_age_s"] <= 380
+    assert f["agent"]["interval_s"] == 60 and 40 <= f["agent"]["last_seen_age_s"] <= 70
+    calls = len([c for c in fake.calls if c[1].startswith("/v1/devices/")])
+    kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert len([c for c in fake.calls if c[1].startswith("/v1/devices/")]) == calls   # device read cached for a minute
+
+
+def test_empty_window_note_counts_everything_and_is_cached(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    old = time.time() - 6 * 3600
+    fake.events = [{"id": f"o{k}", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(old + k)), "hostname": "EC2AMAZ-GEN1",
+                    "tool_name": "Bash", "data": {"verdict": "audit", "cwd": "/x/.aiguard-se-kit/eai-demo",
+                                                  "tool_input": {"command": "rm -rf ./decoy-project"}}} for k in range(150)]
+    kit._DAY_CACHE.update(key=None)
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=15, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert "150 events in the last 24 hours (150 from the demo" in out["notes"]["eai"]   # not capped at 100
+    n = len([c for c in fake.calls if c[1] == "/v1/events"])
+    kit.feed(kit.load_cfg(), ("eai",), minutes=15, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert len([c for c in fake.calls if c[1] == "/v1/events"]) == n + 1   # only the window itself: the 24 h lookup is reused
+
+
+def test_status_explains_event_delay_and_lists_reporting_settings_read_only(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.time()
+    iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
+    fake.devices[0].update(expected_interval_seconds=60, agent_mode="daemon")
+    fake.settings = {"telemetry_flush_seconds": 120, "ui_theme": "dark"}
+    fake.events = [{"id": "x1", "timestamp": iso(now - 400), "arrived_at": iso(now - 150), "hostname": "EC2AMAZ-GEN1",
+                    "tool_name": "Bash", "data": {"verdict": "block", "tool_input": {"command": "rm -rf ./decoy-project"}}}]
+    e._DEVICE_CACHE.update(key=None)
+    before = len(fake.writes())
+    c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}["ready-eai-latency"]
+    assert "about 4 min 10 s" in c["detail"] and "every 60 s (daemon)" in c["detail"]
+    assert "telemetry_flush_seconds=120" in c["detail"] and "ui_theme" not in c["detail"]
+    assert len(fake.writes()) == before   # nothing changed
