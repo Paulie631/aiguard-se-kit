@@ -2642,7 +2642,7 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
     if "eai" in sources and (cfg.get("eai") or {}).get("client_id"):
         try:
             em = product("eai")
-            ev = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=max(1, -(-minutes // 60)), limit=100)
+            ev = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, minutes=minutes, limit=300)
             cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - minutes * 60))
             for i in ev["items"]:
                 if not i.get("time") or str(i["time"])[:19] >= cutoff[:19]:   # unreadable time: the API's own window decides

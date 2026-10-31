@@ -744,26 +744,44 @@ def _since(hours):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * 3600))
 
 
-def evidence(t, cfg, hours=24, limit=50):
-    """The generator's recent AI activity: the events that matched the demo policy first."""
+EVENT_PAGE = 200
+EVENT_PAGES = 15   # up to 3,000 events in a window: plenty for a demo generator
+
+
+def all_events(t, q):
+    """Every event in the window, following next_cursor, newest first. One scene run logs well over 100 events (session
+    start, prompt, before and after each tool, stop), so a single page can miss the newest ones."""
+    out, cursor = [], None
+    for _ in range(EVENT_PAGES):
+        body = t.get("/v1/events", **{**q, "limit": EVENT_PAGE, **({"cursor": cursor} if cursor else {})})
+        out += _items(body, "events")
+        cursor = body.get("next_cursor") if isinstance(body, dict) else None
+        if not cursor:
+            break
+    out.sort(key=lambda ev: utc_iso(ev.get("timestamp")) or "", reverse=True)
+    return out
+
+
+def evidence(t, cfg, hours=24, limit=50, minutes=None):
+    """The generator's recent AI activity, newest first (limit: how many to return)."""
     hosts, emails = generator_identities(cfg)
     hosts = hosts or [d.get("hostname") for d in (ecfg(cfg).get("state") or {}).get("devices") or [] if d.get("hostname")]
     if not hosts and not emails:
         return {"items": [], "matched": 0, "total": 0, "hosts": [], "patterns": {}}
-    q = {"since": _since(hours), "limit": limit}
+    q = {"since": _since(minutes / 60 if minutes else hours)}
     if hosts:   # as typed, short and upper-case: Endpoint AI may record "EC2AMAZ-GEN1" for "ec2amaz-gen1.ec2.internal"
         q["ef_host"] = ",".join(dict.fromkeys(x for h in hosts for x in host_spellings(h)))
     elif emails:
         q["ef_user"] = ",".join(emails)
-    body = t.get("/v1/events", **q)
+    evs = all_events(t, q)
     if hosts:   # only the generator's events, even if the API ignored the filter or spells the host differently
         keys = {host_key(h) for h in hosts}
-        mine = [ev for ev in _items(body, "events") if host_key(ev.get("hostname")) in keys]
+        mine = [ev for ev in evs if host_key(ev.get("hostname")) in keys]
         if not mine:   # the filter matched nothing: read the latest events and match the hostname here instead
-            q2 = {k: v for k, v in q.items() if k != "ef_host"}
-            mine = [ev for ev in _items(t.get("/v1/events", **{**q2, "limit": 200}), "events")
+            mine = [ev for ev in all_events(t, {k: v for k, v in q.items() if k != "ef_host"})
                     if host_key(ev.get("hostname")) in keys]
-        body = {"items": mine}
+        evs = mine
+    body = {"items": evs}
     titles = {r["id"]: r.get("title") or r["id"] for r in template()["rules"]}
     ids = set(titles)
     items = []
@@ -804,8 +822,9 @@ def evidence(t, cfg, hours=24, limit=50):
         total = int(counts.get("events") or len(items))
     except Exception:
         total = len(items)
-    items.sort(key=lambda i: str(i["time"] or ""), reverse=True)   # newest first, the demo's own events on top
-    items.sort(key=lambda i: not i["demo"])
+    items.sort(key=lambda i: str(i["time"] or ""), reverse=True)   # newest first; keep the newest `limit`
+    items = items[:limit]
+    items.sort(key=lambda i: not i["demo"])   # the demo's own events on top (the live feed re-sorts by time)
     return {"items": items, "matched": matched, "total": total, "hosts": hosts, "emails": emails}
 
 
