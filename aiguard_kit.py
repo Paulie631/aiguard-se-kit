@@ -2705,7 +2705,9 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
         FEED_RAW.pop(next(iter(FEED_RAW)))
     for i in items:
         i["has_raw"] = i["id"] in FEED_RAW
-    out["eai_connected"] = bool((cfg.get("eai") or {}).get("client_id"))   # this computer can read Endpoint AI (the laptop, not the generator)
+    out["eai_connected"] = bool((cfg.get("eai") or {}).get("client_id"))   # this computer can read Endpoint AI (the laptop)
+    out["mode_log"] = ((cfg.get("eai") or {}).get("mode_log") or [])[-20:]   # policy switches, for the timeline
+    out["mode"] = (((cfg.get("eai") or {}).get("state") or {}).get("mode")) or ""
     out.update(items=items, errors=errors, at=time.strftime("%H:%M:%S"))
     return out
 

@@ -958,6 +958,7 @@ function drawStage(){
 // Endpoint AI steps switch the SE-Demo Endpoint AI policy when they open (only when it isn't in that mode already).
 let EAIMODE=null;
 const EAIPRESET={monitor:"Monitor: record everything",secrets:"Block secrets & data theft",destructive:"Block destructive & supply chain",block:"Block everything"};
+const MODESHORT={monitor:"Monitor",secrets:"Block secrets",destructive:"Block destructive",block:"Block"};
 async function eaiStepMode(m){const el=$("#seaimode");if(!el)return;
   try{if(EAIMODE==null){const e=await api("/api/eai/state");EAIMODE=(e.state||{}).mode||null;if(!(e.state||{}).policy_id){el.textContent="Endpoint AI demo policy not set up: Endpoint AI tab, step 2.";return}}
     if(EAIMODE==m){el.textContent=`Endpoint AI policy: ${EAIPRESET[m]||m}.`;return}
@@ -1386,7 +1387,7 @@ function roundRight(x,y,w,h,r){r=Math.min(r,h/2,w);return w<=0?"":`M${x},${y}H${
 function niceMax(n){if(n<=4)return Math.max(n,1);const p=Math.pow(10,Math.floor(Math.log10(n)));return Math.ceil(n/p*2)/2*p}
 function buckets(min){const size=min<=15?1:min<=60?5:60,n=Math.ceil(min/size),end=Date.now(),start=end-n*size*60000;return{size,n,start,end}}
 const tlabel=ms=>new Date(ms).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
-function cTimeline(items,min){const B=buckets(min),W=600,H=170,L=30,Bm=22,cw=(W-L)/B.n,bw=Math.min(24,cw*.62);
+function cTimeline(items,min,modes){const B=buckets(min),W=600,H=170,L=30,Bm=22,cw=(W-L)/B.n,bw=Math.min(24,cw*.62);
   const cols=[...Array(B.n)].map(()=>({block:0,audit:0,allow:0}));
   items.forEach(i=>{const t=Date.parse(i.time);if(isNaN(t))return;const k=Math.floor((t-B.start)/(B.size*60000));if(k>=0&&k<B.n)cols[k][VK(i.verdict)]++});
   const mx=niceMax(Math.max(1,...cols.map(c=>c.block+c.audit+c.allow))),sy=v=>(H-Bm)*v/mx;
@@ -1396,6 +1397,9 @@ function cTimeline(items,min){const B=buckets(min),W=600,H=170,L=30,Bm=22,cw=(W-
       g+=top?`<path d="${roundTop(x,y,bw,h-gap,4)}" fill="${VC[v]}"/>`:`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(0,h-gap)}" fill="${VC[v]}"/>`});
     const t0=B.start+k*B.size*60000;g+=`<rect x="${L+k*cw}" y="0" width="${cw}" height="${H-Bm}" fill="transparent" ${tipAttr(`${tlabel(t0)}–${tlabel(t0+B.size*60000)}\n${c.block} blocked · ${c.audit} audited · ${c.allow} allowed`)}/>`});
   [0,Math.floor(B.n/2),B.n-1].forEach(k=>g+=`<text x="${L+k*cw+cw/2}" y="${H-6}" text-anchor="middle">${tlabel(B.start+k*B.size*60000)}</text>`);
+  (modes||[]).forEach(m=>{const t=Date.parse(m.at),x=L+(t-B.start)/(B.size*60000)*cw;if(isNaN(t)||x<L||x>W)return;   // policy switches
+    g+=`<line x1="${x}" x2="${x}" y1="12" y2="${H-Bm}" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="3 3"/><text x="${Math.min(x+4,W-70)}" y="10" style="fill:var(--ink);font-weight:600">→ ${esc(MODESHORT[m.mode]||m.mode)}</text>
+      <rect x="${x-5}" y="0" width="10" height="${H-Bm}" fill="transparent" ${tipAttr(`Policy switched to ${EAIPRESET[m.mode]||m.mode}\n${tlabel(t)}`)}/>`});
   return `<h4>Blocked vs audited over time</h4><div class="sub">${B.size==60?"Per hour":`Per ${B.size} minute${B.size>1?"s":""}`} · switch Monitor to Block and watch amber turn red</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Events per interval by verdict">${g}</svg>${vLegend()}`}
 function hbars(rows,labelW){   // rows: {label, segs:[{v,k|color}], value, tip}; HTML so text stays readable at any width
   const mx=Math.max(1,...rows.map(r=>r.segs.reduce((a,x)=>a+x.v,0)));
@@ -1448,10 +1452,18 @@ function cSources(items,min){const B=buckets(min),panel=(src,name,what)=>{const 
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:44px" role="img" aria-label="${name} events over time"><polyline vector-effect="non-scaling-stroke" points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></div>`};
   return `<h4>AI Guard next to Endpoint AI</h4><div class="sub">Prompts stopped at the model, and actions stopped on the machine</div><div class="row" style="gap:16px;flex-wrap:wrap">${panel("aiguard","AI Guard (prompts this computer sent)","prompts")}${panel("eai","Endpoint AI (agent actions on the generator)","events")}</div>`}
 function drawCharts(el,items,r,min){ensureTip();const q=x=>el.querySelector(x),eai=items.filter(i=>i.source=="eai");
-  q("[data-c1]").innerHTML=cTimeline(items,min);q("[data-c2]").innerHTML=cGroups(eai,r);
+  q("[data-c1]").innerHTML=cTimeline(items,min,r.mode_log);q("[data-c2]").innerHTML=cGroups(eai,r);
   if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c8]").innerHTML=cDetections(eai);q("[data-c5]").innerHTML=cTools(items);
     q("[data-c6]").innerHTML=cSessions(eai,min);q("[data-c7]").innerHTML=cSources(items,min)}}
 const FEED_ROWS=100;   // table rows drawn at first; counts and charts always use every event in the window
+function beforeAfter(items,modes,min){   // the latest policy switch in this window: what changed for the risky actions
+  const cut=Date.now()-min*60000,sw=(modes||[]).filter(m=>Date.parse(m.at)>=cut).slice(-1)[0];if(!sw)return "";
+  const t=Date.parse(sw.at),i=(modes||[]).indexOf(sw),prev=i>0?modes[i-1].mode:"";
+  const risky=items.filter(x=>x.source=="eai"&&(x.rule||(x.patterns||[]).length)),bl=l=>l.filter(x=>VK(x.verdict)=="block").length;
+  const b=risky.filter(x=>Date.parse(x.time)<t),a=risky.filter(x=>Date.parse(x.time)>=t),nm=m=>esc(MODESHORT[m]||m||"before");
+  return `<div class="panel" style="padding:8px 14px;margin:0;min-width:260px"><div class="muted" style="font-size:12px">Policy switched to <b>${nm(sw.mode)}</b> at ${tlabel(t)}</div>
+    <div style="font-size:13px;margin-top:3px"><b>Before</b>${prev?` (${nm(prev)})`:""}: ${b.length} risky action${b.length==1?"":"s"}, <span style="color:var(--v-block)">${bl(b)} blocked</span></div>
+    <div style="font-size:13px"><b>After</b>: ${a.length} risky action${a.length==1?"":"s"}, <span style="color:var(--v-block)">${bl(a)} blocked</span>${a.length?"":` <span class="muted">· run the scenes again on the generator</span>`}</div></div>`}
 function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
   const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null,
     view:"events",demoOnly:false,open:new Set(),last:null,rows:FEED_ROWS,raw:{}};
@@ -1460,7 +1472,9 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     <select data-fm><option value="15" ${st.min==15?"selected":""}>Last 15 min</option><option value="60" ${st.min==60?"selected":""}>Last hour</option><option value="1440">Last 24 hours</option></select>
     <span class="seg" style="display:inline-flex;gap:0"><button data-fv="events" class="on">Events</button><button data-fv="sessions">Sessions</button></span>
     <label class="chk" style="margin:0"><input type="checkbox" data-fd>Demo events only</label>
-    <button data-fp>Pause</button><span class="muted" data-fstat style="font-size:12px"></span></div>
+    <button data-fp>Pause</button><span class="muted" data-fstat style="font-size:12px"></span>
+    <span data-fmode style="display:none;margin-left:auto" class="row"><span class="lbl" style="margin:0">Policy</span><span class="seg" style="display:inline-flex;gap:0"><button data-fm2="monitor">Monitor</button><button data-fm2="block">Block</button></span></span></div>
+    <div data-fmodelog class="muted" style="font-size:12px;margin-top:4px"></div>
     <div data-ftiles class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"></div>
     <div class="fgrid"><div class="fchart" data-c1></div><div class="fchart" data-c2></div></div>
     <details data-fmore style="margin-top:10px"><summary style="cursor:pointer"><b>More charts</b> <span class="muted" style="font-size:12.5px">· frameworks, rules, tools, sessions, AI Guard next to Endpoint AI</span></summary>
@@ -1472,6 +1486,10 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
   el.querySelectorAll("[data-fv]").forEach(b=>b.onclick=()=>{st.view=b.dataset.fv;el.querySelectorAll("[data-fv]").forEach(x=>x.classList.toggle("on",x===b));st.last&&draw(st.last)});
   q("[data-fd]").onchange=()=>{st.demoOnly=q("[data-fd]").checked;st.last&&draw(st.last)};
   q("[data-fmore]").addEventListener("toggle",()=>{st.last&&draw(st.last)});
+  el.querySelectorAll("[data-fm2]").forEach(b=>b.onclick=()=>{const m=b.dataset.fm2;
+    if(!confirm(m=="block"?"Switch the SE-Demo policy to Block everything? The demo actions will be stopped before they run.":"Switch the SE-Demo policy to Monitor? The demo actions will run and be recorded."))return;
+    el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=true);q("[data-fmodelog]").textContent=`Switching to ${m}…`;
+    runJob("/api/eai/mode",{mode:m},q("[data-fmodelog]"),()=>{el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=false);EAIMODE=null;tick(true)})});
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
   el.addEventListener("click",ev=>{if(ev.target.closest("[data-frows]")){st.rows+=200;st.last&&draw(st.last);return}
     const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
@@ -1504,6 +1522,8 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     q("[data-ftiles]").innerHTML=tile(items.length,"events")+tile(items.filter(i=>bad(i.verdict)).length,"blocked","bad")+tile(items.filter(i=>warn(i.verdict)).length,"audited (ran, recorded)","warn")
       +tile(items.filter(i=>i.demo).length,"from the demo scenes")+tile(new Set(items.map(i=>i.session).filter(Boolean)).size,"agent sessions")
       +(tp.length?`<div class="panel" style="padding:8px 14px;margin:0;max-width:420px"><div class="muted" style="font-size:12px">Top risk patterns</div><div style="font-size:12.5px">${tp.slice(0,3).map(([k,n])=>`${esc(k)} <b>${n}</b>`).join(" · ")}</div>${to.length||tm.length?`<div class="muted" style="font-size:12px;margin-top:4px">${to.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}${to.length&&tm.length?" · ":""}${tm.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}</div>`:""}</div>`:"");
+    const ba=beforeAfter(items,r.mode_log,st.min);if(ba)q("[data-ftiles]").insertAdjacentHTML("beforeend",ba);
+    const fm=q("[data-fmode]");fm.style.display=r.eai_connected?"":"none";el.querySelectorAll("[data-fm2]").forEach(b=>b.classList.toggle("on",b.dataset.fm2==r.mode));
     drawCharts(el,items,r,st.min);
     if(!items.length){const gen=st.src.includes("eai")&&r.eai_connected===false;
       q("[data-fbody]").innerHTML=`<div class="muted">${gen?"This computer isn't connected to Endpoint AI — it looks like the traffic generator. Open the Live feed on the laptop that holds the Endpoint AI credential to watch events there.":`Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.`}</div>`;st.first=false;return}
@@ -1541,13 +1561,14 @@ function drawScenes(e){
         <span class="sctag sct-${a}">${SCTAG[a]}</span></label>`}).join("")}</div>`}).join("")}</div>`;
   $$("#eaiscenes [data-es]").forEach(c=>c.onchange=()=>{c.checked?EAISEL.add(c.dataset.es):EAISEL.delete(c.dataset.es);drawScenes(EAI)});
   $$("#eaiscenes [data-sg]").forEach(b=>b.onclick=()=>{scenes.filter(s=>s.group==b.dataset.sg).forEach(s=>b.dataset.v=="1"?EAISEL.add(s.id):EAISEL.delete(s.id));drawScenes(EAI)});
-  const picks=[["all","All"],["none","None"],["one","One per group"],["new","Only new"]];
+  const picks=[["demo","Demo set"],["all","All"],["none","None"],["one","One per group"],["new","Only new"]];
   if(Object.values(last).some(v=>v=="blocked"))picks.push(["blocked","Last run's blocked"]);
   $("#eaiquick").innerHTML=picks.map(([k,l])=>`<button data-qp="${k}" style="font-size:12px;padding:3px 9px">${l}</button>`).join("")
     +`<span class="muted" id="eaiselcnt" style="font-size:12px;margin-left:4px"></span>`;
   $$("#eaiquick [data-qp]").forEach(b=>b.onclick=()=>{const k=b.dataset.qp;EAISEL=new Set();
     if(k=="all")scenes.forEach(s=>EAISEL.add(s.id));
     else if(k=="new")scenes.filter(s=>s.new).forEach(s=>EAISEL.add(s.id));
+    else if(k=="demo")scenes.filter(s=>s.demo_set).forEach(s=>EAISEL.add(s.id));
     else if(k=="blocked")scenes.filter(s=>last[s.id]=="blocked").forEach(s=>EAISEL.add(s.id));
     else if(k=="one"){const seen=new Set();scenes.forEach(s=>{if(!seen.has(s.group)){seen.add(s.group);EAISEL.add(s.id)}})}
     drawScenes(EAI)});

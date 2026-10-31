@@ -1603,3 +1603,21 @@ def test_console_shows_the_install_fix_before_anyone_clicks(eenv, tmp_path, monk
     assert st["blocked"] == [str(home / ".local" / "state")] and "chown" in st["fix"] and not st["installed"]
     monkeypatch.setattr(e.os, "access", lambda p, mode: True)
     assert e.claude_status()["blocked"] == [] and e.claude_status()["fix"] == ""
+
+
+def test_policy_switches_are_recorded_for_the_timeline(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]), mode="monitor")
+    e.set_mode(e.connect(kit.load_cfg()), kit.load_cfg(), "block", log_into([]))
+    e.set_mode(e.connect(kit.load_cfg()), kit.load_cfg(), "block", log_into([]))   # no change: not logged again
+    log = kit.load_cfg()["eai"]["mode_log"]
+    assert [m["mode"] for m in log] == ["monitor", "block"] and all(m["at"].endswith("Z") for m in log)
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert out["mode"] == "block" and [m["mode"] for m in out["mode_log"]] == ["monitor", "block"]
+
+
+def test_demo_set_is_one_scene_per_group(eenv):
+    kit, e, _ = eenv("eai")
+    sc = e.public_state(kit.load_cfg())["scenes"]
+    picked = [s for s in sc if s["demo_set"]]
+    assert len(picked) == len({s["group"] for s in sc}) == len({s["group"] for s in picked}) == 9
