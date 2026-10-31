@@ -147,7 +147,8 @@ before it runs and tells the agent why.
 ## Showing the results
 
 - **Live feed** (its own tab in the console, on your laptop; no Client Connector needed there): refreshes every 20
-  seconds while you're looking at it, new rows flashing. Summary tiles across the top count events, blocked,
+  seconds while you're looking at it, new rows flashing. Counts and charts cover every event in the window (up to 3,000; the feed says so if there are
+  more). The table shows the newest 100 rows, with **Show more** for the rest. Summary tiles across the top count events, blocked,
   audited, demo events and agent sessions, with the top risk patterns and OWASP Agentic / MITRE ATLAS codes. Each
   row shows the rule that fired; click it for the reason, the message the agent got, host, user, working folder,
   serial, session and the raw event. **Sessions** groups events by Claude session with the prompt that started it.

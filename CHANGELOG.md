@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.34
+- **Live feed counts every event in the window.** It used to pass on only the newest 150, so after a couple of full
+  scene runs the counts and charts quietly left out the older ones. Now they cover every event the kit reads (up
+  to 3,000 a window, and the feed says when there are more). The table shows the newest 100 rows with a
+  **Show more** button, and each row's raw event loads when you open it, so the 20-second refresh stays small.
+
 ## 1.8.33
 - **Seven charts on the live feed.** Blocked vs audited over time and Risk categories sit above the event table;
   More charts holds OWASP Agentic / MITRE ATLAS coverage, Rules that fired (coloured by each rule's action), What

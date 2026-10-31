@@ -1228,7 +1228,8 @@ def test_feed_items_carry_rule_session_and_raw(eenv):
     out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     i = out["items"][0]
     assert i["rule"] == "Recursive force-delete" and i["reason"].startswith("Recursive") and i["message"].startswith("This command")
-    assert i["session"] == "sess-1" and i["serial"] == "SN1" and json.loads(i["raw"])["id"] == "b"
+    assert i["session"] == "sess-1" and i["serial"] == "SN1" and "raw" not in i and i["has_raw"]
+    assert i["id"] == "eai-b" and json.loads(kit.feed_raw(i["id"]))["id"] == "b"   # the raw event, on request
 
 
 def test_new_scenes_decoys(eenv):
@@ -1402,3 +1403,51 @@ def test_env_harvest_scene_gets_a_fake_secret_only(eenv):
     s = next(x for x in e.SCENES if x["id"] == "env-harvest")
     e.run_scene(s, "claude", e.work_dir(), runner=runner)
     assert seen["SEDEMO_FAKE_SECRET"] == "sedemo-fake-secret-not-real"
+
+
+def _many(n, now, host="EC2AMAZ-GEN1"):
+    return [{"id": f"m{k}", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3000 + k)), "hostname": host,
+             "tool_name": "Bash", "session_id": f"s{k % 40}",
+             "data": {"verdict": "block" if k % 3 == 0 else "audit", "tool_input": {"command": "rm -rf ./decoy-project"}}}
+            for k in range(n)]
+
+
+def test_feed_returns_every_event_in_the_window_without_raw(eenv):
+    """Counts and charts are worked out from the feed, so it carries every event (no 150/300 cut-off) but not the
+    bulky raw events: those come one at a time from /api/feed/raw."""
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    fake.page_events, now = 100, time.time()
+    fake.events = _many(900, now)
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    eai = [i for i in out["items"] if i["source"] == "eai"]
+    assert len(eai) == 900 and len({i["id"] for i in eai}) == 900
+    assert sum(i["verdict"] == "block" for i in eai) == 300
+    assert not any("raw" in i for i in eai) and all(i["has_raw"] for i in eai)
+    assert json.loads(kit.feed_raw(eai[-1]["id"]))["id"] == "m0"
+    assert not out.get("capped") and "eai" not in (out.get("notes") or {})
+    assert len(json.dumps(out)) < 900 * 1200   # small enough to refresh every 20 s
+
+
+def test_feed_says_when_the_window_holds_more_than_the_kit_reads(eenv, monkeypatch):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    monkeypatch.setattr(e, "EVENT_PAGES", 2)
+    monkeypatch.setattr(e, "EVENT_PAGE", 100)
+    fake.page_events = 100
+    fake.events = _many(450, time.time())
+    before = len([c for c in fake.calls if c[1] == "/v1/events"])
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert out["capped"] and len(out["items"]) == 200
+    assert "showing the newest 200 events" in out["notes"]["eai"] and "shorter window" in out["notes"]["eai"]
+    assert len([c for c in fake.calls if c[1] == "/v1/events"]) - before == 2   # stopped at the page cap
+
+
+def test_raw_cache_stays_bounded(eenv, monkeypatch):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    monkeypatch.setattr(kit, "FEED_RAW_MAX", 50)
+    fake.events = _many(120, time.time())
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert len(kit.FEED_RAW) == 50 and len(out["items"]) == 120
+    assert kit.feed_raw(out["items"][0]["id"])   # the newest are the ones kept

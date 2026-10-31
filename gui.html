@@ -1417,9 +1417,10 @@ function drawCharts(el,items,r,min){ensureTip();const q=x=>el.querySelector(x),e
   q("[data-c1]").innerHTML=cTimeline(items,min);q("[data-c2]").innerHTML=cGroups(eai,r);
   if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c5]").innerHTML=cTools(items);
     q("[data-c6]").innerHTML=cSessions(eai,min);q("[data-c7]").innerHTML=cSources(items,min)}}
+const FEED_ROWS=100;   // table rows drawn at first; counts and charts always use every event in the window
 function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
   const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null,
-    view:"events",demoOnly:false,open:new Set(),last:null};
+    view:"events",demoOnly:false,open:new Set(),last:null,rows:FEED_ROWS,raw:{}};
   el.innerHTML=`<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
     <span class="lbl">Live feed</span>${Object.entries(FEEDSRC).map(([k,v])=>`<label class="chk" style="margin:0"><input type="checkbox" data-fs="${k}" ${st.src.includes(k)?"checked":""}>${v}</label>`).join("")}
     <select data-fm><option value="15" ${st.min==15?"selected":""}>Last 15 min</option><option value="60" ${st.min==60?"selected":""}>Last hour</option><option value="1440">Last 24 hours</option></select>
@@ -1433,13 +1434,18 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     <div data-fzia style="margin-top:8px"></div><div data-fbody style="margin-top:8px"></div>`;
   const q=x=>el.querySelector(x);
   el.querySelectorAll("[data-fs]").forEach(c=>c.onchange=()=>{st.src=[...el.querySelectorAll("[data-fs]")].filter(x=>x.checked).map(x=>x.dataset.fs);tick(true)});
-  q("[data-fm]").onchange=()=>{st.min=+q("[data-fm]").value;tick(true)};
+  q("[data-fm]").onchange=()=>{st.min=+q("[data-fm]").value;st.rows=FEED_ROWS;tick(true)};
   el.querySelectorAll("[data-fv]").forEach(b=>b.onclick=()=>{st.view=b.dataset.fv;el.querySelectorAll("[data-fv]").forEach(x=>x.classList.toggle("on",x===b));st.last&&draw(st.last)});
   q("[data-fd]").onchange=()=>{st.demoOnly=q("[data-fd]").checked;st.last&&draw(st.last)};
   q("[data-fmore]").addEventListener("toggle",()=>{st.last&&draw(st.last)});
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
-  el.addEventListener("click",ev=>{const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
+  el.addEventListener("click",ev=>{if(ev.target.closest("[data-frows]")){st.rows+=200;st.last&&draw(st.last);return}
+    const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
     const k=r.dataset.fid;st.open.has(k)?st.open.delete(k):st.open.add(k);st.last&&draw(st.last)});
+  el.addEventListener("toggle",async ev=>{const d=ev.target;if(!d.matches||!d.matches("details[data-raw]")||!d.open)return;   // raw event: fetched when opened
+    const id=d.dataset.raw;if(st.raw[id]==null){try{st.raw[id]=(await api("/api/feed/raw?id="+encodeURIComponent(id))).raw}catch(e){d.querySelector("pre").textContent=e.message;return}}
+    d.querySelector("pre").textContent=prettyRaw(st.raw[id])},true);
+  const prettyRaw=x=>{try{return JSON.stringify(JSON.parse(x),null,2)}catch(e){return x}};
   const vis=()=>el.isConnected&&el.offsetParent!==null&&!document.hidden;   // only polls while you can see it
   async function tick(now){clearTimeout(st.timer);if(!el.isConnected)return;
     if(st.on&&(now||vis())){try{st.last=await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`);draw(st.last)}catch(e){q("[data-fstat]").textContent=e.message}}
@@ -1451,7 +1457,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
   function detail(i){const rows=[["Rule",i.rule?(i.rule+(i.rule_by=="kit"?" (matched by the kit; Endpoint AI didn't name a rule)":"")):""],["Reason",i.reason],["Message to the agent",i.message],["Event",i.event_type],["Host",i.host],["User",i.user],
       ["Working folder",i.cwd],["Serial",i.serial],["Session",i.session],["Patterns",(i.patterns||[]).join(", ")],["OWASP",(i.owasp||[]).join(", ")],["MITRE ATLAS",(i.mitre||[]).join(", ")]].filter(([,v])=>v);
     return `<tr class="feeddetail"><td colspan="7" style="background:var(--panel2,rgba(0,0,0,.03))"><div style="display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:12.5px">${rows.map(([k,v])=>`<span class="muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>
-      ${i.raw?`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Raw event</summary><pre style="white-space:pre-wrap;font-size:11.5px;max-height:30vh;overflow:auto">${esc((()=>{try{return JSON.stringify(JSON.parse(i.raw),null,2)}catch(e){return i.raw}})())}</pre></details>`:""}</td></tr>`}
+      ${i.has_raw?`<details data-raw="${esc(i.id)}" style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Raw event</summary><pre style="white-space:pre-wrap;font-size:11.5px;max-height:30vh;overflow:auto">${st.raw[i.id]!=null?esc(prettyRaw(st.raw[i.id])):"loading…"}</pre></details>`:""}</td></tr>`}
   function row(i){const fresh=!st.first&&!st.seen.has(i.id),open=st.open.has(i.id);
     return `<tr data-fid="${esc(i.id)}" class="${fresh?"feednew":""}" style="cursor:pointer${i.demo?";font-weight:600":""}"><td>${open?"▾":"▸"} ${esc(new Date(i.time).toLocaleTimeString())}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
       <td>${verdictCell(i.verdict)}</td><td style="font-size:12px">${esc(i.rule||"")}</td><td style="font-size:12px">${esc(i.who||"")}</td><td><code style="font-size:12px">${esc(i.what||"")}</code></td><td style="font-size:12px">${esc(i.detail||"")}</td></tr>`+(open?detail(i):"")}
@@ -1467,15 +1473,18 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     drawCharts(el,items,r,st.min);
     if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}
     const head=`<tr><th>Time</th><th>Source</th><th>Verdict</th><th>Rule</th><th>Where / who</th><th>What</th><th>Detections</th></tr>`;
-    let body;
+    let body,total,shown;
     if(st.view=="sessions"){const groups={};items.forEach(i=>{const k=i.session||(i.source=="aiguard"?"AI Guard (this computer)":"no session");(groups[k]=groups[k]||[]).push(i)});
-      body=Object.entries(groups).sort((a,b)=>String(b[1][0].time).localeCompare(String(a[1][0].time))).map(([k,list])=>{const sid="s:"+k,open=st.open.has(sid);
+      const all=Object.entries(groups).sort((a,b)=>String(b[1][0].time).localeCompare(String(a[1][0].time)));total=all.length;
+      body=all.slice(0,st.rows).map(([k,list])=>{const sid="s:"+k,open=st.open.has(sid);
         const prompt=(list.find(i=>/UserPromptSubmit/i.test(i.event_type||i.tool||""))||{}).what||"";
         const nb=list.filter(i=>bad(i.verdict)).length,na=list.filter(i=>warn(i.verdict)).length;
         return `<tr data-fid="${esc(sid)}" style="cursor:pointer;background:var(--panel2,rgba(0,0,0,.03))"><td>${open?"▾":"▸"} ${esc(new Date(list[list.length-1].time).toLocaleTimeString())}</td><td colspan="2"><b>${list.length}</b> events · <span style="color:var(--bad)">${nb} blocked</span> · <span style="color:var(--warn)">${na} audited</span></td>
           <td colspan="2" style="font-size:12px">${esc(list[0].who||"")}<br><span class="muted">${esc(k.slice(0,36))}</span></td><td colspan="2"><span class="muted" style="font-size:12px">${prompt?"Prompt: ":""}</span>${esc(String(prompt).slice(0,200))}</td></tr>`+(open?list.map(row).join(""):"")}).join("")}
-    else body=items.map(row).join("");
-    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:${opt.tall?72:52}vh;overflow:auto"><table>${head}${body}</table></div><div class="muted" style="font-size:12px;margin-top:6px">Click a row for the rule, the message the agent got, the session and the raw event.</div>`;
+    else{total=items.length;body=items.slice(0,st.rows).map(row).join("")}
+    shown=Math.min(total,st.rows);
+    const more=total>shown?`<div class="row" style="gap:10px;align-items:center;margin-top:6px"><button data-frows>Show ${Math.min(200,total-shown)} more</button><span class="muted" style="font-size:12px">showing the newest ${shown.toLocaleString()} of ${total.toLocaleString()} ${st.view=="sessions"?"sessions":"events"}; the counts and charts above cover all of them</span></div>`:"";
+    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:${opt.tall?72:52}vh;overflow:auto"><table>${head}${body}</table></div>${more}<div class="muted" style="font-size:12px;margin-top:6px">Click a row for the rule, the message the agent got, the session and the raw event.</div>`;
     items.forEach(i=>st.seen.add(i.id));st.first=false}
   tick(true);return st}
 
