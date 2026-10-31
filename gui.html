@@ -188,10 +188,11 @@ tr.feednew td{animation:feedflash 4s ease-out}
 .schead b{font-size:13px}.schead .cnt{color:var(--muted);font-size:11.5px;font-weight:400}
 .schead .sp{margin-left:auto;display:flex;gap:4px}
 .schead button{font-size:11px;padding:1px 7px}
-.scrow{display:flex;align-items:center;gap:7px;padding:5px 10px;font-size:12.5px;border-top:1px solid var(--line);cursor:pointer}
+.scrow{display:flex;align-items:flex-start;gap:7px;padding:6px 10px;font-size:12.5px;line-height:1.35;border-top:1px solid var(--line);cursor:pointer}
+.scrow input{margin-top:2px;flex:none}
+.scrow .sctag,.scrow .sclast{margin-top:1px}
 .scrow:first-of-type{border-top:0}
-.scrow input{margin:0}
-.scrow .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scrow .t{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere}
 .scrow .nw{font-size:9.5px;font-weight:700;color:var(--accent,#4f46e5);border:1px solid currentColor;border-radius:4px;padding:0 3px;letter-spacing:.3px}
 .sctag{font-size:10px;font-weight:600;border-radius:5px;padding:1px 6px;white-space:nowrap}
 .sct-block{background:rgba(180,35,24,.14);color:var(--v-block,#b42318)}
