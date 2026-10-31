@@ -783,6 +783,7 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
         evs = mine
     body = {"items": evs}
     titles = {r["id"]: r.get("title") or r["id"] for r in template()["rules"]}
+    groups = {r["id"]: r.get("group") or "" for r in template()["rules"]}
     ids = set(titles)
     items = []
     for ev in _items(body, "events"):
@@ -808,6 +809,7 @@ def evidence(t, cfg, hours=24, limit=50, minutes=None):
                       "user": ev.get("user_email") or data.get("email") or ev.get("email"),
                       "tool": tool or etype, "source": ev.get("source"), "verdict": verdict, "severity": ev.get("severity"),
                       "command": str(cmd or "")[:300], "rule": rule, "rule_title": titles.get(rule) or data.get("rule_name") or "",
+                      "rule_group": groups.get(rule) or scene_group(cmd, cwd),
                       "reason": str(reason or "")[:200], "message": str(message or "")[:300], "cwd": cwd,
                       "session": ev.get("session_id") or data.get("session_id") or "", "event_type": etype,
                       "serial": ev.get("serial") or ev.get("serial_number") or data.get("serial") or "",
@@ -834,6 +836,18 @@ DEMO_MARKERS = re.compile(r"AKIAIOSFODNN7EXAMPLE|decoy-project|decoy-repo|SETUP-
                           r"example\.com/install\.sh|se-demo-unvetted|customers\.(csv|zip)|example\.com/upload|"
                           r"sedemo-persistence-demo|\breqeusts\b|registry\.example\.com|eai-other-project|"
                           r"bypassPermissions")
+
+
+def scene_group(cmd, cwd=""):
+    """The scene group an event without a rule id most likely belongs to, from the scene commands it contains."""
+    text = str(cmd or "")
+    for sc in SCENES:
+        for k in ("win", "posix"):
+            if sc.get(k) and sc[k] in text:
+                return sc.get("group", "")
+        if sc.get("write") and sc["write"][0] in text:
+            return sc.get("group", "")
+    return ""
 
 
 def _is_demo(cmd):

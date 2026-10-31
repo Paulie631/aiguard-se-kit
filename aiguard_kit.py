@@ -2650,13 +2650,17 @@ def feed(cfg, sources=FEED_SOURCES, minutes=60, eai_tenant=None):
                                   "who": i.get("host") or i.get("user") or "", "detail": " · ".join(
                                       filter(None, [*(i.get("patterns") or []), *(i.get("owasp") or []), *(i.get("mitre") or [])])),
                                   "tool": i.get("tool"), "demo": i.get("demo"),
-                                  "rule": i.get("rule_title") or i.get("rule") or "", "reason": i.get("reason") or "",
+                                  "rule": i.get("rule_title") or i.get("rule") or "", "group": i.get("rule_group") or "",
+                                  "reason": i.get("reason") or "",
                                   "message": i.get("message") or "", "session": i.get("session") or "",
                                   "event_type": i.get("event_type") or "", "user": i.get("user") or "", "host": i.get("host") or "",
                                   "cwd": i.get("cwd") or "", "serial": i.get("serial") or "", "raw": i.get("raw") or "",
                                   "patterns": i.get("patterns") or [], "owasp": i.get("owasp") or [], "mitre": i.get("mitre") or [],
                                   "id": f"eai-{i.get('time')}-{i.get('command', '')[:30]}"})
             out["eai_hosts"] = ev.get("hosts") or []
+            acts = (cfg.get("eai") or {}).get("actions") or {}
+            out["rule_actions"] = {r["title"]: acts.get(r["id"], "audit") for r in em.rule_catalog()}   # for the rules chart
+            out["groups"] = list(dict.fromkeys(r["group"] for r in em.rule_catalog() if not r["optional"]))
             if not any(i["source"] == "eai" for i in items) and minutes < 1440:   # empty window: say what's just outside it
                 day = em.evidence(eai_tenant() if eai_tenant else em.connect(cfg), cfg, hours=24, limit=100)
                 if day["items"]:
