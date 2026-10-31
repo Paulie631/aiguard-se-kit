@@ -328,11 +328,54 @@ def rule_catalog():
              "optional": bool(r.get("optional"))} for r in template()["rules"]]
 
 
-def validate(t, rules):
+def rejected_rules(t, rules):
+    """The rules Endpoint AI's own check rejects, each with its reason: [] when all are accepted. One call when they
+    pass; if the batch fails and the errors don't say which rule, each rule is checked on its own to name it."""
     res = t.req("POST", "/v1/policies/validate", body={"rules": rules})
-    if not res.get("valid", False):
-        raise K.KitError("Endpoint AI rejected the demo policy's rules: " + "; ".join(map(str, res.get("errors") or ["no reason given"]))
-                         + ". Send this to the kit owner.")
+    if res.get("valid", False):
+        return []
+    titles = {r["id"]: r.get("title") or r["id"] for r in template()["rules"]}
+    ids = [r.get("id") for r in rules]
+    bad = []
+    for err in res.get("errors") or []:
+        rid = None
+        if isinstance(err, dict):
+            idx = err.get("index") if isinstance(err.get("index"), int) else err.get("rule_index")
+            rid = err.get("rule_id") or err.get("id") or (ids[idx] if isinstance(idx, int) and 0 <= idx < len(ids) else None)
+            msg = err.get("message") or err.get("error") or json.dumps(err)
+        else:
+            msg = str(err)
+        if rid in titles:
+            bad.append({"id": rid, "title": titles[rid], "error": str(msg)[:300]})
+    if not bad:   # the errors didn't name a rule: find them one by one
+        for r in rules:
+            one = t.req("POST", "/v1/policies/validate", body={"rules": [r]})
+            if not one.get("valid", False):
+                bad.append({"id": r.get("id"), "title": titles.get(r.get("id"), r.get("id")),
+                            "error": "; ".join(map(str, one.get("errors") or ["rejected"]))[:300]})
+    return bad or [{"id": "", "title": "the policy", "error": "; ".join(map(str, res.get("errors") or ["no reason given"]))[:300]}]
+
+
+def validate(t, rules, log=None):
+    bad = rejected_rules(t, rules)
+    if bad:
+        for b in bad:
+            if log:
+                log("fail", f"Endpoint AI rejected rule '{b['title']}': {b['error']}")
+        raise K.KitError(f"Endpoint AI rejected {len(bad)} rule{'s' if len(bad) > 1 else ''}: "
+                         + ", ".join(b["title"] for b in bad) + ". Nothing was changed. Set "
+                         + ("that rule" if len(bad) == 1 else "those rules") + " to Allow (rule off) under Per-rule "
+                         "actions and try again, and send the reason to the kit owner.")
+
+
+def check_rules(t, cfg):
+    """Every demo rule, accepted or not by Endpoint AI's check (without writing the policy)."""
+    e = ecfg(cfg)
+    actions = e.get("actions") or preset_actions("monitor")
+    rules = build_rules(actions, bool(e.get("shell_lock")))
+    bad = {b["id"]: b["error"] for b in rejected_rules(t, rules)}
+    return [{"id": r["id"], "title": r["title"], "group": r["group"], "ok": r["id"] not in bad, "error": bad.get(r["id"], "")}
+            for r in rule_catalog() if not r["optional"] or e.get("shell_lock")]
 
 
 def _items(body, *keys):
@@ -545,7 +588,8 @@ def ensure_policy(t, cfg, gid, log, mode=None):
     actions = e.get("actions") or preset_actions(st.get("mode") if st.get("mode") in PRESETS else "monitor")
     mode = preset_of(actions)
     rules = build_rules(actions, bool(e.get("shell_lock")))
-    validate(t, rules)
+    validate(t, rules, log)
+    log("ok", f"Endpoint AI accepted all {len(rules)} rules")
     name = policy_name()
     note = f"SE demo kit: {PRESETS[mode]['label'] if mode in PRESETS else 'custom per-rule actions'}"
     p = None
@@ -1743,6 +1787,8 @@ def api_get(path, cfg, tenant):
         if m:
             hours = min(int(m.group(1)), 24 * 30)
         return evidence(tenant(), cfg, hours=hours)
+    if path == "/api/eai/check-rules":
+        return {"rules": check_rules(tenant(), cfg)}
     if path == "/api/eai/audit":
         return {"items": audit(tenant(), cfg)}
     return None

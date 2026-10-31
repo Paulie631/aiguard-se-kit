@@ -350,7 +350,7 @@ tr.feednew td{animation:feedflash 4s ease-out}
     </div>
     <details id="eairules" style="margin-top:10px"><summary style="cursor:pointer"><b>Per-rule actions</b> <span class="muted" style="font-size:12.5px">· allow, audit (record and let it run) or block, rule by rule</span></summary>
       <div id="eairuletable" style="margin-top:8px"></div>
-      <div class="row" style="gap:10px;margin-top:8px"><button class="primary" id="eairulesave">Save rule actions</button><span class="muted" id="eairulenote" style="font-size:12.5px"></span></div>
+      <div class="row" style="gap:10px;margin-top:8px"><button class="primary" id="eairulesave">Save rule actions</button><button id="eairulecheck">Check rules with Endpoint AI</button><span class="muted" id="eairulenote" style="font-size:12.5px"></span></div>
     </details>
     <div id="eaiout"></div>
     <div class="log" id="eailog" style="display:none;margin-top:12px"></div>
@@ -1578,9 +1578,17 @@ $("#eaisetup").onclick=async()=>{
 $("#eaistatus").onclick=async()=>{$("#eaiout").innerHTML='<div class="muted">Checking…</div>';
   try{const r=await api("/api/eai/status");if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));$("#eaiout").innerHTML=checksHTML(r.checks);eai()}catch(err){$("#eaiout").innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
 function drawRules(e){const acts=e.actions||{},groups=[...new Set((e.rules||[]).map(r=>r.group))];
-  $("#eairuletable").innerHTML=`<div class="tablewrap"><table><tr><th>Group</th><th>Rule</th><th style="width:150px">Action</th></tr>${groups.map(g=>(e.rules||[]).filter(r=>r.group==g&&(!r.optional||e.shell_lock)).map((r,i)=>`<tr><td class="muted" style="font-size:12.5px">${i?"":esc(g)}</td><td>${esc(r.title)} <span class="muted" style="font-size:11.5px">${esc(r.id)}</span></td>
-    <td><select data-rule="${esc(r.id)}">${["audit","block","allow"].map(v=>`<option value="${v}" ${(acts[r.id]||"audit")==v?"selected":""}>${{audit:"Audit (record)",block:"Block",allow:"Allow (rule off)"}[v]}</option>`).join("")}</select></td></tr>`).join("")).join("")}</table></div>`;
-  $("#eairulenote").textContent=e.state&&e.state.policy_id?"":"Create the demo policy first (Create or update)."}
+  $("#eairuletable").innerHTML=`<div class="tablewrap"><table><tr><th>Group</th><th>Rule</th><th style="width:150px">Action</th><th style="width:220px">Endpoint AI check</th></tr>${groups.map(g=>(e.rules||[]).filter(r=>r.group==g&&(!r.optional||e.shell_lock)).map((r,i)=>`<tr><td class="muted" style="font-size:12.5px">${i?"":esc(g)}</td><td>${esc(r.title)} <span class="muted" style="font-size:11.5px">${esc(r.id)}</span></td>
+    <td><select data-rule="${esc(r.id)}">${["audit","block","allow"].map(v=>`<option value="${v}" ${(acts[r.id]||"audit")==v?"selected":""}>${{audit:"Audit (record)",block:"Block",allow:"Allow (rule off)"}[v]}</option>`).join("")}</select></td><td style="font-size:12px">${ruleCheckCell(r.id)}</td></tr>`).join("")).join("")}</table></div>`;
+  if(!RULECHECK)$("#eairulenote").textContent=e.state&&e.state.policy_id?"":"Create the demo policy first (Create or update)."}
+let RULECHECK=null;   // id -> {ok, error} from the last "Check rules"
+const ruleCheckCell=id=>{const c=RULECHECK&&RULECHECK[id];if(!c)return '<span class="muted">not checked</span>';
+  return c.ok?`<span class="ic ok">${ICON.ok}</span> accepted`:`<span class="ic fail">${ICON.fail}</span> rejected: ${esc(c.error)}`};
+$("#eairulecheck").onclick=async()=>{const b=$("#eairulecheck");b.disabled=true;$("#eairulenote").textContent="Asking Endpoint AI to check every rule…";$("#eairules").open=true;
+  try{const r=await api("/api/eai/check-rules");if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));
+    RULECHECK=Object.fromEntries(r.rules.map(x=>[x.id,x]));const bad=r.rules.filter(x=>!x.ok);
+    $("#eairulenote").innerHTML=bad.length?`<span class="fail">${bad.length} rule${bad.length>1?"s":""} rejected — set ${bad.length>1?"them":"it"} to Allow and save, then tell the kit owner.</span>`:`<span class="ok">All ${r.rules.length} rules accepted by Endpoint AI.</span>`;
+    drawRules(EAI)}catch(err){$("#eairulenote").innerHTML=`<span class="fail">${esc(err.message)}</span>`}finally{b.disabled=false}};
 $("#eairulesave").onclick=()=>{if(!(EAI&&EAI.state&&EAI.state.policy_id))return alert("Create the demo policy first (Create or update).");
   const actions=Object.fromEntries($$("[data-rule]").map(x=>[x.dataset.rule,x.value]));
   $("#eaiout").innerHTML="";runJob("/api/eai/actions",{actions},$("#eailog"),j=>{EAIMODE=null;eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};

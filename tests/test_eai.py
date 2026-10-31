@@ -132,6 +132,11 @@ class FakeEai:
                 return Resp(200, {})
             return Resp(200, d)
         if path == "/v1/policies/validate":
+            rej = [i for i, r in enumerate((body or {}).get("rules") or []) if r.get("id") in getattr(self, "reject_ids", ())]
+            if rej:   # like an engine that rejects one pattern; errors either name the rule's index or don't
+                if getattr(self, "reject_style", "index") == "index":
+                    return Resp(200, {"valid": False, "errors": [{"index": i, "message": "unsupported regex"} for i in rej]})
+                return Resp(200, {"valid": False, "errors": ["pattern not supported"]})
             return Resp(200, {"valid": True, "errors": []} if self.valid else {"valid": False, "errors": ["rules[1]: must be object"]})
         if path == "/v1/policies":
             if method == "GET":
@@ -429,7 +434,7 @@ def test_hostname_finds_the_generator_when_no_zia_user(eenv):
 def test_rejected_rules_stop_before_anything_is_saved(eenv):
     kit, e, fake = eenv("eai")
     fake.valid = False
-    with pytest.raises(kit.KitError, match="rejected the demo policy"):
+    with pytest.raises(kit.KitError, match="Endpoint AI rejected .* Nothing was changed"):
         e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
     assert not any(p["name"].startswith("SE-Demo") for p in fake.policies)
 
@@ -1549,3 +1554,39 @@ def test_raw_detail_keeps_long_events(eenv):
     out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     raw = kit.feed_raw(out["items"][0]["id"])
     assert '"tool_input"' in raw and len(raw) > 9000   # was cut off at 4,000 characters
+
+
+def test_setup_names_each_rejected_rule_and_changes_nothing(eenv):
+    kit, e, fake = eenv("eai")
+    fake.reject_ids = {"r-sedemo-reverse-shell"}
+    log = []
+    with pytest.raises(kit.KitError, match="rejected 1 rule: Reverse shell. Nothing was changed"):
+        e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(log))
+    assert not any(p["name"].startswith("SE-Demo") for p in fake.policies)
+    assert any("rejected rule 'Reverse shell': unsupported regex" in str(m) for m in log)
+
+
+def test_rejected_rule_is_found_even_when_errors_dont_name_it(eenv):
+    kit, e, fake = eenv("eai")
+    fake.reject_ids, fake.reject_style = {"r-sedemo-iam-star", "r-sedemo-ci-edit"}, "plain"
+    bad = e.rejected_rules(e.connect(kit.load_cfg()), e.build_rules(e.preset_actions("monitor"), False))
+    assert {b["title"] for b in bad} == {"All-access IAM policy", "CI pipeline file changed"}
+    assert all(b["error"] == "pattern not supported" for b in bad)
+
+
+def test_check_rules_lists_every_rule_with_its_result(eenv):
+    kit, e, fake = eenv("eai")
+    out = e.api_get("/api/eai/check-rules", kit.load_cfg(), lambda: e.connect(kit.load_cfg()))["rules"]
+    assert len(out) == 42 and all(r["ok"] for r in out)               # the shell lock is off, so it isn't checked
+    fake.reject_ids = {"r-sedemo-llm-key"}
+    out = e.api_get("/api/eai/check-rules", kit.load_cfg(), lambda: e.connect(kit.load_cfg()))["rules"]
+    bad = [r for r in out if not r["ok"]]
+    assert [r["id"] for r in bad] == ["r-sedemo-llm-key"] and bad[0]["error"] == "unsupported regex"
+    assert not any(m == "PUT" or (m == "POST" and p == "/v1/policies") for m, p in fake.writes())   # a check writes nothing
+
+
+def test_setup_says_all_rules_were_accepted(eenv):
+    kit, e, fake = eenv("eai")
+    log = []
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(log))
+    assert any("Endpoint AI accepted all 42 rules" in str(m) for m in log)
