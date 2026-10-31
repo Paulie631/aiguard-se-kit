@@ -1621,3 +1621,15 @@ def test_demo_set_is_one_scene_per_group(eenv):
     sc = e.public_state(kit.load_cfg())["scenes"]
     picked = [s for s in sc if s["demo_set"]]
     assert len(picked) == len({s["group"] for s in sc}) == len({s["group"] for s in picked}) == 9
+
+
+def test_demo_keeps_a_history_of_runs(eenv, monkeypatch):
+    kit, e, fake = eenv("eai")
+    cfg = kit.load_cfg(); cfg["eai"].pop("client_id", None); kit.save_cfg(cfg)
+    runner = lambda cmd, cwd, env, **kw: e.subprocess.CompletedProcess(cmd, 0, stdout='{"result": "RESULT: BLOCKED a PreToolUse hook stopped it"}', stderr="")  # noqa: E731
+    monkeypatch.setattr(e, "find_claude", lambda: "claude")
+    for _ in range(22):
+        e.demo(log_into([]), scenes=["secret"], runner=runner, cfg=kit.load_cfg())
+    runs = kit.load_cfg()["eai"]["runs"]
+    assert len(runs) == 20 and runs[-1]["results"] == [{"id": "secret", "title": "Agent writes a cloud access key to disk", "outcome": "blocked"}]
+    assert len(e.public_state(kit.load_cfg())["runs"]) == 10

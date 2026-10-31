@@ -366,7 +366,8 @@ tr.feednew td{animation:feedflash 4s ease-out}
     <div><span class="lbl">c · Scenes</span> <span class="muted" style="font-size:12px">· pick what the agent should attempt</span>
       <div id="eaiquick" class="row" style="gap:6px;flex-wrap:wrap;margin:6px 0 4px"></div>
       <div id="eaiscenes" style="margin:4px 0 10px"></div>
-      <button class="primary" id="eaidemo">Run scenes on this machine</button></div>
+      <button class="primary" id="eaidemo">Run scenes on this machine</button>
+      <details id="eairuns" style="margin-top:10px;display:none"><summary class="muted" style="cursor:pointer;font-size:12.5px">Recent runs on this machine</summary><div id="eairunlist" style="margin-top:6px"></div></details></div>
     <div id="eaidemoout"></div>
     <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
   </div>
@@ -1456,6 +1457,40 @@ function drawCharts(el,items,r,min){ensureTip();const q=x=>el.querySelector(x),e
   if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c8]").innerHTML=cDetections(eai);q("[data-c5]").innerHTML=cTools(items);
     q("[data-c6]").innerHTML=cSessions(eai,min);q("[data-c7]").innerHTML=cSources(items,min)}}
 const FEED_ROWS=100;   // table rows drawn at first; counts and charts always use every event in the window
+function endpointRecap(r,min,who){   // one printable page: what the agent tried and what Endpoint AI did
+  const items=(r.items||[]),eai=items.filter(i=>i.source=="eai"),risky=eai.filter(i=>i.rule||(i.patterns||[]).length);
+  const n=v=>risky.filter(i=>VK(i.verdict)==v).length,cnt=(list,f)=>{const c={};list.forEach(i=>[].concat(f(i)||[]).forEach(k=>{if(k)c[k]=(c[k]||0)+1}));return Object.entries(c).sort((a,b)=>b[1]-a[1])};
+  const groups=(r.groups||[]).map(g=>{const l=risky.filter(i=>i.group==g);return [g,l.length,l.filter(i=>VK(i.verdict)=="block").length,l.filter(i=>VK(i.verdict)=="audit").length]}).filter(x=>x[1]);
+  const rules=cnt(risky,i=>i.rule),acts=r.rule_actions||{},det=cnt(risky,i=>i.patterns),ow=cnt(risky,i=>i.owasp),mi=cnt(risky,i=>i.mitre);
+  const modes=r.mode_log||[],sw=modes.filter(m=>Date.parse(m.at)>=Date.now()-min*60000).slice(-1)[0];
+  let ba="";if(sw){const t=Date.parse(sw.at),b=risky.filter(i=>Date.parse(i.time)<t),a=risky.filter(i=>Date.parse(i.time)>=t),bl=l=>l.filter(i=>VK(i.verdict)=="block").length;
+    ba=`<p><b>Before and after.</b> At ${esc(tlabel(t))} the policy was switched to <b>${esc(MODESHORT[sw.mode]||sw.mode)}</b>. Before: ${b.length} risky actions, ${bl(b)} blocked. After: ${a.length} risky actions, ${bl(a)} blocked.</p>`}
+  const win=min>=1440?"the last 24 hours":min>=60?"the last hour":`the last ${min} minutes`,date=new Date().toLocaleString();
+  const V={block:'<span class="BLOCK">Blocked</span>',audit:"Audited (ran, recorded)",allow:"Allowed"};
+  const chips=l=>l.length?l.map(([k,c])=>`<span class="chip">${esc(k)} · ${c}</span>`).join(""):'<span class="sub">None in this window.</span>';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Endpoint AI demo recap${who?" – "+esc(who):""}</title><style>
+  body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;color:#14171c;max-width:900px;margin:40px auto;padding:0 28px}
+  h1{font-size:26px;margin:0;letter-spacing:-.02em}h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#5d6673;margin:30px 0 10px}
+  .sub{color:#5d6673;margin-top:6px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:22px}
+  .kpi{border:1px solid #e3e6eb;border-radius:10px;padding:14px}.kpi b{display:block;font-size:26px}
+  table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;border-bottom:1px solid #e3e6eb;text-align:left;vertical-align:top}th{color:#5d6673;font-weight:600;font-size:12px}
+  td code{font:12px ui-monospace,Menlo,monospace;overflow-wrap:anywhere}.chip{display:inline-block;font:500 11px ui-monospace,Menlo,monospace;padding:1px 6px;border-radius:5px;background:#eef2ff;color:#2a3f99;margin:2px 4px 2px 0}
+  .BLOCK{color:#b42318;font-weight:600}.foot{margin-top:36px;color:#5d6673;font-size:12px;border-top:1px solid #e3e6eb;padding-top:12px}
+  .btn{position:fixed;top:16px;right:16px;font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #e3e6eb;background:#fff;cursor:pointer}
+  @media print{.btn{display:none}body{margin:0 auto}}</style></head><body>
+  <button class="btn" onclick="print()">Print / save as PDF</button>
+  <h1>Endpoint AI demo recap</h1>
+  <div class="sub">${who?"Prepared for "+esc(who)+" · ":""}${esc(date)} · ${esc(win)} · AI coding agent on ${esc((r.eai_hosts||[]).join(", ")||"the demo machine")}${r.mode?` · policy now: ${esc(MODESHORT[r.mode]||r.mode)}`:""}</div>
+  <div class="kpis"><div class="kpi"><b>${risky.length}</b>risky actions the agent attempted</div><div class="kpi"><b class="BLOCK">${n("block")}</b>blocked before they ran</div>
+  <div class="kpi"><b>${n("audit")}</b>audited (ran, recorded)</div><div class="kpi"><b>${det.length}</b>Endpoint AI built-in detections</div></div>
+  ${ba}
+  <h2>What the agent attempted, by risk</h2>${groups.length?`<table><tr><th>Risk category</th><th>Attempted</th><th>Blocked</th><th>Audited</th></tr>${groups.map(([g,a,b,u])=>`<tr><td>${esc(g)}</td><td>${a}</td><td>${b}</td><td>${u}</td></tr>`).join("")}</table>`:'<div class="sub">No demo rule matched in this window.</div>'}
+  <h2>Policy rules that fired</h2>${rules.length?`<table><tr><th>Rule (SE-Demo policy)</th><th>Hits</th><th>Action now</th></tr>${rules.map(([k,c])=>`<tr><td>${esc(k)}</td><td>${c}</td><td>${esc({block:"Block",audit:"Audit",allow:"Allow"}[acts[k]]||"Audit")}</td></tr>`).join("")}</table>`:'<div class="sub">None in this window.</div>'}
+  <h2>Endpoint AI built-in detections</h2><div>${chips(det)}</div>
+  <h2>Frameworks</h2><div class="sub" style="margin:0 0 4px">OWASP Top 10 for Agentic Applications</div><div>${chips(ow)}</div><div class="sub" style="margin:10px 0 4px">MITRE ATLAS</div><div>${chips(mi)}</div>
+  <h2>Every risky action</h2>${risky.length?`<table><tr><th style="width:90px">Time</th><th>What the agent did</th><th style="width:120px">Result</th><th style="width:200px">Rule / detection</th></tr>${risky.slice().reverse().map(i=>`<tr><td>${esc(new Date(i.time).toLocaleTimeString())}</td><td><code>${esc(String(i.what||i.tool||"").slice(0,180))}</code></td><td>${V[VK(i.verdict)]}</td><td>${esc(i.rule||"")}${i.rule&&(i.patterns||[]).length?"<br>":""}<span class="sub">${esc((i.patterns||[]).join(", "))}</span></td></tr>`).join("")}</table>`:'<div class="sub">No risky actions in this window.</div>'}
+  <div class="foot">Generated by the Zscaler SE demo kit from Endpoint AI Security events. Every action used decoy files or printed-only commands with published test data (for example AWS's documentation key AKIAIOSFODNN7EXAMPLE); nothing real was read, sent or changed.</div>
+  </body></html>`}
 function beforeAfter(items,modes,min){   // the latest policy switch in this window: what changed for the risky actions
   const cut=Date.now()-min*60000,sw=(modes||[]).filter(m=>Date.parse(m.at)>=cut).slice(-1)[0];if(!sw)return "";
   const t=Date.parse(sw.at),i=(modes||[]).indexOf(sw),prev=i>0?modes[i-1].mode:"";
@@ -1472,7 +1507,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     <select data-fm><option value="15" ${st.min==15?"selected":""}>Last 15 min</option><option value="60" ${st.min==60?"selected":""}>Last hour</option><option value="1440">Last 24 hours</option></select>
     <span class="seg" style="display:inline-flex;gap:0"><button data-fv="events" class="on">Events</button><button data-fv="sessions">Sessions</button></span>
     <label class="chk" style="margin:0"><input type="checkbox" data-fd>Demo events only</label>
-    <button data-fp>Pause</button><span class="muted" data-fstat style="font-size:12px"></span>
+    <button data-fp>Pause</button><button data-frecap title="A one-page summary of this window to print or save as PDF for the customer">Download recap</button><span class="muted" data-fstat style="font-size:12px"></span>
     <span data-fmode style="display:none;margin-left:auto" class="row"><span class="lbl" style="margin:0">Policy</span><span class="seg" style="display:inline-flex;gap:0"><button data-fm2="monitor">Monitor</button><button data-fm2="block">Block</button></span></span></div>
     <div data-fmodelog class="muted" style="font-size:12px;margin-top:4px"></div>
     <div data-ftiles class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"></div>
@@ -1490,6 +1525,8 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     if(!confirm(m=="block"?"Switch the SE-Demo policy to Block everything? The demo actions will be stopped before they run.":"Switch the SE-Demo policy to Monitor? The demo actions will run and be recorded."))return;
     el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=true);q("[data-fmodelog]").textContent=`Switching to ${m}…`;
     runJob("/api/eai/mode",{mode:m},q("[data-fmodelog]"),()=>{el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=false);EAIMODE=null;tick(true)})});
+  q("[data-frecap]").onclick=()=>{if(!st.last)return;const who=(prompt("Customer name for the recap (optional):","")||"").trim();
+    download(`endpoint-ai-recap-${new Date().toISOString().slice(0,10)}.html`,endpointRecap(st.last,st.min,who),"text/html")};
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
   el.addEventListener("click",ev=>{if(ev.target.closest("[data-frows]")){st.rows+=200;st.last&&draw(st.last);return}
     const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
@@ -1572,6 +1609,9 @@ function drawScenes(e){
     else if(k=="blocked")scenes.filter(s=>last[s.id]=="blocked").forEach(s=>EAISEL.add(s.id));
     else if(k=="one"){const seen=new Set();scenes.forEach(s=>{if(!seen.has(s.group)){seen.add(s.group);EAISEL.add(s.id)}})}
     drawScenes(EAI)});
+  const runs=(e.runs||[]).slice().reverse();$("#eairuns").style.display=runs.length?"":"none";
+  $("#eairunlist").innerHTML=`<div class="tablewrap"><table><tr><th>When</th><th>Scenes</th><th>Blocked</th><th>Ran</th><th>Other</th></tr>${runs.map(r=>{const c=k=>r.results.filter(x=>x.outcome==k).length,o=r.results.length-c("blocked")-c("ran");
+    return `<tr title="${esc(r.results.map(x=>x.title+": "+(SCLAST[x.outcome]||x.outcome)).join("\n"))}"><td>${esc(new Date(r.at).toLocaleString())}</td><td>${r.results.length}</td><td>${c("blocked")}</td><td>${c("ran")}</td><td>${o}</td></tr>`}).join("")}</table></div>`;
   const n=EAISEL.size;$("#eaiselcnt").textContent=`${n} selected`;
   $("#eaidemo").disabled=!n;$("#eaidemo").textContent=n?`Run ${n} scene${n>1?"s":""} on this machine`:"Pick at least one scene";
 }

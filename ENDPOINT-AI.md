@@ -163,6 +163,22 @@ The story: start in **Monitor**, run the scenes, show the activity (the commands
 OWASP Agentic and MITRE ATLAS tags). Switch **Mode** to **Block** and run them again: Endpoint AI stops each command
 before it runs and tells the agent why.
 
+## Running the demo in front of a customer
+
+1. **On the generator**, click **Demo set** above the scenes. It ticks one dependable scene per risk category (nine
+   in all). Then click **Run**.
+2. **On your laptop**, open the **Live feed** tab with the policy on **Monitor** (the switch is at the top right of
+   the feed). The actions run and are recorded.
+3. Click **Block** on the feed's policy switch, then run the same scenes again on the generator. The timeline marks
+   the moment you switched, and a card above the charts compares the risky actions before and after the switch.
+4. Click **Download recap** on the feed for a one-page summary: what the agent attempted by risk category, the
+   policy rules that fired, Endpoint AI's own built-in detections, OWASP and MITRE ATLAS tags, and every risky
+   action. Print it or save it as a PDF to leave with the customer.
+
+The generator keeps each run's scenes and outcomes under **Recent runs on this machine**. Click **Check rules with
+Endpoint AI** under Per-rule actions to see, rule by rule, whether Endpoint AI accepts the demo rules (Create or
+update does the same check first, names any rule it rejects, and changes nothing if one is rejected).
+
 ## Showing the results
 
 - **Live feed** (its own tab in the console, on your laptop; no Client Connector needed there): refreshes every 20

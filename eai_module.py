@@ -1578,7 +1578,11 @@ def demo(log, scenes=None, runner=subprocess.run, cfg=None):
     if out:   # remember each scene's last outcome, for the picker (generator-side cfg)
         last = (ecfg(cfg).get("last_run") or {}).get("results") or {}
         last.update({r["id"]: r["outcome"] for r in out})
-        ecfg(cfg)["last_run"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": last}
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        ecfg(cfg)["last_run"] = {"at": now, "results": last}
+        runs = ecfg(cfg).setdefault("runs", [])   # full history, newest last: each run's scenes and outcomes
+        runs.append({"at": now, "results": [{"id": r["id"], "title": r["title"], "outcome": r["outcome"]} for r in out]})
+        ecfg(cfg)["runs"] = runs[-20:]
         K.save_cfg(cfg)
     log("info", "Endpoint AI's own record is what counts: the events show in its console (Events) and on the kit's "
                 "Live feed tab on your laptop within a few minutes.")
@@ -1774,7 +1778,7 @@ def public_state(cfg):
             "policy": policy_name(), "group": group_name(), "console_path": CONSOLE_PATH,
             "scenes": [{"id": s["id"], "title": s["title"], "group": s.get("group", ""), "rule": s.get("rule", ""),
                         "why": s.get("why", ""), "new": bool(s.get("new")), "demo_set": bool(s.get("demo_set"))} for s in SCENES],
-            "last_run": e.get("last_run"),
+            "last_run": e.get("last_run"), "runs": (e.get("runs") or [])[-10:],
             "rules": rule_catalog(), "actions": e.get("actions") or preset_actions("monitor"),
             "presets": [{"id": k, "label": v["label"]} for k, v in PRESETS.items()],
             "zcc": zcc_signin(cfg), "claude": claude_status(), "admin_machine": admin_machine(cfg),
