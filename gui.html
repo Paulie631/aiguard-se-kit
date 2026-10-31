@@ -56,7 +56,7 @@ button:disabled{opacity:.5;cursor:default}
 .group summary::-webkit-details-marker{display:none}
 .group summary .n{margin-left:auto;color:var(--muted);font-weight:400;font-size:12px}
 .test{display:flex;gap:8px;align-items:flex-start;padding:4px 0 4px 22px;font-size:13px;cursor:pointer}
-.test small{color:var(--muted);display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}
+.test small{color:var(--muted);display:block;font-size:12px;overflow-wrap:anywhere;line-height:1.3;max-width:320px}
 .dir{font:600 10px var(--mono);padding:1px 4px;border-radius:4px;background:var(--soft);color:var(--muted)}
 .row{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
 .field{display:flex;flex-direction:column;gap:5px}
@@ -1400,7 +1400,7 @@ function cTimeline(items,min){const B=buckets(min),W=600,H=170,L=30,Bm=22,cw=(W-
 function hbars(rows,labelW){   // rows: {label, segs:[{v,k|color}], value, tip}; HTML so text stays readable at any width
   const mx=Math.max(1,...rows.map(r=>r.segs.reduce((a,x)=>a+x.v,0)));
   return `<div style="display:grid;grid-template-columns:${labelW}px 1fr;gap:6px 10px;align-items:center;font-size:12px">${rows.map(r=>{const t=r.segs.reduce((a,x)=>a+x.v,0),segs=r.segs.filter(x=>x.v);
-    return `<div style="text-align:right;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.label)}">${esc(r.label)}</div>
+    return `<div style="text-align:right;color:var(--ink);overflow-wrap:anywhere;line-height:1.25" title="${esc(r.label)}">${esc(r.label)}</div>
     <div style="display:flex;align-items:center;gap:6px;min-width:0" ${tipAttr(r.tip)}><div style="display:flex;gap:2px;width:${(80*t/mx).toFixed(1)}%;height:14px">${segs.map((x,j)=>`<span style="flex:${x.v};background:${x.color||VC[x.k]};border-radius:${j==segs.length-1?"0 4px 4px 0":"0"}"></span>`).join("")}</div><span style="color:var(--ink);white-space:nowrap">${r.value}</span></div>`}).join("")}</div>`}
 function cGroups(items,r){const groups=(r.groups&&r.groups.length?r.groups:[...new Set(items.map(i=>i.group).filter(Boolean))]);
   if(!groups.length)return `<h4>Risk categories</h4><div class="sub">No Endpoint AI events in this window.</div>`;
@@ -1412,6 +1412,19 @@ function cRules(items,r){const acts=r.rule_actions||{},c={};items.forEach(i=>{if
   const rows=e.map(([k,n])=>{const a=["block","audit","allow"].includes(acts[k])?acts[k]:"audit";
     return{label:k,segs:[{k:a,v:n}],value:`${n} · ${a=="block"?"✕ block":a=="allow"?"✓ allow":"! audit"}`,tip:`${k}\n${n} event${n>1?"s":""} · rule set to ${a}`}});
   return `<h4>Rules that fired</h4><div class="sub">Hits per demo rule, coloured by its current action (change it under Per-rule actions)</div>${hbars(rows,170)}${vLegend()}`}
+function cDetections(items){   // Endpoint AI's own built-in detections, next to the SE-Demo policy rules
+  const calls=items.filter(i=>!/UserPromptSubmit/i.test(i.tool||"")&&(i.rule||(i.patterns||[]).length));
+  const both=calls.filter(i=>i.rule&&(i.patterns||[]).length).length,ro=calls.filter(i=>i.rule&&!(i.patterns||[]).length).length,
+        bo=calls.filter(i=>!i.rule&&(i.patterns||[]).length).length;
+  const c={};items.forEach(i=>(i.patterns||[]).forEach(p=>{const v=VK(i.verdict);(c[p]=c[p]||{block:0,audit:0,allow:0})[v]++}));
+  const e=Object.entries(c).map(([k,v])=>[k,v,v.block+v.audit+v.allow]).sort((a,b)=>b[2]-a[2]).slice(0,8);
+  if(!calls.length)return `<h4>Your rules and Endpoint AI's own detections</h4><div class="sub">No detections in this window.</div>`;
+  const split=hbars([{label:"Caught by both",segs:[{color:"var(--accent)",v:both}],value:both,tip:`${both} action${both==1?"":"s"} matched a demo rule and an Endpoint AI built-in detection`},
+                     {label:"Your rule only",segs:[{color:"color-mix(in srgb,var(--accent) 55%,transparent)",v:ro}],value:ro,tip:`${ro} matched only a demo rule`},
+                     {label:"Built-in only",segs:[{color:"color-mix(in srgb,var(--accent) 30%,transparent)",v:bo}],value:bo,tip:`${bo} matched only Endpoint AI's built-in detections`}],120);
+  const rows=e.map(([k,v,n])=>({label:k,segs:[{k:"block",v:v.block},{k:"audit",v:v.audit},{k:"allow",v:v.allow}],value:n,
+    tip:`${k} (Endpoint AI built-in)\n${n} event${n>1?"s":""}: ${v.block} blocked · ${v.audit} audited · ${v.allow} allowed`}));
+  return `<h4>Your rules and Endpoint AI's own detections</h4><div class="sub">The SE-Demo policy is custom; Endpoint AI also flags risky actions on its own. Coverage, then its top built-in detections</div>${split}<div style="height:10px"></div>${e.length?hbars(rows,190)+vLegend():'<div class="muted" style="font-size:12px">No built-in detections in this window.</div>'}`}
 function cTools(items){const c={};items.filter(i=>i.source=="eai"&&i.tool&&!/UserPromptSubmit/i.test(i.tool)).forEach(i=>c[i.tool]=(c[i.tool]||0)+1);const e=Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,6);
   if(!e.length)return `<h4>What the agent used</h4><div class="sub">No tool calls in this window.</div>`;
   return `<h4>What the agent used</h4><div class="sub">Tool calls by tool · agents act through ordinary tools, which is why tool-level policy matters</div>${hbars(e.map(([k,n])=>({label:k,segs:[{color:"var(--accent)",v:n}],value:n,tip:`${k}: ${n} call${n>1?"s":""}`})),90)}`}
@@ -1436,7 +1449,7 @@ function cSources(items,min){const B=buckets(min),panel=(src,name,what)=>{const 
   return `<h4>AI Guard next to Endpoint AI</h4><div class="sub">Prompts stopped at the model, and actions stopped on the machine</div><div class="row" style="gap:16px;flex-wrap:wrap">${panel("aiguard","AI Guard (prompts this computer sent)","prompts")}${panel("eai","Endpoint AI (agent actions on the generator)","events")}</div>`}
 function drawCharts(el,items,r,min){ensureTip();const q=x=>el.querySelector(x),eai=items.filter(i=>i.source=="eai");
   q("[data-c1]").innerHTML=cTimeline(items,min);q("[data-c2]").innerHTML=cGroups(eai,r);
-  if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c5]").innerHTML=cTools(items);
+  if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c8]").innerHTML=cDetections(eai);q("[data-c5]").innerHTML=cTools(items);
     q("[data-c6]").innerHTML=cSessions(eai,min);q("[data-c7]").innerHTML=cSources(items,min)}}
 const FEED_ROWS=100;   // table rows drawn at first; counts and charts always use every event in the window
 function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
@@ -1451,7 +1464,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     <div data-ftiles class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"></div>
     <div class="fgrid"><div class="fchart" data-c1></div><div class="fchart" data-c2></div></div>
     <details data-fmore style="margin-top:10px"><summary style="cursor:pointer"><b>More charts</b> <span class="muted" style="font-size:12.5px">· frameworks, rules, tools, sessions, AI Guard next to Endpoint AI</span></summary>
-      <div class="fgrid"><div class="fchart" data-c3></div><div class="fchart" data-c4></div><div class="fchart" data-c5></div><div class="fchart" data-c7></div><div class="fchart" data-c6 style="grid-column:1/-1"></div></div></details>
+      <div class="fgrid"><div class="fchart" data-c3></div><div class="fchart" data-c4></div><div class="fchart" data-c8></div><div class="fchart" data-c5></div><div class="fchart" data-c7></div><div class="fchart" data-c6 style="grid-column:1/-1"></div></div></details>
     <div data-fzia style="margin-top:8px"></div><div data-fbody style="margin-top:8px"></div>`;
   const q=x=>el.querySelector(x);
   el.querySelectorAll("[data-fs]").forEach(c=>c.onchange=()=>{st.src=[...el.querySelectorAll("[data-fs]")].filter(x=>x.checked).map(x=>x.dataset.fs);tick(true)});
