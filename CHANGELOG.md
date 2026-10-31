@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.31
+- **Seventeen Endpoint AI scenes**, grouped: data exfiltration (bundling customer data, uploading a file), credentials
+  & config (cloud credentials file, shell startup file, git hooks off), supply chain (typo-squatted package, unknown
+  registry) and agent misuse (switching off its own permission checks, reading another project's files), on top of
+  the earlier eight. All use decoys the kit creates; uploads and installs are printed only. Each has its own rule.
+- **Per-rule actions.** Each SE-Demo rule can be Audit, Block or Allow (on the Endpoint AI tab, or `eai rule`), with
+  presets: Monitor, Block secrets & data theft, Block destructive & supply chain, Block everything.
+- **Guided demo tightens one risk at a time:** Monitor, Monitor, Block secrets & data theft, Block everything, then
+  back to Monitor.
+- Rules are narrow enough not to fire on ordinary work on the generator (`cd ../x`, relative imports, reading
+  `~/.bashrc`, `--no-verify`, `curl -d`), use no regex lookaheads, and match Windows paths as Endpoint AI encodes
+  them. Running setup without a preset keeps the policy's current actions instead of returning to Monitor, and a
+  scene that times out still cleans up after itself.
+- **Richer live feed:** summary tiles (events, blocked, audited, demo events, sessions, top risk patterns, OWASP and
+  MITRE), the rule that fired on each row, click a row for the reason, the message the agent got and the raw event,
+  a Sessions view with the prompt that started each one, and a "Demo events only" filter.
+
 ## 1.8.30
 - **Endpoint AI finds the Mac generator's device.** Its events came in, but setup said "no device in the group yet"
   because Endpoint AI's exact hostname filter didn't match. Setup now also asks for `name.local`, then searches

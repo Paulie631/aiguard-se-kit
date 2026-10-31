@@ -173,7 +173,7 @@ def test_storylines_talk_tracks_news_and_owasp_are_well_formed():
     for st in lib["stories"]:
         assert st["steps"] and st.get("requires") in (None, "zia", "eai")
         for s_ in st["steps"]:   # Endpoint AI steps: show steps that may switch its policy and embed the live feed
-            assert s_.get("eai_mode") in (None, "monitor", "block") and (not s_.get("eai_mode") or s_.get("kind") == "show")
+            assert s_.get("eai_mode") in (None, "monitor", "secrets", "destructive", "block") and (not s_.get("eai_mode") or s_.get("kind") == "show")
         changes = [s["policy"] for s in st["steps"] if s.get("policy")]
         if any(p != "monitor" for p in changes):
             assert changes[-1] == "monitor", f"{st['id']} must end back in Monitor"

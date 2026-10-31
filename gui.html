@@ -319,9 +319,13 @@ tr.feednew td{animation:feedflash 4s ease-out}
       <label class="chk" title="Adds a rule that blocks every shell command from AI agents on the generator"><input type="checkbox" id="eailock">Shell lock rule</label>
       <button class="primary" id="eaisetup">Create or update</button>
       <button id="eaistatus">Check status</button>
-      <span class="lbl" style="margin-left:8px">Mode</span>
-      <select id="eaimode"><option value="monitor">Monitor (record, let it run)</option><option value="block">Block</option></select>
+      <span class="lbl" style="margin-left:8px">Preset</span>
+      <select id="eaimode"><option value="monitor">Monitor: record everything</option><option value="block">Block everything</option></select>
     </div>
+    <details id="eairules" style="margin-top:10px"><summary style="cursor:pointer"><b>Per-rule actions</b> <span class="muted" style="font-size:12.5px">· allow, audit (record and let it run) or block, rule by rule</span></summary>
+      <div id="eairuletable" style="margin-top:8px"></div>
+      <div class="row" style="gap:10px;margin-top:8px"><button class="primary" id="eairulesave">Save rule actions</button><span class="muted" id="eairulenote" style="font-size:12.5px"></span></div>
+    </details>
     <div id="eaiout"></div>
     <div class="log" id="eailog" style="display:none;margin-top:12px"></div>
   </div>
@@ -333,7 +337,7 @@ tr.feednew td{animation:feedflash 4s ease-out}
     <div id="eaizccout"></div>
     <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"><span class="lbl">b · Claude Code</span>
       <span id="eaiclaude" style="font-size:13px"></span><button id="eaiinstall">Install Claude Code</button></div>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><span class="lbl">c · Scenes</span><span id="eaiscenes" class="row" style="gap:10px"></span><button class="primary" id="eaidemo">Run scenes on this machine</button></div>
+    <div><span class="lbl">c · Scenes</span> <span class="muted" style="font-size:12px">· tick a group to tick all its scenes</span><div id="eaiscenes" style="margin:6px 0 8px"></div><button class="primary" id="eaidemo">Run scenes on this machine</button></div>
     <div id="eaidemoout"></div>
     <div class="log" id="eaidemolog" style="display:none;margin-top:12px"></div>
   </div>
@@ -924,14 +928,15 @@ function drawStage(){
 }
 // Endpoint AI steps switch the SE-Demo Endpoint AI policy when they open (only when it isn't in that mode already).
 let EAIMODE=null;
+const EAIPRESET={monitor:"Monitor: record everything",secrets:"Block secrets & data theft",destructive:"Block destructive & supply chain",block:"Block everything"};
 async function eaiStepMode(m){const el=$("#seaimode");if(!el)return;
   try{if(EAIMODE==null){const e=await api("/api/eai/state");EAIMODE=(e.state||{}).mode||null;if(!(e.state||{}).policy_id){el.textContent="Endpoint AI demo policy not set up: Endpoint AI tab, step 2.";return}}
-    if(EAIMODE==m){el.textContent=`Endpoint AI policy: ${m=="block"?"Block":"Monitor"}.`;return}
-    el.textContent=`Switching the Endpoint AI policy to ${m=="block"?"Block":"Monitor"}…`;
+    if(EAIMODE==m){el.textContent=`Endpoint AI policy: ${EAIPRESET[m]||m}.`;return}
+    el.textContent=`Switching the Endpoint AI policy to ${EAIPRESET[m]||m}…`;
     const {id}=await api("/api/eai/mode",{mode:m});
     const tick=async()=>{const j=await api(`/api/job?id=${id}&since=0`);if(!j.done)return setTimeout(tick,800);
       if(j.error){el.innerHTML=`<span class="fail">${esc(j.error.error)}</span>`;return}
-      EAIMODE=m;if($("#seaimode"))$("#seaimode").textContent=`Endpoint AI policy: ${m=="block"?"Block":"Monitor"} (switched just now).`};tick()}
+      EAIMODE=m;if($("#seaimode"))$("#seaimode").textContent=`Endpoint AI policy: ${EAIPRESET[m]||m} (switched just now).`};tick()}
   catch(err){el.innerHTML=`<span class="fail">${esc(err.message)}</span>`}}
 // Per-step Monitor / Block, and switching the policy when a step opens so the ~30 s it takes to apply is spent talking.
 const APPLY_MS=30000;
@@ -1338,31 +1343,59 @@ $("#ziatd").onclick=()=>{if($("#ziatdc").value!="DELETE")return alert("Type DELE
 /* ---------- live feed (Endpoint AI, AI Guard, ZIA) ---------- */
 const FEEDSRC={eai:"Endpoint AI",aiguard:"AI Guard",zia:"ZIA"};
 function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
-  const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null};
+  const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null,
+    view:"events",demoOnly:false,open:new Set(),last:null};
   el.innerHTML=`<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
     <span class="lbl">Live feed</span>${Object.entries(FEEDSRC).map(([k,v])=>`<label class="chk" style="margin:0"><input type="checkbox" data-fs="${k}" ${st.src.includes(k)?"checked":""}>${v}</label>`).join("")}
     <select data-fm><option value="15" ${st.min==15?"selected":""}>Last 15 min</option><option value="60" ${st.min==60?"selected":""}>Last hour</option><option value="1440">Last 24 hours</option></select>
+    <span class="seg" style="display:inline-flex;gap:0"><button data-fv="events" class="on">Events</button><button data-fv="sessions">Sessions</button></span>
+    <label class="chk" style="margin:0"><input type="checkbox" data-fd>Demo events only</label>
     <button data-fp>Pause</button><span class="muted" data-fstat style="font-size:12px"></span></div>
+    <div data-ftiles class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"></div>
     <div data-fzia style="margin-top:8px"></div><div data-fbody style="margin-top:8px"></div>`;
   const q=x=>el.querySelector(x);
   el.querySelectorAll("[data-fs]").forEach(c=>c.onchange=()=>{st.src=[...el.querySelectorAll("[data-fs]")].filter(x=>x.checked).map(x=>x.dataset.fs);tick(true)});
   q("[data-fm]").onchange=()=>{st.min=+q("[data-fm]").value;tick(true)};
+  el.querySelectorAll("[data-fv]").forEach(b=>b.onclick=()=>{st.view=b.dataset.fv;el.querySelectorAll("[data-fv]").forEach(x=>x.classList.toggle("on",x===b));st.last&&draw(st.last)});
+  q("[data-fd]").onchange=()=>{st.demoOnly=q("[data-fd]").checked;st.last&&draw(st.last)};
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
+  el.addEventListener("click",ev=>{const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
+    const k=r.dataset.fid;st.open.has(k)?st.open.delete(k):st.open.add(k);st.last&&draw(st.last)});
   const vis=()=>el.isConnected&&el.offsetParent!==null&&!document.hidden;   // only polls while you can see it
   async function tick(now){clearTimeout(st.timer);if(!el.isConnected)return;
-    if(st.on&&(now||vis())){try{draw(await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`))}catch(e){q("[data-fstat]").textContent=e.message}}
+    if(st.on&&(now||vis())){try{st.last=await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`);draw(st.last)}catch(e){q("[data-fstat]").textContent=e.message}}
     st.timer=setTimeout(()=>tick(false),opt.every||20000)}
+  const bad=v=>/block|deny/.test(v||""),warn=v=>v=="audit";
+  const verdictCell=v=>`<span class="ic ${bad(v)?"fail":warn(v)?"warn":"ok"}">${bad(v)?ICON.fail:warn(v)?ICON.warn:ICON.ok}</span> ${esc(v||"")}`;
+  const tile=(n,l,c)=>`<div class="panel" style="padding:8px 14px;min-width:110px;margin:0"><div style="font-size:22px;font-weight:700${c?";color:var(--"+c+")":""}">${n}</div><div class="muted" style="font-size:12px">${l}</div></div>`;
+  function topOf(list){const c={};list.forEach(x=>{if(x)c[x]=(c[x]||0)+1});return Object.entries(c).sort((a,b)=>b[1]-a[1])}
+  function detail(i){const rows=[["Rule",i.rule],["Reason",i.reason],["Message to the agent",i.message],["Event",i.event_type],["Host",i.host],["User",i.user],
+      ["Working folder",i.cwd],["Serial",i.serial],["Session",i.session],["Patterns",(i.patterns||[]).join(", ")],["OWASP",(i.owasp||[]).join(", ")],["MITRE ATLAS",(i.mitre||[]).join(", ")]].filter(([,v])=>v);
+    return `<tr class="feeddetail"><td colspan="7" style="background:var(--panel2,rgba(0,0,0,.03))"><div style="display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:12.5px">${rows.map(([k,v])=>`<span class="muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>
+      ${i.raw?`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Raw event</summary><pre style="white-space:pre-wrap;font-size:11.5px;max-height:30vh;overflow:auto">${esc((()=>{try{return JSON.stringify(JSON.parse(i.raw),null,2)}catch(e){return i.raw}})())}</pre></details>`:""}</td></tr>`}
+  function row(i){const fresh=!st.first&&!st.seen.has(i.id),open=st.open.has(i.id);
+    return `<tr data-fid="${esc(i.id)}" class="${fresh?"feednew":""}" style="cursor:pointer${i.demo?";font-weight:600":""}"><td>${open?"▾":"▸"} ${esc(new Date(i.time).toLocaleTimeString())}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
+      <td>${verdictCell(i.verdict)}</td><td style="font-size:12px">${esc(i.rule||"")}</td><td style="font-size:12px">${esc(i.who||"")}</td><td><code style="font-size:12px">${esc(i.what||"")}</code></td><td style="font-size:12px">${esc(i.detail||"")}</td></tr>`+(open?detail(i):"")}
   function draw(r){if(!el.isConnected)return;const errs=Object.entries(r.errors||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
     const notes=Object.entries(r.notes||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
     q("[data-fstat]").textContent=`updated ${r.at}`+(st.on?" · every 20 s":" · paused")+((r.eai_hosts||[]).length?` · watching ${r.eai_hosts.join(", ")}`:"")+(errs.concat(notes).length?" · "+errs.concat(notes).join("; "):"");
     const z=r.zia;q("[data-fzia]").innerHTML=st.src.includes("zia")?(z?(z.error?`<div class="muted" style="font-size:12.5px">ZIA (${esc(z.note)}): ${esc(z.error)}</div>`:`<div class="muted" style="font-size:12.5px"><b>ZIA</b> (${esc(z.note)}; ZIA has no live log API): ${z.panels.map(p=>`${esc(p.label)} ${p.total!=null?p.total.toLocaleString():"–"}`).join(" · ")}</div>`):`<div class="muted" style="font-size:12.5px">ZIA: not set up on this computer.</div>`):"";
-    const items=r.items||[];
+    const items=(r.items||[]).filter(i=>!st.demoOnly||i.demo);
+    const tp=topOf(items.flatMap(i=>i.patterns||[])),to=topOf(items.flatMap(i=>i.owasp||[])),tm=topOf(items.flatMap(i=>i.mitre||[]));
+    q("[data-ftiles]").innerHTML=tile(items.length,"events")+tile(items.filter(i=>bad(i.verdict)).length,"blocked","bad")+tile(items.filter(i=>warn(i.verdict)).length,"audited (ran, recorded)","warn")
+      +tile(items.filter(i=>i.demo).length,"from the demo scenes")+tile(new Set(items.map(i=>i.session).filter(Boolean)).size,"agent sessions")
+      +(tp.length?`<div class="panel" style="padding:8px 14px;margin:0;max-width:420px"><div class="muted" style="font-size:12px">Top risk patterns</div><div style="font-size:12.5px">${tp.slice(0,3).map(([k,n])=>`${esc(k)} <b>${n}</b>`).join(" · ")}</div>${to.length||tm.length?`<div class="muted" style="font-size:12px;margin-top:4px">${to.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}${to.length&&tm.length?" · ":""}${tm.slice(0,3).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}</div>`:""}</div>`:"");
     if(!items.length){q("[data-fbody]").innerHTML=`<div class="muted">Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.</div>`;st.first=false;return}
-    const bad=v=>/block|deny/.test(v||""),warn=v=>v=="audit";
-    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:${opt.tall?72:52}vh;overflow:auto"><table><tr><th>Time</th><th>Source</th><th>Verdict</th><th>Where / who</th><th>What</th><th>Detections</th></tr>${items.map(i=>{const fresh=!st.first&&!st.seen.has(i.id);
-      return `<tr class="${fresh?"feednew":""}"${i.demo?' style="font-weight:600"':""}><td>${esc(new Date(i.time).toLocaleTimeString())}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
-      <td><span class="ic ${bad(i.verdict)?"fail":warn(i.verdict)?"warn":"ok"}">${bad(i.verdict)?ICON.fail:warn(i.verdict)?ICON.warn:ICON.ok}</span> ${esc(i.verdict||"")}</td>
-      <td style="font-size:12px">${esc(i.who||"")}</td><td><code style="font-size:12px">${esc(i.what||"")}</code></td><td style="font-size:12px">${esc(i.detail||"")}</td></tr>`}).join("")}</table></div>`;
+    const head=`<tr><th>Time</th><th>Source</th><th>Verdict</th><th>Rule</th><th>Where / who</th><th>What</th><th>Detections</th></tr>`;
+    let body;
+    if(st.view=="sessions"){const groups={};items.forEach(i=>{const k=i.session||(i.source=="aiguard"?"AI Guard (this computer)":"no session");(groups[k]=groups[k]||[]).push(i)});
+      body=Object.entries(groups).sort((a,b)=>String(b[1][0].time).localeCompare(String(a[1][0].time))).map(([k,list])=>{const sid="s:"+k,open=st.open.has(sid);
+        const prompt=(list.find(i=>/UserPromptSubmit/i.test(i.event_type||i.tool||""))||{}).what||"";
+        const nb=list.filter(i=>bad(i.verdict)).length,na=list.filter(i=>warn(i.verdict)).length;
+        return `<tr data-fid="${esc(sid)}" style="cursor:pointer;background:var(--panel2,rgba(0,0,0,.03))"><td>${open?"▾":"▸"} ${esc(new Date(list[list.length-1].time).toLocaleTimeString())}</td><td colspan="2"><b>${list.length}</b> events · <span style="color:var(--bad)">${nb} blocked</span> · <span style="color:var(--warn)">${na} audited</span></td>
+          <td colspan="2" style="font-size:12px">${esc(list[0].who||"")}<br><span class="muted">${esc(k.slice(0,36))}</span></td><td colspan="2"><span class="muted" style="font-size:12px">${prompt?"Prompt: ":""}</span>${esc(String(prompt).slice(0,200))}</td></tr>`+(open?list.map(row).join(""):"")}).join("")}
+    else body=items.map(row).join("");
+    q("[data-fbody]").innerHTML=`<div class="tablewrap" style="max-height:${opt.tall?72:52}vh;overflow:auto"><table>${head}${body}</table></div><div class="muted" style="font-size:12px;margin-top:6px">Click a row for the rule, the message the agent got, the session and the raw event.</div>`;
     items.forEach(i=>st.seen.add(i.id));st.first=false}
   tick(true);return st}
 
@@ -1378,7 +1411,9 @@ async function eai(){
     $("#eaihosts").value=(e.hosts||[]).join(", ");$("#eailock").checked=!!e.shell_lock;
     const c=e.credential||{};
     $("#eaicred").textContent=e.saved?`Saved: ${e.client_id}`+(c.name?` (${c.name}${c.roles?", "+c.roles.filter(Boolean).join(", "):""}${c.expires_at?", expires "+String(c.expires_at).slice(0,10):""})`:"")+(e.state&&e.state.set_up?` · demo policy set up ${e.state.set_up}, ${(e.state.mode||"monitor")} mode`:" · connected; demo policy not created yet (step 2)"):"Not connected yet.";
-    if(e.state&&e.state.mode)$("#eaimode").value=e.state.mode;
+    const sel=$("#eaimode");if(e.presets&&sel.options.length!=e.presets.length+1)sel.innerHTML=e.presets.map(p=>`<option value="${p.id}">${esc(p.label)}</option>`).join("")+'<option value="custom">Custom (per-rule below)</option>';
+    sel.value=(e.state&&e.state.mode)||"monitor";
+    drawRules(e);
     const z=e.zcc||{},m=e.this_machine||{};
     const here=m.hostname?`This machine: <code>${esc(m.hostname)}</code> <button id="eaihostcp" style="font-size:12px;padding:2px 8px">Copy</button> · Client Connector ${m.zcc_running===true?"running":m.zcc_running===false?"<b>not running</b>":"status unknown"}. <b>Already signed in?</b> Keep it: paste this hostname into <b>Generator hostnames</b> on your laptop and click Create or update; the kit reads who it's signed in as from Client Connector. <b>Not signed in?</b> `:"";
     $("#eaizcc").innerHTML=here+(z.email?`Sign in as <code>${esc(z.email)}</code>${z.password_source&&!z.has_password?` · password: ${esc(z.password_source)}`:""}. In the Endpoint AI console this machine should then appear under Administration &gt; Devices.`:"Sign in as the ZIA test user (the ZIA tab on your laptop shows it). This machine should then appear under Administration &gt; Devices in the Endpoint AI console.");
@@ -1387,7 +1422,10 @@ async function eai(){
     const cl=e.claude||{};
     $("#eaiclaude").innerHTML=cl.installed?`Installed (<code>${esc(cl.path)}</code>). Signed in? Run <code>claude</code> once in a terminal and follow the browser sign-in.`:"Not installed on this machine.";
     $("#eaiinstall").textContent=cl.installed?"Reinstall":"Install Claude Code";
-    if(!$("#eaiscenes").children.length)$("#eaiscenes").innerHTML=e.scenes.map(s=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-es="${s.id}" checked>${esc(s.title)}</label>`).join("");
+    if(!$("#eaiscenes").children.length){const groups=[...new Set(e.scenes.map(s=>s.group))];
+      $("#eaiscenes").innerHTML=groups.map(g=>`<div style="width:100%"><label class="lbl" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-esg="${esc(g)}" checked>${esc(g)}</label>
+        <div class="row" style="gap:10px;flex-wrap:wrap;margin:2px 0 6px 18px">${e.scenes.filter(s=>s.group==g).map(s=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-es="${s.id}" data-g="${esc(g)}" checked>${esc(s.title)}</label>`).join("")}</div></div>`).join("");
+      $$("[data-esg]").forEach(c=>c.onchange=()=>$$(`[data-es][data-g="${CSS.escape(c.dataset.esg)}"]`).forEach(x=>x.checked=c.checked))}
     $("#eailastrep").innerHTML=e.last_report?`Last: <a href="#" data-rep="${esc(e.last_report.file)}">${esc(e.last_report.file)}</a>`:"";
   }catch(err){$("#eaicred").textContent=err.message}
 }
@@ -1402,7 +1440,14 @@ $("#eaisetup").onclick=async()=>{
   $("#eaiout").innerHTML="";runJob("/api/eai/setup",{mode:$("#eaimode").value},$("#eailog"),j=>{eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
 $("#eaistatus").onclick=async()=>{$("#eaiout").innerHTML='<div class="muted">Checking…</div>';
   try{const r=await api("/api/eai/status");if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));$("#eaiout").innerHTML=checksHTML(r.checks);eai()}catch(err){$("#eaiout").innerHTML=`<div class="fail">${esc(err.message)}</div>`}};
-$("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
+function drawRules(e){const acts=e.actions||{},groups=[...new Set((e.rules||[]).map(r=>r.group))];
+  $("#eairuletable").innerHTML=`<div class="tablewrap"><table><tr><th>Group</th><th>Rule</th><th style="width:150px">Action</th></tr>${groups.map(g=>(e.rules||[]).filter(r=>r.group==g&&(!r.optional||e.shell_lock)).map((r,i)=>`<tr><td class="muted" style="font-size:12.5px">${i?"":esc(g)}</td><td>${esc(r.title)} <span class="muted" style="font-size:11.5px">${esc(r.id)}</span></td>
+    <td><select data-rule="${esc(r.id)}">${["audit","block","allow"].map(v=>`<option value="${v}" ${(acts[r.id]||"audit")==v?"selected":""}>${{audit:"Audit (record)",block:"Block",allow:"Allow (rule off)"}[v]}</option>`).join("")}</select></td></tr>`).join("")).join("")}</table></div>`;
+  $("#eairulenote").textContent=e.state&&e.state.policy_id?"":"Create the demo policy first (Create or update)."}
+$("#eairulesave").onclick=()=>{if(!(EAI&&EAI.state&&EAI.state.policy_id))return alert("Create the demo policy first (Create or update).");
+  const actions=Object.fromEntries($$("[data-rule]").map(x=>[x.dataset.rule,x.value]));
+  $("#eaiout").innerHTML="";runJob("/api/eai/actions",{actions},$("#eailog"),j=>{EAIMODE=null;eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+$("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(m=="custom"){$("#eairules").open=true;return}if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
   $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{EAIMODE=null;eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
 $("#eaizccpw").onclick=async()=>{const b=$("#eaizccpw");if(b.dataset.on){$("#eaizccout").innerHTML="";delete b.dataset.on;b.textContent="Show password";return}
   try{const r=await api("/api/zia/password",{});if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));b.dataset.on=1;b.textContent="Hide password";

@@ -3,6 +3,9 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.26
+- More Endpoint AI scenes, per-rule actions, richer live feed (see AI Guard kit CHANGELOG 1.8.31).
+
 ## 0.2.25
 - Endpoint AI finds a Mac generator's device (see AI Guard kit CHANGELOG 1.8.30).
 

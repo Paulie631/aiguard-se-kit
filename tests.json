@@ -1525,15 +1525,30 @@
     },
     {
      "kind": "show",
-     "title": "Stop it: switch to Block",
+     "title": "Stop secret theft first",
+     "owasp": [
+      "LLM02"
+     ],
+     "eai_mode": "secrets",
+     "feed": true,
+     "say": "Start with what hurts most: secrets and customer data. This step blocks only the credential, PII and exfiltration rules. Run the scenes again: the key write, the SSH and cloud-credential reads and the upload are stopped; the force-delete and the package installs still run and are recorded.",
+     "show": "This step switches the policy to 'Block secrets & data theft'. Run the scenes on the generator and compare 'block' and 'audit' rows in the feed.",
+     "where": "The live feed below. In the Endpoint AI console: Policies > SE-Demo: Agentic Guardrails shows which rules block.",
+     "sowhat": "You can roll guardrails out a risk at a time, starting where the exposure is biggest, without breaking developers' day.",
+     "ask": "Which would you lock down first: secrets leaving, or agents changing things they shouldn't?",
+     "talk": ""
+    },
+    {
+     "kind": "show",
+     "title": "Then the rest: destructive actions and supply chain",
      "owasp": [
       "LLM06"
      ],
      "eai_mode": "block",
      "feed": true,
-     "say": "Same agent, same commands, but now the policy blocks them before they run, and tells the agent why so it doesn't try to work around it.",
-     "show": "This step switches the SE-Demo policy to Block. Run the scenes again on the generator: the key write and the recursive force-delete show as 'block' in the feed.",
-     "where": "The live feed below. In the Endpoint AI console: Policies > SE-Demo: Agentic Guardrails, and Events filtered to the generator.",
+     "say": "Now everything blocks: force-deletes, force-pushes, look-alike packages, unknown registries, and the agent switching off its own checks. Same agent, same commands, all stopped before they run, and the agent is told why.",
+     "show": "This step switches the policy to 'Block everything'. Run the scenes again: every demo row in the feed is 'block'.",
+     "where": "The live feed below, or Events in the Endpoint AI console filtered to the generator.",
      "sowhat": "Guardrails for agents without taking the agents away: developers keep the productivity, the risky actions just don't happen.",
      "talk": ""
     },
