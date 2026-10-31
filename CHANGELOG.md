@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.8.36
+- **Live feed fills in "What", "Rules that fired" and "Risk categories".** Endpoint AI keeps the agent's command
+  inside the event's `data.raw` (the original hook payload), not `data.tool_input`, so those were empty on real
+  tenants. The kit now reads it from there. A row's raw event now shows the whole event (it was cut off at 4,000
+  characters).
+- **Rejected rules are named.** Create or update asks Endpoint AI to check the rules first. If any are rejected, it
+  lists each one by name with the reason and changes nothing. A new **Check rules with Endpoint AI** button shows
+  every rule's result without writing the policy.
+- **Demo flow.** A Monitor / Block switch on the laptop's Live feed. Each switch is marked on the timeline, and a
+  card compares the risky actions before and after it. On the generator, **Demo set** ticks one dependable scene
+  per risk category.
+- **Download recap:** a one-page summary of the feed window to print or save as PDF for the customer.
+- **Recent runs:** the generator keeps the last 20 runs' scenes and outcomes.
+- **Your rules next to Endpoint AI's own detections:** a new Live feed panel shows what the SE-Demo policy caught,
+  what Endpoint AI's built-in detections caught, and the overlap.
+- **Readable text:** scene titles, chart labels and test descriptions wrap instead of being cut off.
+- The Claude Code line warns up front, with the one-line fix, when this user can't write the folders Claude Code
+  needs.
+
 ## 1.8.35
 - **Twelve more Endpoint AI scenes (44 in all)**, grouped under four headings: AI-specific misuse (a tool
   description that hides instructions, exfiltrating an LLM API key, reading its own transcript), Cloud &

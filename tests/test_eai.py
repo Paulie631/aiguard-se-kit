@@ -132,6 +132,11 @@ class FakeEai:
                 return Resp(200, {})
             return Resp(200, d)
         if path == "/v1/policies/validate":
+            rej = [i for i, r in enumerate((body or {}).get("rules") or []) if r.get("id") in getattr(self, "reject_ids", ())]
+            if rej:   # like an engine that rejects one pattern; errors either name the rule's index or don't
+                if getattr(self, "reject_style", "index") == "index":
+                    return Resp(200, {"valid": False, "errors": [{"index": i, "message": "unsupported regex"} for i in rej]})
+                return Resp(200, {"valid": False, "errors": ["pattern not supported"]})
             return Resp(200, {"valid": True, "errors": []} if self.valid else {"valid": False, "errors": ["rules[1]: must be object"]})
         if path == "/v1/policies":
             if method == "GET":
@@ -429,7 +434,7 @@ def test_hostname_finds_the_generator_when_no_zia_user(eenv):
 def test_rejected_rules_stop_before_anything_is_saved(eenv):
     kit, e, fake = eenv("eai")
     fake.valid = False
-    with pytest.raises(kit.KitError, match="rejected the demo policy"):
+    with pytest.raises(kit.KitError, match="Endpoint AI rejected .* Nothing was changed"):
         e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
     assert not any(p["name"].startswith("SE-Demo") for p in fake.policies)
 
@@ -827,7 +832,7 @@ def test_console_install_button_runs_the_checked_installer(eenv, monkeypatch):
     assert e.api_job("/api/eai/install", {}, kit.load_cfg(), None, log_into(out), job)
     assert job["verify"][0]["status"] == "ok" and any("sign Claude Code in" in m for _, m in out)
     monkeypatch.setattr(e, "find_claude", lambda: None)
-    assert e.public_state(kit.load_cfg())["claude"] == {"installed": False, "path": ""}
+    assert e.public_state(kit.load_cfg())["claude"] == {"installed": False, "path": "", "blocked": [], "fix": ""}
 
 
 def test_install_stops_with_the_fix_when_local_is_owned_by_root(eenv, monkeypatch, tmp_path):
@@ -1508,3 +1513,123 @@ def test_feed_flags_whether_this_computer_has_endpoint_ai(eenv):
     cfg = kit.load_cfg(); cfg["eai"].pop("client_id"); kit.save_cfg(cfg)
     out = kit.feed(kit.load_cfg(), ("eai", "aiguard"), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
     assert out["eai_connected"] is False           # the generator has none
+
+
+def _real_shape(eid, ts, raw):
+    """An event shaped like the one Endpoint AI returned from the Mac (fields as seen in its raw view)."""
+    return {"id": eid, "timestamp": ts, "arrived_at": ts, "event_timestamp": ts, "category": "hook",
+            "event_type": "PreToolUse", "severity": "info", "user_email": "ztest@pyite.buzz",
+            "hostname": "Pauls-MacBook-Pro.local", "tool_name": "Bash", "session_id": "af684b13", "source": "claude",
+            "os": "macos",
+            "data": {"access_method": "cli", "cwd": "/Users/paulaiuto/.aiguard-se-kit/eai-demo", "hook_category": "tool",
+                     "machine_serial": "FNQNV30CXG", "permission_mode": "default", "process_lineage": [], "raw": raw},
+            "pattern_tags": [{"label": "macOS Keychain Dump", "owasp": "ASI02,ASI03", "atlas": "AML.T0037,AML.T0055"}]}
+
+
+def test_real_event_shape_reads_the_hook_payload_from_data_raw(eenv):
+    """Endpoint AI keeps the hook's tool_input inside data.raw (a dict, or a JSON string), not data.tool_input."""
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    cmd = "echo 'security dump-keychain -d  # sedemo'"
+    as_dict = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}}
+    fake.events = [dict(_real_shape("d1", now, as_dict), hostname="EC2AMAZ-GEN1"),
+                   dict(_real_shape("d2", now, json.dumps(as_dict)), hostname="EC2AMAZ-GEN1"),
+                   dict(_real_shape("d3", now, {"effort": {"level": "medium"}}), hostname="EC2AMAZ-GEN1")]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    by = {i["id"]: i for i in out["items"]}
+    for k in ("eai-d1", "eai-d2"):
+        assert by[k]["what"] == cmd and by[k]["rule"] == "OS credential store read" and by[k]["group"] == "Machine & OS"
+        assert by[k]["rule_by"] == "kit" and by[k]["demo"]
+    assert by["eai-d3"]["what"] == "" and by["eai-d3"]["demo"]          # no tool_input anywhere: still a demo event
+    assert by["eai-d3"]["patterns"] == ["macOS Keychain Dump"]           # Endpoint AI's own detection still shows
+
+
+def test_raw_detail_keeps_long_events(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    ev = dict(_real_shape("long", now, {"tool_input": {"command": "ls"}, "note": "x" * 9000}), hostname="EC2AMAZ-GEN1")
+    fake.events = [ev]
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    raw = kit.feed_raw(out["items"][0]["id"])
+    assert '"tool_input"' in raw and len(raw) > 9000   # was cut off at 4,000 characters
+
+
+def test_setup_names_each_rejected_rule_and_changes_nothing(eenv):
+    kit, e, fake = eenv("eai")
+    fake.reject_ids = {"r-sedemo-reverse-shell"}
+    log = []
+    with pytest.raises(kit.KitError, match="rejected 1 rule: Reverse shell. Nothing was changed"):
+        e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(log))
+    assert not any(p["name"].startswith("SE-Demo") for p in fake.policies)
+    assert any("rejected rule 'Reverse shell': unsupported regex" in str(m) for m in log)
+
+
+def test_rejected_rule_is_found_even_when_errors_dont_name_it(eenv):
+    kit, e, fake = eenv("eai")
+    fake.reject_ids, fake.reject_style = {"r-sedemo-iam-star", "r-sedemo-ci-edit"}, "plain"
+    bad = e.rejected_rules(e.connect(kit.load_cfg()), e.build_rules(e.preset_actions("monitor"), False))
+    assert {b["title"] for b in bad} == {"All-access IAM policy", "CI pipeline file changed"}
+    assert all(b["error"] == "pattern not supported" for b in bad)
+
+
+def test_check_rules_lists_every_rule_with_its_result(eenv):
+    kit, e, fake = eenv("eai")
+    out = e.api_get("/api/eai/check-rules", kit.load_cfg(), lambda: e.connect(kit.load_cfg()))["rules"]
+    assert len(out) == 42 and all(r["ok"] for r in out)               # the shell lock is off, so it isn't checked
+    fake.reject_ids = {"r-sedemo-llm-key"}
+    out = e.api_get("/api/eai/check-rules", kit.load_cfg(), lambda: e.connect(kit.load_cfg()))["rules"]
+    bad = [r for r in out if not r["ok"]]
+    assert [r["id"] for r in bad] == ["r-sedemo-llm-key"] and bad[0]["error"] == "unsupported regex"
+    assert not any(m == "PUT" or (m == "POST" and p == "/v1/policies") for m, p in fake.writes())   # a check writes nothing
+
+
+def test_setup_says_all_rules_were_accepted(eenv):
+    kit, e, fake = eenv("eai")
+    log = []
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into(log))
+    assert any("Endpoint AI accepted all 42 rules" in str(m) for m in log)
+
+
+def test_console_shows_the_install_fix_before_anyone_clicks(eenv, tmp_path, monkeypatch):
+    kit, e, _ = eenv("eai")
+    home = tmp_path / "home"
+    (home / ".local" / "state").mkdir(parents=True)
+    monkeypatch.setattr(e, "user_home", lambda: home)
+    monkeypatch.setattr(e, "find_claude", lambda: None)
+    monkeypatch.setattr(e.os, "access", lambda p, mode: not str(p).endswith("state"))   # .local/state not writable
+    st = e.claude_status()
+    assert st["blocked"] == [str(home / ".local" / "state")] and "chown" in st["fix"] and not st["installed"]
+    monkeypatch.setattr(e.os, "access", lambda p, mode: True)
+    assert e.claude_status()["blocked"] == [] and e.claude_status()["fix"] == ""
+
+
+def test_policy_switches_are_recorded_for_the_timeline(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]), mode="monitor")
+    e.set_mode(e.connect(kit.load_cfg()), kit.load_cfg(), "block", log_into([]))
+    e.set_mode(e.connect(kit.load_cfg()), kit.load_cfg(), "block", log_into([]))   # no change: not logged again
+    log = kit.load_cfg()["eai"]["mode_log"]
+    assert [m["mode"] for m in log] == ["monitor", "block"] and all(m["at"].endswith("Z") for m in log)
+    out = kit.feed(kit.load_cfg(), ("eai",), minutes=60, eai_tenant=lambda: e.connect(kit.load_cfg()))
+    assert out["mode"] == "block" and [m["mode"] for m in out["mode_log"]] == ["monitor", "block"]
+
+
+def test_demo_set_is_one_scene_per_group(eenv):
+    kit, e, _ = eenv("eai")
+    sc = e.public_state(kit.load_cfg())["scenes"]
+    picked = [s for s in sc if s["demo_set"]]
+    assert len(picked) == len({s["group"] for s in sc}) == len({s["group"] for s in picked}) == 9
+
+
+def test_demo_keeps_a_history_of_runs(eenv, monkeypatch):
+    kit, e, fake = eenv("eai")
+    cfg = kit.load_cfg(); cfg["eai"].pop("client_id", None); kit.save_cfg(cfg)
+    runner = lambda cmd, cwd, env, **kw: e.subprocess.CompletedProcess(cmd, 0, stdout='{"result": "RESULT: BLOCKED a PreToolUse hook stopped it"}', stderr="")  # noqa: E731
+    monkeypatch.setattr(e, "find_claude", lambda: "claude")
+    for _ in range(22):
+        e.demo(log_into([]), scenes=["secret"], runner=runner, cfg=kit.load_cfg())
+    runs = kit.load_cfg()["eai"]["runs"]
+    assert len(runs) == 20 and runs[-1]["results"] == [{"id": "secret", "title": "Agent writes a cloud access key to disk", "outcome": "blocked"}]
+    assert len(e.public_state(kit.load_cfg())["runs"]) == 10
