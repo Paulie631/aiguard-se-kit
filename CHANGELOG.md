@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.38
+- **A CloudShare image for traffic generators.** **Download image build script** on the ZIA tab (or
+  `zia image`) builds one generic Windows Server 2022 image per team. The image holds the Client Connector installer
+  (checked against its pinned SHA-256 and Zscaler's signature, not installed), the kit and the desktop shortcuts, and
+  no tenant settings. Each copy runs a one-time setup at first sign-in. You paste a setup code from your laptop
+  (**Copy setup code**, or `zia setup-code`), and the setup gives the copy its own name, installs Client Connector for
+  your tenant and schedules the traffic. A new optional manual step on the Setup tab walks through building the image.
+- **The CloudFormation template and the setup script include the Endpoint AI pieces:** a **SE-Demo install Claude
+  Code** desktop shortcut next to the Endpoint AI scenes shortcut, and the stack's next steps say how to use them.
+- Manual steps can now be **optional**: shown on the Setup tab, but never "next" and not counted as left to do.
+
 ## 1.8.37
 - **The Live feed shows how live Endpoint AI's record is.** Blocking happens on the generator straight away, but
   Endpoint AI takes a few minutes to record each event, even in its own console. A line under the feed's status now

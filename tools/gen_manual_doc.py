@@ -54,7 +54,7 @@ def render(level=1):
                         + (f" Needs first: {needs(s)}." if s.get("needs") else "")
                         + (f" Then: {s['then']}" if s.get("then") else ""), ""]
                 continue
-            out += [f"{hd}## {s['title']}", "", f"**Why it's manual:** {s['why']}", "",
+            out += [f"{hd}## {s['title']}" + (" (optional)" if s.get("optional") else ""), "", f"**Why it's manual:** {s['why']}", "",
                     f"**When:** {WHEN.get(s['applies'], s['applies'])}", ""]
             if s.get("needs"):
                 out += [f"**Needs first:** {needs(s)}", ""]

@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ZIA_VERSION = "0.2.32"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
+ZIA_VERSION = "0.2.33"   # the ZIA kit's own version (its releases are tagged zia-v<version>; see CHANGELOG-ZIA.md)
 K = None  # the kit (aiguard_kit), set by bind()
 NAME_MAX = 31  # ZIA rule-name limit
 RULE_KINDS = ("url_filtering", "cloud_app_control", "file_type_control", "dlp", "firewall", "dns", "ssl")
@@ -1926,6 +1926,49 @@ def api_script(cfg, body, tenant):
     return {"filename": SCRIPT_NAME, "script": text, "settings": st}
 
 
+def cmd_image():
+    """`zia image`: the CloudShare image build script. Tenant-neutral: one image serves every SE's own tenant."""
+    K.head("Traffic generator image for CloudShare: build script")
+    downloads = K.HOME / "Downloads"
+    out = Path(K.opt("out") or (downloads if downloads.is_dir() else K.CFG_DIR) / aws_module().IMAGE_SCRIPT_NAME)
+    zcc = (K.opt("zcc-url", "") or "").strip()
+    try:
+        aws_module().write_image_script(out, zcc_url="none" if zcc.lower() in ("none", "no", "manual") else zcc)
+    except ValueError as e:
+        raise K.KitError(str(e)) from e
+    K.ok(f"Wrote {out}")
+    print("  Next: on a fresh CloudShare Windows Server 2022 VM, PowerShell as Administrator:")
+    print(f"        powershell -ExecutionPolicy Bypass -File .\\{aws_module().IMAGE_SCRIPT_NAME}")
+    print("        then shut the VM down and save it as a template. Each copy asks for a setup code at first sign-in:")
+    print("        ./aiguard-kit zia setup-code   See ZIA.md (CloudShare image).")
+
+
+def api_image(cfg, body, tenant):
+    zcc = (body.get("zcc_url") or "").strip()
+    if zcc.lower().startswith("s3://"):
+        raise K.KitError("An s3:// installer only works on AWS. Leave it empty (the kit's verified copy), give an https URL, or 'none'.")
+    try:
+        text = aws_module().image_script(zcc_url="none" if zcc.lower() in ("none", "no", "manual") else zcc)
+    except ValueError as e:
+        raise K.KitError(str(e)) from e
+    return {"filename": aws_module().IMAGE_SCRIPT_NAME, "script": text}
+
+
+def cmd_setup_code():
+    """`zia setup-code`: the line a copy of the CloudShare image asks for at first sign-in (this tenant's test user,
+    cloud and Client Connector app profile token)."""
+    cfg = K.load_cfg()
+    st = aws_settings(connect(cfg), cfg)
+    print(aws_module().setup_code(**st))
+    K.info(f"For {st['test_user']} on {st['cloud']} · " + token_note(st) + ". Paste it into the setup window on the copy.")
+
+
+def api_setup_code(cfg, body, tenant):
+    st = aws_settings(tenant(), cfg)
+    return {"code": aws_module().setup_code(**st), "test_user": st["test_user"], "cloud": st["cloud"],
+            "has_policy_token": bool(st.get("policy_token"))}
+
+
 def cmd_password():
     """Shows the kit-created test user's password, on this computer only."""
     cfg = K.load_cfg()
@@ -2002,9 +2045,10 @@ def cli(args):
     cmds = {"setup": cmd_setup, "preflight": cmd_preflight, "status": cmd_status, "teardown": cmd_teardown,
             "dashboards": cmd_dashboards, "check": cmd_check, "traffic": cmd_traffic,
             "schedule": lambda: K.cmd_schedule("zia"), "password": cmd_password, "aws": cmd_aws, "script": cmd_script,
+            "image": cmd_image, "setup-code": cmd_setup_code,
             "ready": lambda: K.cmd_ready()}
     if sub not in cmds:
-        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|aws|check|traffic|schedule|ready  (see ZIA.md)")
+        print("Usage: ./aiguard-kit zia setup|preflight|status|teardown|dashboards|password|aws|script|image|setup-code|check|traffic|schedule|ready  (see ZIA.md)")
         return
     try:
         cmds[sub]()

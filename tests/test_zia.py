@@ -1757,3 +1757,85 @@ def test_setup_path_orders_greg_s_zidentity_tenant(zenv, capsys):
     kit.cmd_todo()
     out = capsys.readouterr().out
     assert "(kit) Kit: create the Client Connector profiles" in out and "← next" in out and "Start it:" in out
+
+
+def _first_logon(script):
+    import base64
+    m = re.search(r'FromBase64String\("([A-Za-z0-9+/=]+)"\)', script)
+    return base64.b64decode(m.group(1)).decode("utf-8-sig")
+
+
+def test_cloudshare_image_is_tenant_neutral_and_each_copy_sets_itself_up(aws):
+    """One image for every SE: the build stages the checked Client Connector installer without installing it and holds
+    no tenant values; each copy's one-time setup installs it for that SE's tenant and gives the copy its own name."""
+    s = aws.image_script()
+    assert "{{" not in s and "${" not in s and "msiexec" not in s and "CLOUDNAME" not in s and "USERDOMAIN" not in s
+    assert aws.ZCC_DEFAULT["sha256"] in s and "Get-AuthenticodeSignature" in s and "zcc-installer.msi" in s
+    assert s.count("# 2. uv and the kit") == 1 and "eai.cmd" in s and "S-1-5-32-545" in s   # the template's own steps
+    assert 'New-ScheduledTaskPrincipal -GroupId "BUILTIN\\Administrators" -RunLevel Highest' in s
+    assert all(x in s for x in ("SE-Demo set up this generator", "SE-Demo Endpoint AI scenes", "SE-Demo install Claude Code"))
+    assert "anthropic" not in s.lower() and "sk-ant" not in s
+    f = _first_logon(s)
+    assert "{{" not in f and "CLOUDNAME=$cloud USERDOMAIN=$domain" in f and "POLICYTOKEN=$token" in f
+    assert "Rename-Computer -NewName $name" in f and '"SEDEMO-"' in f and "traffic --count 4" in f and "-Minutes 30" in f
+    assert "Unregister-ScheduledTask -TaskName \"SE-Demo set up this generator\"" in f
+    f2 = _first_logon(aws.image_script(every=60, per_type=2))
+    assert "-Minutes 60" in f2 and "traffic --count 2" in f2
+    assert '$zcc = ""' in aws.image_script(zcc_url="none")
+    with pytest.raises(ValueError, match="characters"):
+        aws.image_script(zcc_url='https://x.example/a.msi"; Remove-Item C:\\ -Recurse; "')
+
+
+def test_setup_code_carries_user_cloud_and_token_only(aws):
+    import base64
+    code = aws.setup_code("se-demo-traffic@acme.com", "zscalertwo", "tok.1=")
+    assert re.fullmatch(r"SEDEMO1:[A-Za-z0-9_-]+", code)
+    raw = code.split(":", 1)[1]
+    body = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    assert body == {"u": "se-demo-traffic@acme.com", "c": "zscalertwo", "t": "tok.1="}
+    plain = aws.setup_code("a@b.co", "zscaler").split(":", 1)[1]
+    assert "t" not in json.loads(base64.urlsafe_b64decode(plain + "=" * (-len(plain) % 4)))
+
+
+def test_console_offers_the_image_script_and_the_setup_code(zenv, aws):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    next(p for p in fake.web if p["name"] == "SE-Demo traffic generator")["policyToken"] = "a1b2c3d4e5"
+    cfg = kit.load_cfg()
+    r = z.api_setup_code(cfg, {}, lambda: fake)
+    raw = r["code"].split(":", 1)[1]
+    import base64
+    body = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    assert body["u"] == r["test_user"] and body["t"] == "a1b2c3d4e5" and r["has_policy_token"]
+    img = z.api_image(cfg, {}, lambda: fake)
+    assert img["filename"] == "se-demo-generator-image-build.ps1" and r["test_user"] not in img["script"]
+    with pytest.raises(kit.KitError, match="only works on AWS"):
+        z.api_image(cfg, {"zcc_url": "s3://b/zcc.msi"}, lambda: fake)
+
+
+def test_image_scripts_are_valid_powershell(aws, tmp_path):
+    import shutil
+    import subprocess
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell isn't installed here")
+    files = {"image.ps1": aws.image_script(), "image-none.ps1": aws.image_script(zcc_url="none"),
+             "first-logon.ps1": aws.first_logon_script()}
+    for name, text in files.items():
+        f = tmp_path / name
+        f.write_text(text, encoding="utf-8-sig")
+        r = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command",
+                            "$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($env:KIT_PS1,[ref]$null,[ref]$e);"
+                            " if ($e) { $e | ForEach-Object { $_.ToString() }; exit 1 }"],
+                           capture_output=True, text=True, timeout=120, env={**os.environ, "KIT_PS1": str(f)})
+        assert r.returncode == 0, (name, r.stdout + r.stderr)
+
+
+def test_cloudshare_image_step_is_optional_and_never_next(zenv):
+    kit, z, fake = zenv("zia", "setup", "--yes")
+    kit.cmd_zia()
+    items = {i["id"]: i for i in kit.manual_status(kit.load_cfg(), check=False)}
+    img = items["generator-image"]
+    assert img["status"] == "optional" and not img["next"] and img not in kit.manual_open(list(items.values()))
+    kit.manual_mark(kit.load_cfg(), "generator-image")
+    assert {i["id"]: i for i in kit.manual_status(kit.load_cfg(), check=False)}["generator-image"]["status"] == "done"
