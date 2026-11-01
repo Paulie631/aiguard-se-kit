@@ -135,17 +135,37 @@ Zscaler Help: [Assigning entitlements to users](https://help.zscaler.com/unified
 
 ## On the traffic generator
 
+### Build the CloudShare generator image (once per team) (optional)
+
+**Why it's manual:** One generic Windows image lets every SE deploy a ready traffic generator in minutes, set up for their own tenant at first sign-in. Skip this if your team already has the image.
+
+**When:** When the ZIA demo is set up.
+
+1. In CloudShare, create an environment with a **Windows Server 2022** VM that has direct internet access (no corporate proxy, no other Client Connector).
+2. In the kit's **Internet Access (ZIA)** tab, click **Download image build script**, copy it to the VM, open PowerShell **as Administrator** and run `powershell -ExecutionPolicy Bypass -File .\se-demo-generator-image-build.ps1`. About 10 minutes; progress: `C:\SE-Demo\image-build.log`.
+3. The script stages the Client Connector installer (checked against its pinned SHA-256 and Zscaler's signature) but doesn't install it, and adds the kit, the traffic schedule's scripts and the desktop shortcuts. It holds no tenant settings.
+4. Don't run **SE-Demo set up this generator** and don't sign in to Client Connector on this VM. If the setup window opens when you sign in again, close it.
+5. Shut the VM down from Windows, then save it in CloudShare as a template (snapshot) and share it with your team.
+
+**Then:** Each SE deploys a copy and pastes their setup code at first sign-in (next step).
+
+**Done when:** you mark it done (`aiguard-kit todo --done generator-image`).
+
+*Menu names not yet confirmed · id `generator-image`*
+
 ### Build the traffic generator machine
 
-**Why it's manual:** ZIA dashboards fill only from real traffic, from a separate Windows machine. The kit writes the template or script; creating the machine happens in AWS or CloudShare.
+**Why it's manual:** ZIA dashboards fill only from real traffic, from a separate Windows machine. Pick one of three ways: your team's CloudShare image (fastest), the AWS template, or the setup script on any Windows VM.
 
 **When:** When the ZIA demo is set up.
 
 **Needs first:** Kit: create the ZIA demo rules
 
-1. **AWS:** in the kit's ZIA tab, **Download CloudFormation template**. In the AWS console, **CloudFormation > Create stack > With new resources (standard) > Upload a template file**, choose the file, keep the parameters, tick the IAM acknowledgement and **Submit**. Wait about 15 minutes.
-2. **CloudShare or any Windows VM:** create a Windows Server 2022 VM with direct internet access. In the kit's ZIA tab, **Download setup script**, copy it to the VM, open PowerShell **as Administrator** and run `powershell -ExecutionPolicy Bypass -File .\se-demo-zia-generator-setup.ps1`. Progress: `C:\SE-Demo\setup.log`, about 10 minutes.
-3. Make the template or script after the Client Connector profiles exist, so Client Connector is installed with the kit's app profile.
+1. **CloudShare, from your team's image:** deploy a copy of the image. In the kit's ZIA tab click **Copy setup code**. Sign in to the copy: the **SE-Demo set up this generator** window opens (or use the desktop shortcut). Paste the code. It gives the copy its own name (SEDEMO-xxxxxx), installs Client Connector for your tenant and restarts. Note the new name for the Endpoint AI tab.
+2. **AWS:** in the kit's ZIA tab, **Download CloudFormation template**. In the AWS console, **CloudFormation > Create stack > With new resources (standard) > Upload a template file**, choose the file, keep the parameters, tick the IAM acknowledgement and **Submit**. Wait about 15 minutes.
+3. **CloudShare or any Windows VM, without the image:** create a Windows Server 2022 VM with direct internet access. In the kit's ZIA tab, **Download setup script**, copy it to the VM, open PowerShell **as Administrator** and run `powershell -ExecutionPolicy Bypass -File .\se-demo-zia-generator-setup.ps1`. Progress: `C:\SE-Demo\setup.log`, about 10 minutes.
+4. Make the setup code, template or script after the Client Connector profiles exist, so Client Connector is installed with the kit's app profile.
+5. For the Endpoint AI scenes on any of them: double-click **SE-Demo install Claude Code** on the generator's desktop and sign in to Claude Code once.
 
 **Then:** Connect to the machine and sign in to Client Connector.
 

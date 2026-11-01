@@ -2438,6 +2438,8 @@ def manual_status(cfg, check=True, zia_tenant=None):
             detail = detail or (f"marked done {marks[st['id']][:10]}" if st["id"] in marks else "")
         else:
             how = "checked"
+        if st.get("optional") and state == "todo":   # shown, but never "next" and not counted as left to do
+            state = "optional"
         item.update(status=state, how=how, detail=detail, marked=st["id"] in marks)
         out.append(item)
     by_id = {i["id"]: i for i in out}
@@ -2500,10 +2502,10 @@ def cmd_todo():
             stage = it["stage_label"]
             print(f"\n  {C['b']}{stage}{C['x']}")
         mark = {"done": f"{C['g']}✓{C['x']}", "todo": f"{C['y']}!{C['x']}", "waiting": f"{C['d']}…{C['x']}",
-                "reminder": "·"}[it["status"]]
+                "reminder": "·", "optional": f"{C['d']}○{C['x']}"}[it["status"]]
         who = "" if it["who"] == "you" else f"{C['d']}(kit){C['x']} "
         nxt = f"  {C['y']}← next{C['x']}" if it["next"] else ""
-        print(f"  {mark} {who}{it['title']}  {C['d']}[{it['id']}]{(' ' + it['detail']) if it['detail'] else ''}{C['x']}{nxt}")
+        print(f"  {mark} {who}{it['title']}{'  (optional)' if it['status'] == 'optional' else ''}  {C['d']}[{it['id']}]{(' ' + it['detail']) if it['detail'] else ''}{C['x']}{nxt}")
         if it["status"] == "waiting":
             print(f"      {C['d']}Waiting for: {'; '.join(it['waiting_for'])}{C['x']}")
             continue
@@ -2522,7 +2524,7 @@ def cmd_todo():
             print(f"      Zscaler Help: {h['title']} - {h['url']}")
         if not it["confirmed"]:
             print(f"      {C['d']}(menu names not yet confirmed against a live console: tell the kit owner if they differ){C['x']}")
-        if not it["can_check"] and it["status"] == "todo":
+        if not it["can_check"] and it["status"] in ("todo", "optional"):
             print(f"      When it's done: aiguard-kit todo --done {it['id']}")
     open_ = manual_open(items)
     head("Nothing left to do by hand" if not open_ else f"{len(open_)} manual step{'s' if len(open_) > 1 else ''} to do")
@@ -3308,6 +3310,12 @@ def cmd_gui():
                     return self._send(200, product("zia").api_script(c, body, lambda: zia_tenant(c)))
                 except Exception as e:
                     return self._send(400, {"error": str(e), "fix": product("zia").zhint(e)})
+            if path in ("/api/zia/image", "/api/zia/setup-code"):
+                fn = product("zia").api_image if path.endswith("image") else product("zia").api_setup_code
+                try:
+                    return self._send(200, fn(c, body, lambda: zia_tenant(c)))
+                except Exception as e:
+                    return self._send(400, {"error": str(e), "fix": product("zia").zhint(e)})
             if path == "/api/zia/aws":
                 try:
                     return self._send(200, product("zia").api_aws(c, body, lambda: zia_tenant(c)))
@@ -3450,7 +3458,7 @@ def cmd_gui():
 # version, install folder, shortcut, command name and update channel, so editions never replace each other.
 # Credentials, keychain and settings stay shared in ~/.aiguard-se-kit.
 EDITION = None
-EDITION_COMMANDS = {"zia": {"setup", "preflight", "status", "teardown", "dashboards", "password", "aws", "script", "check",
+EDITION_COMMANDS = {"zia": {"setup", "preflight", "status", "teardown", "dashboards", "password", "aws", "script", "image", "setup-code", "check",
                             "traffic", "schedule", "ready"}}
 
 

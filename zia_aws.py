@@ -129,6 +129,9 @@ foreach ($s in @(@("SE-Demo ZIA console", "$root\console.cmd"), @("SE-Demo traff
 }
 $l = $sh.CreateShortcut("C:\Users\Public\Desktop\SE-Demo Endpoint AI scenes.lnk"); $l.TargetPath = "$env:ComSpec"
 $l.Arguments = "/k `"$root\eai.cmd`" demo"; $l.Save()
+# Claude Code installs per Windows user (its own installer, no admin), so whoever signs in runs this once
+$l = $sh.CreateShortcut("C:\Users\Public\Desktop\SE-Demo install Claude Code.lnk"); $l.TargetPath = "$env:ComSpec"
+$l.Arguments = "/k `"$root\eai.cmd`" demo --install"; $l.Save()
 # 6. Let whoever signs in run the console too. Setup ran as SYSTEM, so C:\SE-Demo (uv cache, Python, settings)
 #    is otherwise read-only to a remote desktop user's non-elevated session. This box is single-purpose and only
 #    administrators can sign in to it, so giving local Users modify rights here is acceptable.
@@ -292,7 +295,9 @@ def build(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@e
                                            "to Client Connector as ${TestUser} (password: the one the kit created, "
                                            "shown by aiguard-kit zia password on your laptop, or for a ZIdentity user "
                                            "the one you set in ZIdentity), then open 'SE-Demo traffic log' on the "
-                                           "desktop."}},
+                                           "desktop. For the Endpoint AI scenes: double-click 'SE-Demo install Claude "
+                                           "Code', sign in to Claude Code once (run claude in a terminal), then use "
+                                           "'SE-Demo Endpoint AI scenes'."}},
     }
     return {"AWSTemplateFormatVersion": "2010-09-09",
             "Description": f"{NAME} for {test_user} (aiguard-kit zia aws). Delete the stack to remove everything.",
@@ -354,3 +359,202 @@ def write_script(path, **kw):
     Path(path).write_text(setup_script(**kw), encoding="utf-8-sig", newline="\r\n")
     return path
 
+
+
+# ---------------------------------------------------------------- CloudShare image (one generic image per team)
+# The image is tenant-neutral: each SE deploys a copy and, at first logon, a one-time setup gives that copy its own
+# computer name (copies of one image would otherwise share a name and machine identity, so Client Connector and
+# Endpoint AI would see one device), installs Client Connector for that SE's tenant from the verified installer staged
+# in the image, and schedules the traffic. Values come from a setup code the kit on the SE's laptop makes.
+IMAGE_SCRIPT_NAME = "se-demo-generator-image-build.ps1"
+SETUP_TASK = "SE-Demo set up this generator"
+
+FIRST_LOGON = r"""# SE-Demo traffic generator: one-time setup for this copy of the image (written by the image build).
+$root = "C:\SE-Demo"
+$marker = "$root\generator.json"
+if (Test-Path $marker) {
+  if ($args -contains "-AtLogon") { exit 0 }
+  $m = Get-Content $marker -Raw | ConvertFrom-Json
+  Write-Host ("This generator is already set up as " + $m.hostname + " for " + $m.test_user + ".")
+  Read-Host "Press Enter to close" | Out-Null
+  exit 0
+}
+Start-Transcript -Path "$root\first-logon.log" -Append | Out-Null
+$Host.UI.RawUI.WindowTitle = "SE-Demo: set up this traffic generator"
+try {
+  $ErrorActionPreference = "Stop"
+  Write-Host "SE-Demo traffic generator: one-time setup for this copy" -ForegroundColor Cyan
+  Write-Host "Gives this machine its own name, installs Zscaler Client Connector for your demo tenant and schedules the traffic."
+  Write-Host "Close this window to do it later: it opens again at your next sign-in, or use the desktop shortcut."
+  Write-Host ""
+  $code = (Read-Host "Paste the setup code from the kit on your laptop (ZIA tab > Copy setup code), or press Enter to type the details").Trim()
+  $user = ""; $cloud = ""; $token = ""
+  if ($code) {
+    if ($code -notmatch '^SEDEMO1:([A-Za-z0-9_-]+)$') { throw "That isn't a setup code (it starts with SEDEMO1:). Copy it again from the kit." }
+    $b = $Matches[1].Replace('-', '+').Replace('_', '/')
+    while ($b.Length % 4) { $b += '=' }
+    $j = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)) | ConvertFrom-Json
+    $user = [string]$j.u; $cloud = [string]$j.c; $token = [string]$j.t
+  } else {
+    $user = (Read-Host "The test user's email (shown on the kit's ZIA tab)").Trim()
+    $cloud = (Read-Host "Your Zscaler cloud [zscalertwo]").Trim()
+    if (-not $cloud) { $cloud = "zscalertwo" }
+  }
+  if ($user -notmatch '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') { throw "Not an email address: $user" }
+  if ($cloud -notmatch '^[a-z0-9]{3,30}$') { throw "Not a Zscaler cloud name: $cloud" }
+  if ($token -and $token -notmatch '^[A-Za-z0-9._:+=/-]{4,200}$') { throw "The policy token in the setup code looks wrong: copy the code again." }
+  $domain = $user.Split("@")[1]
+
+  # Client Connector, from the installer the image build checked; checked again before it runs
+  $f = "$root\zcc-installer.msi"
+  if (Test-Path $f) {
+    $sig = Get-AuthenticodeSignature $f
+    if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Zscaler") {
+      throw "The Client Connector installer in $root isn't validly signed by Zscaler. Rebuild the image."
+    }
+    $a = "/i `"$f`" /quiet /norestart CLOUDNAME=$cloud USERDOMAIN=$domain"
+    if ($token) { $a += " POLICYTOKEN=$token" }
+    Write-Host "Installing Client Connector for $domain on $cloud (about a minute)..."
+    $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList $a
+    if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw ("Client Connector didn't install (msiexec exit code " + $p.ExitCode + ").") }
+  } else {
+    Write-Host "This image has no Client Connector installer: install it by hand from your demo tenant after the restart." -ForegroundColor Yellow
+  }
+
+  # Traffic rounds and the startup check, as SYSTEM so they run with nobody signed in
+  $a1 = New-ScheduledTaskAction -Execute "$root\zia.cmd" -Argument "traffic --count {{PERTYPE}}"
+  $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10) -RepetitionInterval (New-TimeSpan -Minutes {{EVERY}})
+  Register-ScheduledTask -TaskName "SE-Demo ZIA traffic" -Action $a1 -Trigger $t1 -User "SYSTEM" -RunLevel Highest -Force | Out-Null
+  $a2 = New-ScheduledTaskAction -Execute "$root\zia.cmd" -Argument "check"
+  Register-ScheduledTask -TaskName "SE-Demo ZIA check" -Action $a2 -Trigger (New-ScheduledTaskTrigger -AtStartup) -User "SYSTEM" -RunLevel Highest -Force | Out-Null
+
+  # A name of its own, so Client Connector and Endpoint AI see this copy as its own device
+  $chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".ToCharArray()
+  $name = "SEDEMO-" + (-join (1..6 | ForEach-Object { $chars | Get-Random }))
+  Rename-Computer -NewName $name -Force -WarningAction SilentlyContinue
+
+  @{ test_user = $user; cloud = $cloud; hostname = $name; at = (Get-Date).ToString("s") } | ConvertTo-Json | Set-Content -Encoding UTF8 $marker
+  Unregister-ScheduledTask -TaskName "{{TASK}}" -Confirm:$false -ErrorAction SilentlyContinue
+  Remove-Item "C:\Users\Public\Desktop\{{TASK}}.lnk" -ErrorAction SilentlyContinue
+  Write-Host ""
+  Write-Host "Done. This generator is now $name." -ForegroundColor Green
+  Write-Host "After the restart:"
+  Write-Host "  1. Sign in to Client Connector as $user."
+  Write-Host "  2. On your laptop, in the kit's Endpoint AI tab, add $name under Generator hostnames and click Create or update."
+  Write-Host "  3. For the Endpoint AI scenes, use the desktop shortcut 'SE-Demo install Claude Code', then sign in to Claude Code once."
+  Stop-Transcript | Out-Null
+  Read-Host "Press Enter to restart now" | Out-Null
+  Restart-Computer -Force
+} catch {
+  Write-Host ""
+  Write-Host ("Setup stopped: " + $_.Exception.Message) -ForegroundColor Red
+  Write-Host "Nothing was finished, so it will run again: use the desktop shortcut or sign in again. Log: $root\first-logon.log"
+  Stop-Transcript | Out-Null
+  Read-Host "Press Enter to close" | Out-Null
+  exit 1
+}
+"""
+
+IMAGE_BUILD = r"""# SE-Demo traffic generator image for CloudShare (Windows Server 2022), made by the SE demo kit.
+# Run once on a fresh VM with direct internet access, in PowerShell as Administrator:
+#   powershell -ExecutionPolicy Bypass -File .\se-demo-generator-image-build.ps1
+# It holds no tenant settings: each copy of the image is set up for its SE's tenant at first sign-in.
+$ErrorActionPreference = "Continue"
+$root = "C:\SE-Demo"
+New-Item -ItemType Directory -Force -Path $root, "$root\home" | Out-Null
+Start-Transcript -Path "$root\image-build.log" -Append
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+"SE-Demo generator image build"
+
+# 1. Client Connector installer: downloaded and checked now, installed on each copy for that SE's tenant
+$zcc = "{{ZCC_URL}}"
+$want = "{{ZCC_SHA}}"
+if ($zcc) {
+  $tmp = "$root\zcc-installer.download"
+  Invoke-WebRequest -Uri $zcc -OutFile $tmp -UseBasicParsing
+  $ok = Test-Path $tmp
+  if ($ok -and $want) {
+    $got = (Get-FileHash $tmp -Algorithm SHA256).Hash
+    if ($got -ne $want.ToUpper()) { "Client Connector installer SHA-256 is $got, expected $want. Not keeping it."; $ok = $false }
+  }
+  if ($ok) {
+    $sig = Get-AuthenticodeSignature $tmp
+    if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Zscaler") {
+      "Client Connector installer isn't validly signed by Zscaler (" + $sig.Status + "): not keeping it."; $ok = $false
+    }
+  }
+  if ($ok) { Move-Item -Force $tmp "$root\zcc-installer.msi"; "Client Connector installer checked and staged (not installed)." }
+  else { Remove-Item $tmp -ErrorAction SilentlyContinue }
+} else {
+  "No Client Connector installer: each copy installs it by hand."
+}
+
+{{KIT_STEPS}}
+# 4. The one-time setup each copy runs at first sign-in (as an administrator, so it can install and rename)
+[IO.File]::WriteAllBytes("$root\first-logon.ps1", [Convert]::FromBase64String("{{FIRST_LOGON_B64}}"))
+$act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$root\first-logon.ps1`" -AtLogon"
+$prn = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
+Register-ScheduledTask -TaskName "{{TASK}}" -Action $act -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Principal $prn -Force | Out-Null
+
+# 5. Desktop shortcuts for whoever signs in
+$sh = New-Object -ComObject WScript.Shell
+foreach ($s in @(@("SE-Demo ZIA console", "$root\console.cmd", ""), @("SE-Demo traffic log", "$root\traffic.log", ""),
+                 @("{{TASK}}", "$env:SystemRoot\System32\schtasks.exe", "/run /tn `"{{TASK}}`""),
+                 @("SE-Demo Endpoint AI scenes", "$env:ComSpec", "/k `"$root\eai.cmd`" demo"),
+                 @("SE-Demo install Claude Code", "$env:ComSpec", "/k `"$root\eai.cmd`" demo --install"))) {
+  $l = $sh.CreateShortcut("C:\Users\Public\Desktop\" + $s[0] + ".lnk"); $l.TargetPath = $s[1]
+  if ($s[2]) { $l.Arguments = $s[2] }
+  if ($s[1] -like "*console.cmd" -and (Test-Path "$root\kit\assets\zia-icon.ico")) { $l.IconLocation = "$root\kit\assets\zia-icon.ico,0" }
+  $l.Save()
+}
+{{ACL_STEP}}
+@{ built = (Get-Date).ToString("s"); kit = "{{KIT_ZIP}}"; zcc = "{{ZCC_VERSION}}" } | ConvertTo-Json | Set-Content -Encoding UTF8 "$root\image.json"
+""
+"Image ready. Before saving it in CloudShare: don't run '{{TASK}}' here and don't sign in to Client Connector"
+"(if the setup window opens at your next sign-in, just close it). Shut down this VM, then save it as a template."
+Stop-Transcript
+"""
+
+
+def _block(start, end):
+    """A slice of the first-boot script, so the image and the template share one copy of these steps."""
+    i, j = USER_DATA.index(start), USER_DATA.index(end)
+    return USER_DATA[i:j]
+
+
+def first_logon_script(every=30, per_type=4):
+    return (FIRST_LOGON.replace("{{EVERY}}", str(int(every))).replace("{{PERTYPE}}", str(int(per_type)))
+            .replace("{{TASK}}", SETUP_TASK))
+
+
+def image_script(kit_zip=KIT_ZIP, zcc_url="", zcc_sha256="", every=30, per_type=4, **_):
+    """The CloudShare image build: tenant-neutral, so one image serves every SE's own tenant."""
+    import base64
+    zcc_url, zcc_sha256 = _installer(zcc_url, "", zcc_sha256)
+    for k, v in (("kit zip", kit_zip), ("installer URL", zcc_url), ("installer SHA-256", zcc_sha256)):
+        if not SAFE_VALUE.match(str(v)):
+            raise ValueError(f"The {k} has characters the build script can't take safely: {v!r}")
+    kit_steps = _block("# 2. uv and the kit", "# 4. Scheduled tasks").replace("${KitZipUrl}", kit_zip)
+    acl = _block("# 6. Let whoever signs in", '"Setup finished.')
+    first = base64.b64encode(first_logon_script(every, per_type).encode("utf-8-sig")).decode()
+    version = ZCC_DEFAULT["version"] if zcc_url == ZCC_DEFAULT["url"] else ("your installer" if zcc_url else "none")
+    return (IMAGE_BUILD.replace("{{KIT_STEPS}}", kit_steps).replace("{{ACL_STEP}}", acl)
+            .replace("{{FIRST_LOGON_B64}}", first).replace("{{ZCC_URL}}", zcc_url).replace("{{ZCC_SHA}}", zcc_sha256)
+            .replace("{{KIT_ZIP}}", kit_zip).replace("{{ZCC_VERSION}}", version).replace("{{TASK}}", SETUP_TASK))
+
+
+def write_image_script(path, **kw):
+    from pathlib import Path
+    Path(path).write_text(image_script(**kw), encoding="utf-8-sig", newline="\r\n")
+    return path
+
+
+def setup_code(test_user, cloud, policy_token="", **_):
+    """What a copy of the image needs from this SE's tenant, as one line to paste at first sign-in. Not a secret:
+    the test user and cloud, plus the app profile's policy token (which still needs the user to sign in)."""
+    import base64
+    body = {"u": test_user, "c": cloud}
+    if policy_token:
+        body["t"] = policy_token
+    raw = json.dumps(body, separators=(",", ":")).encode()
+    return "SEDEMO1:" + base64.urlsafe_b64encode(raw).decode().rstrip("=")

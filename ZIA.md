@@ -160,6 +160,44 @@ The simplest generator is a Windows instance in an AWS account you can use for d
 
 **Cost:** roughly what a Windows t3.medium costs in your region. The weekday schedule keeps it to working hours.
 
+### On CloudShare from your team's image (fastest)
+
+Build one generic image per team, and every SE deploys a ready generator from it in minutes, set up for their own
+tenant. The image holds no tenant settings.
+
+**Build the image (once per team):**
+
+1. In CloudShare, create an environment with a **Windows Server 2022** VM that has direct internet access.
+2. On the console's ZIA tab, click **Download image build script** (or run `./aiguard-kit zia image`). Copy it to the
+   VM, open PowerShell **as Administrator** and run
+   `powershell -ExecutionPolicy Bypass -File .\se-demo-generator-image-build.ps1`. Progress goes to
+   `C:\SE-Demo\image-build.log`; it takes about 10 minutes.
+   - It downloads the Client Connector installer and keeps it only if it matches the pinned SHA-256 and carries
+     Zscaler's signature. It **doesn't install it**.
+   - It adds uv, the kit, the traffic and Endpoint AI wrappers and the desktop shortcuts.
+   - It registers a one-time setup that runs when someone first signs in to a copy.
+3. Don't run **SE-Demo set up this generator** and don't sign in to Client Connector on this VM. Shut it down from
+   Windows, then save it in CloudShare as a template and share it with your team.
+
+**Use it (each SE):**
+
+1. Deploy a copy of the image.
+2. On your laptop, click **Copy setup code** on the ZIA tab (or run `./aiguard-kit zia setup-code`). The code names
+   your test user, your cloud and the kit's Client Connector app profile. It holds no password.
+3. Sign in to the copy. The **SE-Demo set up this generator** window opens (or use the desktop shortcut). Paste the
+   code. The setup then:
+   - gives the copy its own name (`SEDEMO-xxxxxx`), so copies never look like one device to Client Connector or
+     Endpoint AI;
+   - installs Client Connector for your tenant;
+   - schedules the traffic and restarts.
+4. After the restart, sign in to Client Connector as the test user. Then, on your laptop's Endpoint AI tab, add the
+   new name under **Generator hostnames** and click **Create or update**.
+5. For the Endpoint AI scenes, double-click **SE-Demo install Claude Code** on the copy's desktop and sign in to
+   Claude Code once.
+
+If the setup stops (a bad code, say), nothing is half-done. It runs again from the shortcut or at the next sign-in.
+Its log is `C:\SE-Demo\first-logon.log`.
+
 ### On CloudShare or any other Windows VM: one setup script
 
 If you build generators in CloudShare (or a lab VM, or another cloud), the kit gives you the same setup as the AWS template as a PowerShell script. The kit can't create the CloudShare machine for you (that would need CloudShare API access); you create the VM, the script does the rest.
