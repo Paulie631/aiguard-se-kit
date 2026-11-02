@@ -9,7 +9,7 @@ By the end of this guide you have AI Guard and ZIA dashboards full of demo data 
 | Piece | Runs on | What it does |
 | --- | --- | --- |
 | SE Demo Kit (`aiguard-kit`) | Your laptop | Creates the `SE-Demo:` objects in AI Guard and ZIA, runs tests, hosts the console and Guided demo |
-| Traffic generator | A separate Windows VM (AWS stack or lab VM) | Sends safe test traffic through Client Connector as a test user, so ZIA logs and dashboards fill |
+| Traffic generator | A separate Windows VM (a copy of your team's CloudShare image, an AWS stack, or a lab VM) | Sends safe test traffic through Client Connector as a test user, so ZIA logs and dashboards fill |
 | Your demo tenant | Zscaler cloud | Holds the objects; everything the kit creates is named `SE-Demo` and removed by teardown |
 
 **Golden rules**
@@ -42,9 +42,10 @@ Tick every box before you start; most setup failures trace back to one of these.
 
 Pick one:
 
-- [ ] **AWS (recommended):** an AWS account you may use for demos, with rights to create CloudFormation stacks, a VPC, an IAM role and an EC2 instance. Cost is about a Windows t3.medium for working hours.
-- [ ] **Your own VM:** Windows 10/11 or Server 2022, with remote desktop, internet access that doesn't go through a corporate proxy, and no other Zscaler tenant's Client Connector on it.
-- [ ] The **Client Connector Windows installer (.msi) from your demo tenant**, never from the corporate tenant.
+- [ ] **CloudShare, from your team's image (fastest):** access to the CloudShare template your team built (or build it once, Part 5).
+- [ ] **AWS:** an AWS account you may use for demos, with rights to create CloudFormation stacks, a VPC, an IAM role and an EC2 instance. Cost is about a Windows t3.medium for working hours.
+- [ ] **Your own VM:** Windows Server 2019 or 2022 (or Windows 10/11), with remote desktop, internet access that doesn't go through a corporate proxy, and no other Zscaler tenant's Client Connector on it.
+- [ ] Nothing else for Client Connector: all three options install the kit's verified copy. Only if that's skipped, the **Windows installer (.msi) from your demo tenant**, never from the corporate tenant.
 
 **Calendar**
 
@@ -132,9 +133,44 @@ Prefer a terminal? `aiguard-kit zia preflight`, then `aiguard-kit zia setup`, th
 
 ## Part 5: Build the traffic generator (20 minutes)
 
-ZIA dashboards fill only from real traffic, so a separate Windows machine browses as the test user through Client Connector. Use AWS (option A), or CloudShare / a lab VM (option B).
+ZIA dashboards fill only from real traffic, so a separate Windows machine browses as the test user through Client Connector. Pick one:
 
-### Option A: AWS CloudFormation
+- **Option A: CloudShare, from your team's image.** Fastest: deploy a copy, paste a setup code, done.
+- **Option B: AWS CloudFormation.** One stack, started and stopped on a weekday schedule.
+- **Option C: CloudShare or any Windows VM, with the setup script.** When there's no team image yet.
+
+### Option A: CloudShare, from your team's image
+
+**Use the image (each SE, about 5 minutes):**
+
+1. In CloudShare, create an environment from your team's **SE-Demo traffic generator** template.
+2. On your laptop, on the console's ZIA tab, click **Copy setup code** (terminal: `aiguard-kit zia setup-code`). The code names your test user, your Zscaler cloud and the kit's Client Connector app profile. It holds no password, but keep it within your team.
+3. Connect to the copy and sign in. The **SE-Demo set up this generator** window opens on its own. If it doesn't, double-click that shortcut on the desktop. Paste the code and press Enter. The setup:
+   - gives the copy its own computer name, `SEDEMO-xxxxxx`, so no two copies look like one device to Client Connector or Endpoint AI;
+   - installs Client Connector for your tenant, with the kit's app profile;
+   - schedules a traffic round every 30 minutes, then restarts.
+4. Write down the new name (it's shown before the restart and saved in `C:\SE-Demo\generator.json`). You need it for Endpoint AI.
+5. Continue at **Sign in to Client Connector** below.
+
+If the setup stops (a mistyped code, say), nothing is half-done: it runs again from the shortcut or at the next sign-in. Its log is `C:\SE-Demo\first-logon.log`.
+
+**Build the image (once per team, about 30 minutes):**
+
+1. In CloudShare, create an environment with a **Windows Server 2022** VM (2019 works too) that has direct internet access.
+2. On your laptop's ZIA tab, click **Download image build script** (terminal: `aiguard-kit zia image`). It holds no tenant settings, so anyone on the team can make it.
+3. Upload it to the VM (CloudShare's **File Upload** puts it in `C:\Uploads`). Open PowerShell **as Administrator** and run it with the path in quotes. Browsers add `(2)`, `(3)` to repeat downloads, and PowerShell misreads those without quotes:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File "C:\Uploads\se-demo-generator-image-build.ps1"
+   ```
+   About 10 minutes; progress in `C:\SE-Demo\image-build.log`.
+   - It downloads the Client Connector installer and keeps it only if its SHA-256 matches and it's signed by Zscaler. It **doesn't install it**: each copy installs it for its own tenant.
+   - It adds uv, the kit, the traffic and Endpoint AI wrappers, the desktop shortcuts and the one-time setup.
+4. Don't run **SE-Demo set up this generator** and don't sign in to Client Connector on this VM. If the setup window opens when you sign in again, close it.
+5. Shut the VM down from Windows, save it in CloudShare as a template, and share it with your team.
+
+The Setup tab's manual steps include this as the optional step **Build the CloudShare generator image (once per team)**.
+
+### Option B: AWS CloudFormation
 
 1. **Download the template.** In the console's ZIA tab, section **2 · Traffic generator**, click **Download CloudFormation template**. It saves `se-demo-zia-generator.cfn.json` to your Downloads folder, already filled in with your cloud, domain and test user.
 2. **Create the stack.**
@@ -158,17 +194,21 @@ ZIA dashboards fill only from real traffic, so a separate Windows machine browse
 
 > Account won't let stacks create a VPC or IAM roles? Set `NetworkMode` to `ExistingSubnet` (with a subnet that doesn't route through corporate inspection) and/or `ExistingInstanceProfile` to a profile with `AmazonSSMManagedInstanceCore`, plus `WeekdaySchedule` = `false`.
 
-### Option B: CloudShare or your own Windows VM
+### Option C: CloudShare or any Windows VM, with the setup script
 
-1. Create a Windows Server 2022 (or Windows 10/11) VM with direct internet access and no other tenant's Client Connector. In CloudShare, start an environment from a Windows Server template.
+1. Create a Windows Server 2019 or 2022 (or Windows 10/11) VM with direct internet access and no other tenant's Client Connector. In CloudShare, start an environment from a Windows Server template.
 2. On your laptop, in the console's ZIA tab, section **2 · Traffic generator**, click **Download setup script (CloudShare / any Windows VM)**. It saves `se-demo-zia-generator-setup.ps1`, filled in for your tenant. (Terminal: `aiguard-kit zia script`.)
-3. Copy the file to the VM (in CloudShare, drag it into the VM window or use its file transfer). Open PowerShell **as Administrator** on the VM and run `powershell -ExecutionPolicy Bypass -File .\se-demo-zia-generator-setup.ps1`. It installs the verified Client Connector (with the kit's app profile), the kit and the 30-minute traffic schedule, like the AWS stack. Progress: `C:\SE-Demo\setup.log`, about 10 minutes.
+3. Copy the file to the VM. CloudShare's **File Upload** puts it in `C:\Uploads`, and a repeat download may be named `se-demo-zia-generator-setup(3).ps1`. Open PowerShell **as Administrator** and run it with the full path in quotes, using the file's actual name:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File "C:\Uploads\se-demo-zia-generator-setup.ps1"
+   ```
+   Signed in as the built-in `Administrator` account, right-clicking the file and choosing **Run with PowerShell** also works. It installs the verified Client Connector (with the kit's app profile), the kit, the 30-minute traffic schedule and the desktop shortcuts, like the AWS stack. Progress: `C:\SE-Demo\setup.log` (the **SE-Demo setup log** shortcut), about 10 minutes. It ends with "Setup finished".
 4. Continue below. Traffic only runs while the VM is running, so check CloudShare's suspend policy before a demo.
 
-### Sign in to Client Connector (both options)
+### Sign in to Client Connector (every option)
 
 1. **Get Client Connector onto the machine.**
-   - **AWS or the setup script (kit 1.8.18 or later):** it's already installed, with the kit's app profile (Z-Tunnel 2.0 and the Zscaler certificate) loaded before you sign in. The stack downloads Client Connector 4.10.0.477 from the kit's `zcc-installer` release and installs it only if the file's SHA-256 matches and it's signed by Zscaler. If `C:\SE-Demo\setup.log` (the **SE-Demo setup log** shortcut) says it was skipped, install by hand as below.
+   - **The team image, AWS or the setup script:** it's already installed, with the kit's app profile (Z-Tunnel 2.0 and the Zscaler certificate) loaded before you sign in. The stack downloads Client Connector 4.10.0.477 from the kit's `zcc-installer` release and installs it only if the file's SHA-256 matches and it's signed by Zscaler. If `C:\SE-Demo\setup.log` (the **SE-Demo setup log** shortcut) says it was skipped, install by hand as below.
    - **Your own VM, or the AWS install was skipped:** in Edge, sign in to your **demo tenant's** admin console, download the latest Windows 64-bit .msi from the Client Connector App Store and run it with the defaults. Never use an installer from the corporate tenant.
 2. Sign in to Client Connector as the test user (`se-demo-traffic@<your user domain>`) with the password from Part 4. On a ZIdentity tenant, sign in as `se-demo-traffic@<vanity>.zslogin.net` with the password you set in ZIdentity.
 3. Open Client Connector > **More > Update Policy**. This picks up the kit's app profile: the Zscaler certificate and **Z-Tunnel 2.0**.
@@ -202,15 +242,22 @@ On the generator, run the machine check first; traffic rounds only start once it
 
 ## Optional: Endpoint AI Security (20 minutes)
 
-Shows an AI coding agent on the generator trying something risky: Endpoint AI records it in **Monitor** and stops it in **Block**. Full runbook: ENDPOINT-AI.md.
+Shows an AI coding agent on the generator trying something risky: Endpoint AI records it in **Monitor** and stops it in **Block**. There are 44 scenes in nine risk categories (secrets, destructive actions, credentials, supply chain, agent misuse, data exfiltration, cloud, developer workflow, machine and OS). Full runbook: ENDPOINT-AI.md.
+
+Two machines do this: your **laptop** holds the Endpoint AI credential and shows the Live feed; the **generator** runs the scenes. The kit refuses to run scenes on the machine that holds the credential.
 
 1. **Create the API credential** (Endpoint AI console, **Administration > API Access**): name `se-demo-kit`, role **Admin**, expiry 90 days. Copy the client_id and the secret (`sqrx_sk_…`, shown once). Note the region in the API host: the `use2` in `https://use2.api.<domain>`.
-2. **Connect** on the kit's **Endpoint AI** tab: console domain, region, client_id, secret, then **Save and test**.
+2. **Connect** on the kit's **Endpoint AI** tab on your laptop: console domain, region, client_id, secret, then **Save and test**.
 3. **Turn on the Endpoint AI agent** for the generator's app profile in the Client Connector portal, and check the generator shows under **Administration > Devices**.
-4. **Create the demo policy**: **Create or update** on the Endpoint AI tab. The kit makes the device group `SE-Demo: traffic generator` (only the generator) and the policy `SE-Demo: Agentic Guardrails`, assigned to that group only.
-5. **On the generator**, as the Windows user who'll run the demo: `C:\SE-Demo\eai.cmd demo --install`, then sign in with `claude` (or `C:\SE-Demo\eai.cmd demo --set-key` for an API key). Double-click **SE-Demo Endpoint AI scenes** once and watch the **Live feed** tab on your laptop.
+4. **Name the generator.** Under **Generator hostnames**, enter its computer name: `SEDEMO-xxxxxx` for a copy of the team image, `EC2AMAZ-…` on AWS (the kit also finds it by the test user).
+5. **Check the rules.** Click **Check rules with Endpoint AI** under Per-rule actions. Every rule should show *accepted*. A rejected rule shows Endpoint AI's reason; set it to **Allow (rule off)** and tell the kit owner.
+6. **Create the demo policy**: **Create or update**. The kit makes the device group `SE-Demo: traffic generator` (only the generator) and the policy `SE-Demo: Agentic Guardrails`, assigned to that group only. It checks the rules first and changes nothing if any is rejected. Run it again after each kit update that adds scenes, to add their rules.
+7. **On the generator**, as the Windows user who'll run the demo, double-click **SE-Demo install Claude Code**, then sign in to Claude Code once (`claude` in a terminal; or `C:\SE-Demo\eai.cmd demo --set-key` for an API key).
+8. Open the generator's **Endpoint AI** tab, click **Demo set** (one scene per risk category), then **Run**. Watch the **Live feed** tab on your laptop.
 
-The scenes use only AWS's published example key (`AKIAIOSFODNN7EXAMPLE`) and a decoy folder the kit creates. **Build PDF** on the tab gives you the Executive Brief as a leave-behind.
+Endpoint AI stops a blocked action on the generator straight away, but its events take a few minutes to appear, in its own console as well as on the Live feed. The line under the feed's status shows how far behind Endpoint AI is.
+
+The scenes use only safe test data: AWS's published example key (`AKIAIOSFODNN7EXAMPLE`), decoy files in a throwaway folder the kit creates and puts back after every scene, and commands that are only printed, never run. **Build PDF** on the tab gives you the Executive Brief as a leave-behind.
 
 ## Part 7: Before every demo (5 minutes)
 
@@ -224,7 +271,7 @@ Run the readiness check the morning of the demo, and give yourself time to fix w
   - recent traffic rounds and Insights panels with data;
   - the AWS start/stop schedule, so the generator isn't asleep during the demo.
   - Endpoint AI (if set up): the credential isn't about to expire, the generator is online, the policy is assigned, and demo events arrived in the last 24 hours.
-- [ ] **Endpoint AI:** set **Mode** to **Monitor** and run the scenes once, so there's recent activity to show.
+- [ ] **Endpoint AI:** on your laptop, switch the Live feed's policy to **Monitor**, run the **Demo set** once on the generator, and wait until its events show on the Live feed (a few minutes), so there's recent activity to show.
 - [ ] **Drift found?** On the ZIA tab, click **Check for drift**, then **Fix drift**. It only changes the kit's own objects.
 - [ ] **Demo after 9pm New York or on a weekend?** Start the AWS instance by hand in the EC2 console.
 - [ ] **Clean up the screen.** Close tabs with secrets, turn off **Show talk track** if you'll share the whole screen, and update the kit (**Updates** button).
@@ -252,6 +299,16 @@ Open the console's **Guided demo** tab, pick a storyline and follow the steps; t
 6. On the last step, click **Recap**, then **Copy for the follow-up email**.
 
 **Keys:** ← → move between steps, Enter runs the step.
+
+**Endpoint AI demo (about 10 minutes, two machines)**
+
+1. On your laptop, open the **Live feed** tab with the policy switch (top right) on **Monitor**.
+2. On the generator, click **Demo set**, then **Run**. Each action runs and is recorded. While the events arrive, talk through what the agent is attempting.
+3. On the Live feed, click **Block**, then run the Demo set again. The feed checks every 5 seconds for 10 minutes after a switch, marks the switch on the timeline, and a card compares the risky actions before and after it ("0 blocked, then 9 blocked").
+4. Walk through the charts: risk categories, the rules that fired, Endpoint AI's own built-in detections next to your rules, and OWASP Agentic and MITRE ATLAS. Click a row for the rule, the message the agent got and the raw event.
+5. Click **Download recap** for a one-page summary to print or save as a PDF, and leave it with the customer.
+
+Blocking happens on the generator immediately, and the record follows a few minutes later. Say so, so a short wait on the feed reads as normal.
 
 ## Updating, rolling back and tearing down
 
@@ -290,4 +347,11 @@ Start with the **Logs** tab: it shows every call with the request and response, 
 | AWS remote desktop: TargetNotConnected | The instance is stopped (weekday 7am–9pm New York schedule). Start it in EC2 |
 | Generator console: "Access is denied" | Use a stack made from a current template; older stacks need the kit folder permissions reset |
 | Insights panels empty | Normal for the first \~2 days. Use the Internet Access dashboards meanwhile; **Check Insights** lists what's still empty |
+| On the VM: "The term '-ExecutionPolicy' is not recognized", or "The term 'C:\Uploads\se-demo-…-setup' is not recognized" | Start the line with `powershell`, and put the file's full path in quotes, as in Part 5. A repeat download is named like `…-setup(3).ps1`, and the `(3)` breaks an unquoted path |
+| CloudShare image copy: the setup window didn't open at sign-in | Double-click **SE-Demo set up this generator** on the desktop. Already set up? It says so and shows the copy's name |
+| Installing Claude Code: "The process cannot access the file … because it is being used by another process" | Windows Defender is still scanning the download, or an earlier install is still running. Wait a minute, run `Remove-Item "$env:USERPROFILE\.claude\downloads\*" -Force` in PowerShell, then double-click **SE-Demo install Claude Code** again |
+| Live feed empty right after running the scenes | Endpoint AI takes a few minutes to record events, even in its own console. The line under the feed's status shows the newest event's age and the typical delay |
+| Live feed on the generator: "This computer isn't connected to Endpoint AI" | Expected: open the Live feed on your laptop, which holds the credential |
+| Endpoint AI: "rejected 1 rule: …" at Create or update | Endpoint AI's rule check refused that pattern. Nothing was changed. Set the rule to **Allow (rule off)** under Per-rule actions, save, and send the reason to the kit owner |
+| Endpoint AI scenes show "Ran" in Block | That scene's rule isn't in your policy yet (new in a kit update). Click **Create or update** on your laptop |
 | A Guided demo menu path doesn't match your console | Zscaler renames menus between console versions. Tell the kit owner the path you see |
