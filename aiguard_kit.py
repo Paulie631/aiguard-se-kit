@@ -511,10 +511,10 @@ def quiet_sdk():
 
 class Tenant:
     def __init__(self, cfg):
-        from zscaler import ZscalerClient
         secret = kc_get("oneapi-client-secret")
         if not (cfg.get("client_id") and cfg.get("vanity_domain") and secret):
             raise KitError(no_creds_message())
+        from zscaler import ZscalerClient
         conf = {"clientId": cfg["client_id"], "clientSecret": secret, "vanityDomain": cfg["vanity_domain"]}
         if cfg.get("cloud"):
             conf["cloud"] = cfg["cloud"]
