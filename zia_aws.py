@@ -71,16 +71,21 @@ if ($zcc -or $s3o) {
   $pt = "${ZccPolicyToken}"
   if (-not $ok) {
     "Install Client Connector by hand from your demo tenant, then sign in as ${TestUser}."
-  } elseif ($ext -eq "msi") {
-    $margs = "/i `"$f`" /quiet /norestart CLOUDNAME=${ZccCloudName} USERDOMAIN=${ZccUserDomain}"
-    if ($pt) { $margs += " POLICYTOKEN=$pt" }
-    Start-Process msiexec.exe -Wait -ArgumentList $margs
-    "Client Connector installed" + $(if ($pt) { " with the kit's app profile" } else { "" }) + ". Sign in as ${TestUser}."
   } else {
-    $xargs = "--mode unattended --cloudName ${ZccCloudName} --userDomain ${ZccUserDomain}"
-    if ($pt) { $xargs += " --policyToken $pt" }
-    Start-Process $f -Wait -ArgumentList $xargs
-    "Client Connector installed" + $(if ($pt) { " with the kit's app profile" } else { "" }) + ". Sign in as ${TestUser}."
+    if ($ext -eq "msi") {
+      $iargs = "/i `"$f`" /quiet /norestart CLOUDNAME=${ZccCloudName} USERDOMAIN=${ZccUserDomain}"
+      if ($pt) { $iargs += " POLICYTOKEN=$pt" }
+      $ip = Start-Process msiexec.exe -Wait -PassThru -ArgumentList $iargs
+    } else {
+      $iargs = "--mode unattended --cloudName ${ZccCloudName} --userDomain ${ZccUserDomain}"
+      if ($pt) { $iargs += " --policyToken $pt" }
+      $ip = Start-Process $f -Wait -PassThru -ArgumentList $iargs
+    }
+    if ($ip.ExitCode -eq 0 -or $ip.ExitCode -eq 3010) {
+      "Client Connector installed" + $(if ($pt) { " with the kit's app profile" } else { "" }) + ". Sign in as ${TestUser}."
+    } else {
+      "Client Connector did NOT install (installer exit code " + $ip.ExitCode + "). Install it by hand from your demo tenant, then sign in as ${TestUser}."
+    }
   }
 } else {
   "No Client Connector installer URL given: install it by hand, then sign in as ${TestUser}."
@@ -321,7 +326,9 @@ def write(path, **kw):
     return path
 
 
-SAFE_VALUE = __import__("re").compile(r"^[A-Za-z0-9._:/@?=&%+~#-]*$")
+import re
+
+SAFE_VALUE = re.compile(r"^[A-Za-z0-9._:/@?=&%+~#-]*$")
 
 
 def setup_script(cloud="zscalertwo", domain="example.com", test_user="se-demo-traffic@example.com", kit_zip=KIT_ZIP,
@@ -530,7 +537,13 @@ def first_logon_script(every=30, per_type=4):
 def image_script(kit_zip=KIT_ZIP, zcc_url="", zcc_sha256="", every=30, per_type=4, **_):
     """The CloudShare image build: tenant-neutral, so one image serves every SE's own tenant."""
     import base64
+    if str(zcc_url).lower().startswith("s3://"):
+        raise ValueError("An s3:// installer only works on AWS. Leave the installer field empty (the kit's verified copy), "
+                         "give an https URL to an .msi, or 'none'.")
     zcc_url, zcc_sha256 = _installer(zcc_url, "", zcc_sha256)
+    if zcc_url and not re.search(r"\.msi(\?|$)", zcc_url, re.I):
+        raise ValueError("The image needs the Client Connector .msi installer (each copy installs it with msiexec); "
+                         f"this URL isn't one: {zcc_url}")
     for k, v in (("kit zip", kit_zip), ("installer URL", zcc_url), ("installer SHA-256", zcc_sha256)):
         if not SAFE_VALUE.match(str(v)):
             raise ValueError(f"The {k} has characters the build script can't take safely: {v!r}")

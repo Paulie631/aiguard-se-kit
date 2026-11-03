@@ -1106,3 +1106,45 @@ def test_feed_raw_route_serves_one_event_and_needs_the_token(monkeypatch, tmp_pa
                                  headers={"X-Kit-Token": tok, "Content-Type": "application/json"})
     urllib.request.urlopen(req).read()
     t.join(5)
+
+
+def test_save_cfg_is_atomic_locked_and_creates_profile_dirs(monkeypatch, tmp_path):
+    import threading
+    kit = load_kit(monkeypatch, tmp_path, ["status"])
+    kit.CFG_DIR = tmp_path / "profiles" / "acme"; kit.CFG_FILE = kit.CFG_DIR / "config.json"   # --profile on a fresh machine
+    kit.save_cfg({"a": 1})
+    assert kit.load_cfg() == {"a": 1} and not kit.CFG_FILE.with_name("config.json.tmp").exists()
+    errors, stop = [], threading.Event()
+    def writer():
+        n = 0
+        while not stop.is_set():
+            kit.update_cfg(lambda c: c.__setitem__("w", c.get("w", 0) + 1)); n += 1
+    def reader():
+        while not stop.is_set():
+            try:
+                kit.load_cfg()
+            except Exception as e:   # a half-written file would land here
+                errors.append(e)
+    ts = [threading.Thread(target=writer), threading.Thread(target=writer), threading.Thread(target=reader)]
+    [t.start() for t in ts]; import time; time.sleep(0.4); stop.set(); [t.join() for t in ts]
+    assert not errors and kit.load_cfg()["w"] > 10   # two writers: no lost update, every increment counted
+
+
+def test_redact_survives_secrets_added_while_it_runs_and_hides_passwords_whole(monkeypatch, tmp_path):
+    import threading
+    kit = load_kit(monkeypatch, tmp_path, ["status"])
+    stop = threading.Event()
+    def adder():   # a few hundred renewed tokens, like a console left open: enough to hit the loop mid-iteration
+        for i in range(400):
+            if stop.is_set():
+                break
+            kit.remember_secret(f"tok-{i:08d}-abcdefgh"); time.sleep(0.0005)
+    import time
+    t = threading.Thread(target=adder); t.start()
+    try:
+        for _ in range(400):
+            kit.redact({"x": "nothing here " * 50, "password": "Sup3r-Secret"})
+    finally:
+        stop.set(); t.join()
+    out = kit.redact({"password": "Sup3r-Secret", "client_secret": "abcdefgh12345", "nested": [{"password": "p"}]})
+    assert out["password"] == "…" and out["client_secret"] == "abcd…" and out["nested"][0]["password"] == "…"

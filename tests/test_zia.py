@@ -1424,7 +1424,7 @@ def test_zia_and_client_connector_writes_and_failures_reach_the_activity_log(mon
     logged = kit.ACTIVITY[-2:]
     assert logged[0]["level"] == "error" and logged[0]["detail"]["request"]["body"]["trustedNetworkIds"] == [7]
     assert '"status": 400' in logged[0]["detail"]["error"]
-    assert logged[1]["detail"]["request"]["body"]["password"].startswith("Sup3") and "Secret" not in json.dumps(logged[1])
+    assert logged[1]["detail"]["request"]["body"]["password"] == "…" and "Sup3" not in json.dumps(logged[1])   # a password shows nothing, not even a prefix
 
 
 def test_forwarding_profile_falls_back_to_a_minimal_profile(zenv, capsys):
@@ -1783,7 +1783,11 @@ def test_cloudshare_image_is_tenant_neutral_and_each_copy_sets_itself_up(aws):
     assert "-Minutes 60" in f2 and "traffic --count 2" in f2
     assert '$zcc = ""' in aws.image_script(zcc_url="none")
     with pytest.raises(ValueError, match="characters"):
-        aws.image_script(zcc_url='https://x.example/a.msi"; Remove-Item C:\\ -Recurse; "')
+        aws.image_script(zcc_url='https://x.example/a"; Remove-Item C:\\ -Recurse; "/a.msi')
+    with pytest.raises(ValueError, match=r"\.msi installer"):      # each copy runs msiexec on it: an .exe can't be staged
+        aws.image_script(zcc_url="https://x.example/Zscaler-windows.exe")
+    with pytest.raises(ValueError, match="only works on AWS"):
+        aws.image_script(zcc_url="s3://bucket/zcc.msi")
 
 
 def test_setup_code_carries_user_cloud_and_token_only(aws):
@@ -1839,3 +1843,22 @@ def test_cloudshare_image_step_is_optional_and_never_next(zenv):
     assert img["status"] == "optional" and not img["next"] and img not in kit.manual_open(list(items.values()))
     kit.manual_mark(kit.load_cfg(), "generator-image")
     assert {i["id"]: i for i in kit.manual_status(kit.load_cfg(), check=False)}["generator-image"]["status"] == "done"
+
+
+def test_first_boot_reports_a_failed_client_connector_install(aws):
+    """The AWS/script path reads msiexec's exit code: a failed install must not be logged as installed."""
+    s = aws.setup_script()
+    assert "Start-Process msiexec.exe -Wait -PassThru" in s and "Start-Process $f -Wait -PassThru" in s
+    assert "$ip.ExitCode -eq 0 -or $ip.ExitCode -eq 3010" in s and "did NOT install (installer exit code" in s
+    assert s.count("Client Connector installed") == 1
+
+
+def test_cloud_name_covers_every_zscaler_cloud(zenv):
+    kit, z, fake = zenv("zia")
+    for email, want in (("admin@acme.zscalertwo.net", "zscalertwo"), ("admin@acme.zscloud.net", "zscloud"),
+                        ("admin@acme.zspreview.net", "zspreview"), ("admin@acme.zsdemo.net", "zsdemo"),
+                        ("admin@acme.zscalerthree.net", "zscalerthree"), ("admin@acme.zscaler.net", "zscaler")):
+        fake.db["users"] = [{"id": 1, "email": email}]
+        assert z.cloud_name(fake) == want, email
+    fake.db["users"] = [{"id": 1, "email": "someone@example.com"}]
+    assert z.cloud_name(fake) is None
