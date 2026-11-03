@@ -1148,3 +1148,28 @@ def test_redact_survives_secrets_added_while_it_runs_and_hides_passwords_whole(m
         stop.set(); t.join()
     out = kit.redact({"password": "Sup3r-Secret", "client_secret": "abcdefgh12345", "nested": [{"password": "p"}]})
     assert out["password"] == "…" and out["client_secret"] == "abcd…" and out["nested"][0]["password"] == "…"
+
+
+def test_generator_console_points_setup_at_the_laptop(monkeypatch, tmp_path):
+    """On a machine the kit's own generator scripts built (zia.cmd and home\\ next to the kit folder), the console says
+    setup belongs on the laptop, and the credentials error says so instead of naming a setup command."""
+    kit = load_kit(monkeypatch, tmp_path, ["status"])
+    assert not kit.generator_machine()
+    root = tmp_path / "SE-Demo"; (root / "kit").mkdir(parents=True); (root / "home").mkdir(); (root / "zia.cmd").write_text("@echo off")
+    monkeypatch.setattr(kit, "HERE", root / "kit")
+    assert kit.generator_machine()
+    assert "setup runs on your laptop" in kit.no_creds_message() and "aiguard-kit" not in kit.no_creds_message()
+    with pytest.raises(kit.KitError, match="traffic generator"):
+        kit.Tenant({})
+    monkeypatch.setattr(kit, "HERE", tmp_path)
+    assert "`./aiguard-kit setup`" in kit.no_creds_message()
+
+
+def test_messages_name_this_editions_command(monkeypatch, tmp_path):
+    kit = load_kit(monkeypatch, tmp_path, ["status"])
+    monkeypatch.setattr(kit, "WINDOWS", False)
+    assert kit.L("Run `./aiguard-kit setup` first.") == "Run `./aiguard-kit setup` first."
+    monkeypatch.setattr(kit, "EDITION", {"product": "zia", "command": "zia-kit"})
+    assert kit.L("Run `./aiguard-kit zia check` first.") == "Run `./zia-kit zia check` first."
+    monkeypatch.setattr(kit, "WINDOWS", True)
+    assert kit.L("Run `./aiguard-kit zia check` first.") == "Run `.\\zia-kit.cmd zia check` first."

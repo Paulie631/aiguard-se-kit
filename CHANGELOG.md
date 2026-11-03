@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.41
+- **The generator's console says setup belongs on the laptop.** On a machine the kit's own scripts built, the Setup
+  tab led into the AI Guard wizard and failed at step 5 with "No OneAPI credentials saved yet" (the generator holds
+  none by design). It now says so up front and points at Check this machine and the Endpoint AI scenes.
+- Messages name this edition's command (`zia-kit` on the ZIA kit, not `aiguard-kit`).
+
 ## 1.8.40
 Demo-quality fixes from the end-to-end review.
 - **Six rules no longer fire on ordinary developer work:** reading a public key (`id_rsa.pub`) or creating a key,

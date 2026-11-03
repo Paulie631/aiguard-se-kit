@@ -63,6 +63,12 @@ from pathlib import Path
 
 VERSION = "1.8.40"
 HERE = Path(__file__).resolve().parent
+
+
+def generator_machine():
+    """True on a traffic generator the kit's own scripts set up (AWS template, setup script or the CloudShare image):
+    the kit runs from <root>\kit next to the zia.cmd wrapper they write. Setup belongs on the SE's laptop, not here."""
+    return (HERE.parent / "zia.cmd").exists() and (HERE.parent / "home").is_dir()
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
 for _stream in (sys.stdout, sys.stderr):  # Windows consoles and redirected output default to cp1252, which can't print ✓ ✗
@@ -73,8 +79,20 @@ for _stream in (sys.stdout, sys.stderr):  # Windows consoles and redirected outp
 
 
 def L(text: str) -> str:
-    """Messages are written with the Mac/Linux launcher; show the Windows one on Windows."""
-    return text.replace("./aiguard-kit", LAUNCHER) if WINDOWS else text
+    """Messages are written as `./aiguard-kit …`; shown with this edition's command (zia-kit on the ZIA kit) and the
+    Windows launcher on Windows."""
+    cmd = (EDITION or {}).get("command") or "aiguard-kit"
+    text = text.replace("./aiguard-kit", f"./{cmd}")
+    return text.replace(f"./{cmd}", f".\\{cmd}.cmd") if WINDOWS else text
+
+
+NO_CREDS = ("No OneAPI credentials saved yet. Run `./aiguard-kit setup` (or the console's Setup tab) to enter them.")
+NO_CREDS_GENERATOR = ("This is the traffic generator, which holds no tenant credentials: setup runs on your laptop. Here, use "
+                      "Internet Access (ZIA) > Check this machine, and Endpoint AI > step 3 for the scenes.")
+
+
+def no_creds_message():
+    return NO_CREDS_GENERATOR if generator_machine() else NO_CREDS
 
 
 if WINDOWS:
@@ -496,7 +514,7 @@ class Tenant:
         from zscaler import ZscalerClient
         secret = kc_get("oneapi-client-secret")
         if not (cfg.get("client_id") and cfg.get("vanity_domain") and secret):
-            raise KitError("No OneAPI credentials saved yet. Run `./aiguard-kit setup` first.")
+            raise KitError(no_creds_message())
         conf = {"clientId": cfg["client_id"], "clientSecret": secret, "vanityDomain": cfg["vanity_domain"]}
         if cfg.get("cloud"):
             conf["cloud"] = cfg["cloud"]
@@ -3099,7 +3117,7 @@ def cmd_gui():
                                         "lib": lib, "panels": PANELS, "prefix": PREFIX, "block_levels": block_levels(),
                                         "competitor": c.get("competitor", "Palo Alto"), "profile": PROFILE,
                                         "update_behind": _UPDATE["behind"], "kit_dir": str(HERE),
-                                        "edition": (EDITION or {}).get("product"),
+                                        "edition": (EDITION or {}).get("product"), "generator": generator_machine(),
                                         "zia_set_up": bool((c.get("zia") or {}).get("users")),
                                         "eai_set_up": bool(((c.get("eai") or {}).get("state") or {}).get("policy_id")),
                                         "edition_name": (EDITION or {}).get("name"),
