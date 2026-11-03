@@ -109,8 +109,7 @@ class ZiaTenant:
         from zscaler import ZscalerClient
         secret = K.kc_get("oneapi-client-secret")
         if not (cfg.get("client_id") and cfg.get("vanity_domain") and secret):
-            raise K.KitError("No OneAPI credentials saved yet. Run `./aiguard-kit setup` (or the console's Setup tab) "
-                             "to enter them, then run `./aiguard-kit zia setup`.")
+            raise K.KitError(K.no_creds_message() + ("" if K.generator_machine() else " Then run `./aiguard-kit zia setup`."))
         conf = {"clientId": cfg["client_id"], "clientSecret": secret, "vanityDomain": cfg["vanity_domain"]}
         if cfg.get("cloud"):
             conf["cloud"] = cfg["cloud"]

@@ -3,6 +3,9 @@
 The ZIA kit is a separate edition of the SE demo kit. It installs beside the AI Guard kit (its own folder,
 shortcut and `zia-kit` command) and shares its saved OneAPI login. Releases are tagged `zia-v<version>`.
 
+## 0.2.36
+- The generator's console says setup belongs on the laptop; messages name `zia-kit` (see AI Guard kit CHANGELOG 1.8.41).
+
 ## 0.2.35
 - Image setup shortcut runs elevated; the setup code stays out of the log (see AI Guard kit CHANGELOG 1.8.40).
 
