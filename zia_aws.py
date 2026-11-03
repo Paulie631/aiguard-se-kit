@@ -386,7 +386,6 @@ if (Test-Path $marker) {
   Read-Host "Press Enter to close" | Out-Null
   exit 0
 }
-Start-Transcript -Path "$root\first-logon.log" -Append | Out-Null
 $Host.UI.RawUI.WindowTitle = "SE-Demo: set up this traffic generator"
 try {
   $ErrorActionPreference = "Stop"
@@ -411,6 +410,8 @@ try {
   if ($cloud -notmatch '^[a-z0-9]{3,30}$') { throw "Not a Zscaler cloud name: $cloud" }
   if ($token -and $token -notmatch '^[A-Za-z0-9._:+=/-]{4,200}$') { throw "The policy token in the setup code looks wrong: copy the code again." }
   $domain = $user.Split("@")[1]
+  Start-Transcript -Path "$root\first-logon.log" -Append | Out-Null   # after the code was read: it never lands in the log
+  "Setting up this generator for $user on $cloud"
 
   # Client Connector, from the installer the image build checked; checked again before it runs
   $f = "$root\zcc-installer.msi"
@@ -455,8 +456,8 @@ try {
 } catch {
   Write-Host ""
   Write-Host ("Setup stopped: " + $_.Exception.Message) -ForegroundColor Red
-  Write-Host "Nothing was finished, so it will run again: use the desktop shortcut or sign in again. Log: $root\first-logon.log"
-  Stop-Transcript | Out-Null
+  Write-Host "Safe to run again: use the desktop shortcut or sign in again. Log: $root\first-logon.log"
+  try { Stop-Transcript | Out-Null } catch {}
   Read-Host "Press Enter to close" | Out-Null
   exit 1
 }
@@ -506,7 +507,7 @@ Register-ScheduledTask -TaskName "{{TASK}}" -Action $act -Trigger (New-Scheduled
 # 5. Desktop shortcuts for whoever signs in
 $sh = New-Object -ComObject WScript.Shell
 foreach ($s in @(@("SE-Demo ZIA console", "$root\console.cmd", ""), @("SE-Demo traffic log", "$root\traffic.log", ""),
-                 @("{{TASK}}", "$env:SystemRoot\System32\schtasks.exe", "/run /tn `"{{TASK}}`""),
+                 @("{{TASK}}", "powershell.exe", "-NoProfile -Command `"Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \`"$root\first-logon.ps1\`"'`""),
                  @("SE-Demo Endpoint AI scenes", "$env:ComSpec", "/k `"$root\eai.cmd`" demo"),
                  @("SE-Demo install Claude Code", "$env:ComSpec", "/k `"$root\eai.cmd`" demo --install"))) {
   $l = $sh.CreateShortcut("C:\Users\Public\Desktop\" + $s[0] + ".lnk"); $l.TargetPath = $s[1]

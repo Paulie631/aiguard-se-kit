@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.8.40
+Demo-quality fixes from the end-to-end review.
+- **Six rules no longer fire on ordinary developer work:** reading a public key (`id_rsa.pub`) or creating a key,
+  calling a local address (`curl http://127.0.0.1…`; the rule now needs a download to a file), variables that merely
+  end in "key" (`$env:MONKEY`, `printenv WHISKEY`), a commit message that mentions a password, reading or clearing
+  `core.hooksPath`, and any `history.jsonl`. Every scene still trips its own rule.
+- **An idle generator no longer doubles the Endpoint AI reads on every poll.** The unfiltered re-read that catches
+  a differently spelt hostname now runs at most once a minute when the window is empty (and straight away when the
+  API ignores the host filter).
+- **Two more scenes are stopped by Endpoint AI rather than a Claude Code prompt:** "adds an unvetted MCP server"
+  and "rewrites its own standing instructions" now write under the decoy folder instead of the project's own
+  `.mcp.json` and `CLAUDE.md`, which Claude Code asks about first.
+- **Live feed:** the raw-event panel keeps its place across refreshes and can't stick on "loading…"; an AI Guard
+  error row shows a warning icon instead of a green tick; an event with no readable time says "time unknown" instead
+  of "Invalid Date"; a slow older response can no longer overwrite a newer one; the 5-second refresh now starts after
+  a policy switch made anywhere (the feed, the Endpoint AI tab, the guided demo), not only from the feed's own
+  buttons; the guided demo won't start a second switch while one is running; and "Demo events only" says when it
+  hid everything.
+- **Generator image:** the "set up this generator" desktop shortcut runs elevated (it failed with Access denied for
+  any admin but the built-in one), and the setup code is read before the transcript starts, so it never lands in
+  `first-logon.log`.
+- ENDPOINT-AI.md's scene table and command list match the kit again; ZIA.md no longer says the kit comes from a branch.
+
 ## 1.8.39
 Bug fixes from an end-to-end review.
 - **A rule on Allow is no longer sent to Endpoint AI**, so switching off a rule its check rejects now works (the

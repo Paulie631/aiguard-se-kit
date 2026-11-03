@@ -965,15 +965,18 @@ function drawStage(){
 let EAIMODE=null;
 const EAIPRESET={monitor:"Monitor: record everything",secrets:"Block secrets & data theft",destructive:"Block destructive & supply chain",block:"Block everything"};
 const MODESHORT={monitor:"Monitor",secrets:"Block secrets",destructive:"Block destructive",block:"Block"};
+let EAISWITCHING=null;   // the mode a switch job is moving to, while it runs
 async function eaiStepMode(m){const el=$("#seaimode");if(!el)return;
+  if(EAISWITCHING){el.textContent=`Still switching the Endpoint AI policy to ${EAIPRESET[EAISWITCHING]||EAISWITCHING}…`;return}
   try{if(EAIMODE==null){const e=await api("/api/eai/state");EAIMODE=(e.state||{}).mode||null;if(!(e.state||{}).policy_id){el.textContent="Endpoint AI demo policy not set up: Endpoint AI tab, step 2.";return}}
     if(EAIMODE==m){el.textContent=`Endpoint AI policy: ${EAIPRESET[m]||m}.`;return}
     el.textContent=`Switching the Endpoint AI policy to ${EAIPRESET[m]||m}…`;
-    const {id}=await api("/api/eai/mode",{mode:m});
-    const tick=async()=>{const j=await api(`/api/job?id=${id}&since=0`);if(!j.done)return setTimeout(tick,800);
-      if(j.error){el.innerHTML=`<span class="fail">${esc(j.error.error)}</span>`;return}
-      EAIMODE=m;if($("#seaimode"))$("#seaimode").textContent=`Endpoint AI policy: ${EAIPRESET[m]||m} (switched just now).`};tick()}
-  catch(err){el.innerHTML=`<span class="fail">${esc(err.message)}</span>`}}
+    EAISWITCHING=m;const {id}=await api("/api/eai/mode",{mode:m});
+    const tick=async()=>{let j;try{j=await api(`/api/job?id=${id}&since=0`)}catch(e){EAISWITCHING=null;if($("#seaimode"))$("#seaimode").innerHTML=`<span class="fail">${esc(e.message)}</span>`;return}
+      if(!j.done)return setTimeout(tick,800);EAISWITCHING=null;
+      if(j.error){if($("#seaimode"))$("#seaimode").innerHTML=`<span class="fail">${esc(j.error.error)}</span>`;return}
+      EAIMODE=m;feedFastNow();if($("#seaimode"))$("#seaimode").textContent=`Endpoint AI policy: ${EAIPRESET[m]||m} (switched just now).`};tick()}
+  catch(err){EAISWITCHING=null;el.innerHTML=`<span class="fail">${esc(err.message)}</span>`}}
 // Per-step Monitor / Block, and switching the policy when a step opens so the ~30 s it takes to apply is spent talking.
 const APPLY_MS=30000;
 // Block = the smallest profile that covers the detectors the step's test is written to trigger (or the step's own
@@ -1469,7 +1472,9 @@ function drawCharts(el,items,r,min){ensureTip();const q=x=>el.querySelector(x),e
   q("[data-c1]").innerHTML=cTimeline(items,min,r.mode_log);q("[data-c2]").innerHTML=cGroups(eai,r);
   if(q("[data-fmore]").open){q("[data-c3]").innerHTML=cFrameworks(items);q("[data-c4]").innerHTML=cRules(eai,r);q("[data-c8]").innerHTML=cDetections(eai);q("[data-c5]").innerHTML=cTools(items);
     q("[data-c6]").innerHTML=cSessions(eai,min);q("[data-c7]").innerHTML=cSources(items,min)}}
-const FEED_ROWS=100;   // table rows drawn at first; counts and charts always use every event in the window
+const FEED_ROWS=100;
+let FEED_FAST_UNTIL=0;   // set by every policy switch (feed, Endpoint AI tab, guided demo), read by every feed instance
+const feedFastNow=()=>{FEED_FAST_UNTIL=Date.now()+600000};   // table rows drawn at first; counts and charts always use every event in the window
 function endpointRecap(r,min,who){   // one printable page: what the agent tried and what Endpoint AI did
   const items=(r.items||[]),eai=items.filter(i=>i.source=="eai"),risky=eai.filter(i=>i.rule||(i.patterns||[]).length);
   const n=v=>risky.filter(i=>VK(i.verdict)==v).length,cnt=(list,f)=>{const c={};list.forEach(i=>[].concat(f(i)||[]).forEach(k=>{if(k)c[k]=(c[k]||0)+1}));return Object.entries(c).sort((a,b)=>b[1]-a[1])};
@@ -1524,7 +1529,7 @@ function beforeAfter(items,modes,min){   // the latest policy switch in this win
     <div style="font-size:13px"><b>After</b>: ${a.length} risky action${a.length==1?"":"s"}, <span style="color:var(--v-block)">${bl(a)} blocked</span>${a.length?"":` <span class="muted">· run the scenes again on the generator</span>`}</div></div>`}
 function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new rows flash; Pause stops polling
   const st={on:true,seen:new Set(),first:true,src:opt.sources||["eai","aiguard","zia"],min:opt.minutes||60,timer:null,
-    view:"events",demoOnly:false,open:new Set(),last:null,rows:FEED_ROWS,raw:{}};
+    view:"events",demoOnly:false,open:new Set(),last:null,rows:FEED_ROWS,raw:{},rawOpen:new Set(),gen:0};
   el.innerHTML=`<div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
     <span class="lbl">Live feed</span>${Object.entries(FEEDSRC).map(([k,v])=>`<label class="chk" style="margin:0"><input type="checkbox" data-fs="${k}" ${st.src.includes(k)?"checked":""}>${v}</label>`).join("")}
     <select data-fm><option value="15" ${st.min==15?"selected":""}>Last 15 min</option><option value="60" ${st.min==60?"selected":""}>Last hour</option><option value="1440">Last 24 hours</option></select>
@@ -1548,32 +1553,34 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
   el.querySelectorAll("[data-fm2]").forEach(b=>b.onclick=()=>{const m=b.dataset.fm2;
     if(!confirm(m=="block"?"Switch the SE-Demo policy to Block everything? The demo actions will be stopped before they run.":"Switch the SE-Demo policy to Monitor? The demo actions will run and be recorded."))return;
     el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=true);q("[data-fmodelog]").textContent=`Switching to ${m}…`;
-    runJob("/api/eai/mode",{mode:m},q("[data-fmodelog]"),j=>{el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=false);EAIMODE=null;if(!j.error)st.fastUntil=Date.now()+600000;tick(true)})});
+    runJob("/api/eai/mode",{mode:m},q("[data-fmodelog]"),j=>{el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=false);EAIMODE=null;if(!j.error)feedFastNow();tick(true)})});
   q("[data-frecap]").onclick=()=>{if(!st.last)return;const who=(prompt("Customer name for the recap (optional):","")||"").trim();
     download(`endpoint-ai-recap-${new Date().toISOString().slice(0,10)}.html`,endpointRecap(st.last,st.min,who),"text/html")};
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};
   el.addEventListener("click",ev=>{if(ev.target.closest("[data-frows]")){st.rows+=200;st.last&&draw(st.last);return}
     const r=ev.target.closest("[data-fid]");if(!r||ev.target.closest("a,button,input,select"))return;
     const k=r.dataset.fid;st.open.has(k)?st.open.delete(k):st.open.add(k);st.last&&draw(st.last)});
-  el.addEventListener("toggle",async ev=>{const d=ev.target;if(!d.matches||!d.matches("details[data-raw]")||!d.open)return;   // raw event: fetched when opened
-    const id=d.dataset.raw;if(st.raw[id]==null){try{st.raw[id]=(await api("/api/feed/raw?id="+encodeURIComponent(id))).raw}catch(e){d.querySelector("pre").textContent=e.message;return}}
-    d.querySelector("pre").textContent=prettyRaw(st.raw[id])},true);
+  el.addEventListener("toggle",async ev=>{const d=ev.target;if(!d.matches||!d.matches("details[data-raw]"))return;   // raw event: fetched when opened
+    const id=d.dataset.raw;if(!d.open){st.rawOpen.delete(id);return}st.rawOpen.add(id);
+    if(st.raw[id]==null){try{st.raw[id]=(await api("/api/feed/raw?id="+encodeURIComponent(id))).raw}catch(e){st.raw[id]="Couldn't load it: "+e.message}}
+    const now=el.querySelector(`details[data-raw="${CSS.escape(id)}"] pre`);if(now)now.textContent=prettyRaw(st.raw[id])},true);
   const prettyRaw=x=>{try{return JSON.stringify(JSON.parse(x),null,2)}catch(e){return x}};
   const vis=()=>el.isConnected&&el.offsetParent!==null&&!document.hidden;   // only polls while you can see it
   async function tick(now){clearTimeout(st.timer);if(!el.isConnected)return;
-    if(st.on&&(now||vis())){try{st.last=await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`);draw(st.last)}catch(e){q("[data-fstat]").textContent=e.message}}
+    if(st.on&&(now||vis())){const g=++st.gen;try{const r=await api(`/api/feed?sources=${st.src.join(",")}&minutes=${st.min}`);if(g!=st.gen)return;st.last=r;draw(r)}catch(e){if(g==st.gen)q("[data-fstat]").textContent=e.message}}
     st.timer=setTimeout(()=>tick(false),opt.every||(fast()?5000:20000))}
-  const fast=()=>st.fastUntil&&Date.now()<st.fastUntil;   // just after a policy switch: look every 5 s for 10 minutes
-  const bad=v=>/block|deny/.test(v||""),warn=v=>v=="audit";
-  const verdictCell=v=>`<span class="ic ${bad(v)?"fail":warn(v)?"warn":"ok"}">${bad(v)?ICON.fail:warn(v)?ICON.warn:ICON.ok}</span> ${esc(v||"")}`;
+  const fast=()=>Date.now()<Math.max(st.fastUntil||0,FEED_FAST_UNTIL);   // just after a policy switch (from any tab): every 5 s for 10 minutes
+  const bad=v=>/block|deny/.test(v||""),warn=v=>v=="audit",oops=v=>/error|fail/i.test(v||"");
+  const verdictCell=v=>`<span class="ic ${bad(v)?"fail":warn(v)?"warn":oops(v)?"info":"ok"}">${bad(v)?ICON.fail:warn(v)?ICON.warn:oops(v)?"!":ICON.ok}</span> ${esc(v||"")}`;
+  const when=t=>{const d=new Date(t);return isNaN(d)?"time unknown":d.toLocaleTimeString()};
   const tile=(n,l,c)=>`<div class="panel" style="padding:8px 14px;min-width:110px;margin:0"><div style="font-size:22px;font-weight:700${c?";color:var(--"+c+")":""}">${n}</div><div class="muted" style="font-size:12px">${l}</div></div>`;
   function topOf(list){const c={};list.forEach(x=>{if(x)c[x]=(c[x]||0)+1});return Object.entries(c).sort((a,b)=>b[1]-a[1])}
   function detail(i){const rows=[["Rule",i.rule?(i.rule+(i.rule_by=="kit"?" (matched by the kit; Endpoint AI didn't name a rule)":"")):""],["Reason",i.reason],["Message to the agent",i.message],["Event",i.event_type],["Host",i.host],["User",i.user],
       ["Working folder",i.cwd],["Serial",i.serial],["Session",i.session],["Patterns",(i.patterns||[]).join(", ")],["OWASP",(i.owasp||[]).join(", ")],["MITRE ATLAS",(i.mitre||[]).join(", ")]].filter(([,v])=>v);
     return `<tr class="feeddetail"><td colspan="7" style="background:var(--panel2,rgba(0,0,0,.03))"><div style="display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:12.5px">${rows.map(([k,v])=>`<span class="muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>
-      ${i.has_raw?`<details data-raw="${esc(i.id)}" style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Raw event</summary><pre style="white-space:pre-wrap;font-size:11.5px;max-height:30vh;overflow:auto">${st.raw[i.id]!=null?esc(prettyRaw(st.raw[i.id])):"loading…"}</pre></details>`:""}</td></tr>`}
+      ${i.has_raw?`<details data-raw="${esc(i.id)}" style="margin-top:8px" ${st.rawOpen.has(i.id)?"open":""}><summary class="muted" style="cursor:pointer;font-size:12px">Raw event</summary><pre style="white-space:pre-wrap;font-size:11.5px;max-height:30vh;overflow:auto">${st.raw[i.id]!=null?esc(prettyRaw(st.raw[i.id])):"loading…"}</pre></details>`:""}</td></tr>`}
   function row(i){const fresh=!st.first&&!st.seen.has(i.id),open=st.open.has(i.id);
-    return `<tr data-fid="${esc(i.id)}" class="${fresh?"feednew":""}" style="cursor:pointer${i.demo?";font-weight:600":""}"><td>${open?"▾":"▸"} ${esc(new Date(i.time).toLocaleTimeString())}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
+    return `<tr data-fid="${esc(i.id)}" class="${fresh?"feednew":""}" style="cursor:pointer${i.demo?";font-weight:600":""}"><td>${open?"▾":"▸"} ${esc(when(i.time))}</td><td>${esc(FEEDSRC[i.source]||i.source)}${i.tool?` · ${esc(i.tool)}`:""}</td>
       <td>${verdictCell(i.verdict)}</td><td style="font-size:12px">${esc(i.rule||"")}</td><td style="font-size:12px">${esc(i.who||"")}</td><td><code style="font-size:12px">${esc(i.what||"")}</code></td><td style="font-size:12px">${esc(i.detail||"")}</td></tr>`+(open?detail(i):"")}
   function draw(r){if(!el.isConnected)return;const errs=Object.entries(r.errors||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
     const notes=Object.entries(r.notes||{}).map(([k,v])=>`${FEEDSRC[k]}: ${v}`);
@@ -1588,6 +1595,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
     q("[data-ffresh]").innerHTML=freshLine(r,items);
     const fm=q("[data-fmode]");fm.style.display=r.eai_connected?"":"none";el.querySelectorAll("[data-fm2]").forEach(b=>b.classList.toggle("on",b.dataset.fm2==r.mode));
     drawCharts(el,items,r,st.min);
+    if(!items.length&&(r.items||[]).length){q("[data-fbody]").innerHTML=`<div class="muted">${(r.items||[]).length} event${(r.items||[]).length==1?"":"s"} in this window, none from the demo scenes. Untick <b>Demo events only</b> to see them.</div>`;st.first=false;return}
     if(!items.length){const gen=st.src.includes("eai")&&r.eai_connected===false;
       q("[data-fbody]").innerHTML=`<div class="muted">${gen?"This computer isn't connected to Endpoint AI — it looks like the traffic generator. Open the Live feed on the laptop that holds the Endpoint AI credential to watch events there.":`Nothing in this window yet${(r.eai_hosts||[]).length?` from ${esc(r.eai_hosts.join(", "))}`:""}. Endpoint AI events arrive a few minutes after a scene runs.`}</div>`;st.first=false;return}
     const head=`<tr><th>Time</th><th>Source</th><th>Verdict</th><th>Rule</th><th>Where / who</th><th>What</th><th>Detections</th></tr>`;
@@ -1597,7 +1605,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
       body=all.slice(0,st.rows).map(([k,list])=>{const sid="s:"+k,open=st.open.has(sid);
         const prompt=(list.find(i=>/UserPromptSubmit/i.test(i.event_type||i.tool||""))||{}).what||"";
         const nb=list.filter(i=>bad(i.verdict)).length,na=list.filter(i=>warn(i.verdict)).length;
-        return `<tr data-fid="${esc(sid)}" style="cursor:pointer;background:var(--panel2,rgba(0,0,0,.03))"><td>${open?"▾":"▸"} ${esc(new Date(list[list.length-1].time).toLocaleTimeString())}</td><td colspan="2"><b>${list.length}</b> events · <span style="color:var(--bad)">${nb} blocked</span> · <span style="color:var(--warn)">${na} audited</span></td>
+        return `<tr data-fid="${esc(sid)}" style="cursor:pointer;background:var(--panel2,rgba(0,0,0,.03))"><td>${open?"▾":"▸"} ${esc(when(list[list.length-1].time))}</td><td colspan="2"><b>${list.length}</b> events · <span style="color:var(--bad)">${nb} blocked</span> · <span style="color:var(--warn)">${na} audited</span></td>
           <td colspan="2" style="font-size:12px">${esc(list[0].who||"")}<br><span class="muted">${esc(k.slice(0,36))}</span></td><td colspan="2"><span class="muted" style="font-size:12px">${prompt?"Prompt: ":""}</span>${esc(String(prompt).slice(0,200))}</td></tr>`+(open?list.map(row).join(""):"")}).join("")}
     else{total=items.length;body=items.slice(0,st.rows).map(row).join("")}
     shown=Math.min(total,st.rows);
@@ -1693,9 +1701,9 @@ $("#eairulecheck").onclick=async()=>{const b=$("#eairulecheck");b.disabled=true;
     drawRules(EAI)}catch(err){$("#eairulenote").innerHTML=`<span class="fail">${esc(err.message)}</span>`}finally{b.disabled=false}};
 $("#eairulesave").onclick=()=>{if(!(EAI&&EAI.state&&EAI.state.policy_id))return alert("Create the demo policy first (Create or update).");
   const actions=Object.fromEntries($$("[data-rule]").map(x=>[x.dataset.rule,x.value]));
-  $("#eaiout").innerHTML="";runJob("/api/eai/actions",{actions},$("#eailog"),j=>{EAIMODE=null;eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+  $("#eaiout").innerHTML="";runJob("/api/eai/actions",{actions},$("#eailog"),j=>{EAIMODE=null;RULECHECK=null;if(!j.error)feedFastNow();eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
 $("#eaimode").onchange=()=>{const m=$("#eaimode").value;if(m=="custom"){$("#eairules").open=true;return}if(!(EAI&&EAI.state&&EAI.state.policy_id))return;
-  $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{EAIMODE=null;eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
+  $("#eaiout").innerHTML="";runJob("/api/eai/mode",{mode:m},$("#eailog"),j=>{EAIMODE=null;if(!j.error)feedFastNow();eai();if(j.verify)$("#eaiout").innerHTML=checksHTML(j.verify)})};
 $("#eaizccpw").onclick=async()=>{const b=$("#eaizccpw");if(b.dataset.on){$("#eaizccout").innerHTML="";delete b.dataset.on;b.textContent="Show password";return}
   try{const r=await api("/api/zia/password",{});if(r.error)throw new Error(r.error+(r.fix?" — "+r.fix:""));b.dataset.on=1;b.textContent="Hide password";
   $("#eaizccout").innerHTML=`<div class="notice" style="display:block;margin:0 0 10px">Client Connector sign-in:<br><code>${esc(r.email)}</code><br><code>${esc(r.password)}</code> <button id="eaipwcp" style="margin-left:6px">Copy</button><div class="muted" style="font-size:12px;margin-top:6px">Shown on this computer only. Don't paste it into chat, email or tickets.</div></div>`;

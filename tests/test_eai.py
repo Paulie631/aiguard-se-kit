@@ -170,7 +170,7 @@ class FakeEai:
                 return Resp(204)
         if path == "/v1/events":
             hosts = set(filter(None, (q.get("ef_host") or "").split(",")))
-            evs = [ev for ev in self.events if not hosts or ev.get("hostname") in hosts]
+            evs = [ev for ev in self.events if self.ignore_filters or not hosts or ev.get("hostname") in hosts]
             if getattr(self, "page_events", 0):   # like a cursor-paged API returning oldest first
                 start = int(q.get("cursor") or 0)
                 n = min(int(q.get("limit") or 50), self.page_events)
@@ -1016,11 +1016,16 @@ def test_rules_stay_quiet_on_ordinary_developer_work():
                                       "SELECT * FROM customers", "cat kube/config.md", "echo $env:PATH",
                                       "terraform plan", "terraform apply", "aws s3 ls s3://bucket", "kubectl get pods",
                                       "npm run build", "git add src/app.ts && git commit -m wip", "security find-certificate -a",
-                                      "docker run -d -p 80:80 nginx", "git commit -m 'add Action and Resource docs'")]
+                                      "docker run -d -p 80:80 nginx", "git commit -m 'add Action and Resource docs'",
+                                      "cat ~/.ssh/id_rsa.pub", "ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519", "curl http://127.0.0.1:8080/health",
+                                      "curl -s http://10.0.0.5/metrics", "echo $env:MONKEY", "printenv WHISKEY", "Get-ChildItem Env:PATH",
+                                      "git commit -m 'document the password reset flow'", "git config --get core.hooksPath",
+                                      "git config --unset core.hooksPath", "cat history.jsonl", "cat ~/.ssh/known_hosts")]
     harmless += [("Write", json.dumps({"file_path": "src/app.ts", "content": "import { x } from '../utils'"})),
                  ("Edit", json.dumps({"file_path": "src/app.profile.ts", "old_string": "a", "new_string": "b"})),
                  ("Write", json.dumps({"file_path": "docs/iam.md", "content": "describe Action and Resource wildcards"})),
                  ("Write", json.dumps({"file_path": "src/deploy.ts", "content": "// deploy to github pages"})),
+                 ("Read", json.dumps({"file_path": "/home/dev/.ssh/id_rsa.pub"})),
                  ("Bash", json.dumps({"command": "Get-ChildItem ..\\docs"}))]
     for r in rules:
         if r.get("optional"):
@@ -1720,3 +1725,33 @@ def test_credential_expiry_and_last_seen_read_every_timestamp_form(eenv):
     c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}["ready-eai-credential"]
     assert "expiry unreadable" in c["detail"] and "never" not in c["detail"]
     assert e._recent(int(time.time() * 1000) - 60000, 1) and e._recent(time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), 1)
+
+
+def test_idle_generator_does_not_double_read_every_poll(eenv, monkeypatch):
+    """With the host filter honoured and the generator idle, the unfiltered fallback runs at most once a minute; when
+    the API ignores the filter (events for other hosts come back) it runs every time, so a differently spelt host is
+    still found."""
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    e._FALLBACK_AT["at"] = 0
+    fake.events = []
+    n = lambda: len([c for c in fake.calls if c[1] == "/v1/events"])  # noqa: E731
+    before = n(); e.evidence(e.connect(kit.load_cfg()), kit.load_cfg(), minutes=15); first = n() - before
+    before = n(); e.evidence(e.connect(kit.load_cfg()), kit.load_cfg(), minutes=15); second = n() - before
+    assert first == 2 and second == 1   # fallback once, then the filtered read only
+    fake.events = [{"id": "o", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "hostname": "SOMEONE-ELSE",
+                    "tool_name": "Bash", "data": {"verdict": "allow", "tool_input": {"command": "ls"}}}]
+    fake.ignore_filters = True
+    before = n(); e.evidence(e.connect(kit.load_cfg()), kit.load_cfg(), minutes=15)
+    assert n() - before == 2   # the filter was ignored: fall back straight away
+
+
+def test_scenes_never_write_claude_codes_own_project_files():
+    """Claude Code asks before an agent edits the project's own .claude/, .mcp.json or CLAUDE.md, so a scene that did
+    would be stopped by that prompt, never by Endpoint AI. Every write stays under the decoy folder or is a plain file."""
+    spec = importlib.util.spec_from_file_location("eai_own", ROOT / "eai_module.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    for s in m.SCENES:
+        if s.get("write"):
+            path = s["write"][0]
+            assert not path.startswith((".claude/", ".mcp.json", "CLAUDE.md", "AGENTS.md")), (s["id"], path)

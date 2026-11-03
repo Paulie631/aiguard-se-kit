@@ -133,7 +133,7 @@ The simplest generator is a Windows instance in an AWS account you can use for d
    - a Windows Server 2022 instance (t3.medium);
    - unless you turn it off, a weekday 7am start and a 9pm stop (New York time).
 
-   On first boot, the instance installs uv and the kit (from `KitZipUrl`, currently the `zia-traffic` branch) into `C:\SE-Demo`. It also registers two tasks that run as SYSTEM:
+   On first boot, the instance installs uv and the kit (from `KitZipUrl`: the newest ZIA kit release by default) into `C:\SE-Demo`. It also registers two tasks that run as SYSTEM:
    - **SE-Demo ZIA traffic**, every 30 minutes;
    - **SE-Demo ZIA check**, at startup.
 
