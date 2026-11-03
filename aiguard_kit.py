@@ -253,7 +253,7 @@ def redact(o, depth=0):
         out = {}
         for k, v in o.items():
             if _SECRET_FIELDS.match(str(k)) and isinstance(v, str):
-                out[k] = (v[:4] + "…") if v else v
+                out[k] = ("…" if str(k).lower() == "password" else v[:4] + "…") if v else v   # a password shows nothing
             elif str(k) == "apiCredentials":
                 out[k] = {kk: ((vv[:4] + "…") if isinstance(vv, str) and kk != "type" else vv) for kk, vv in (v or {}).items()}
             else:
@@ -262,7 +262,7 @@ def redact(o, depth=0):
     if isinstance(o, (list, tuple)):
         return [redact(v, depth + 1) for v in o]
     if isinstance(o, str):
-        for sec in _SECRETS:
+        for sec in tuple(_SECRETS):   # a snapshot: another thread may add a renewed token meanwhile
             if sec in o:
                 o = o.replace(sec, sec[:4] + "…")
         o = _SECRET_SHAPES.sub(lambda m: m.group(1) + "…", o)
@@ -407,19 +407,38 @@ def mask(s):
 
 
 # ---------------------------------------------------------------- config
+_CFG_LOCK = threading.RLock()   # the console's request threads and its job threads all read and write the one config
+
+
 def load_cfg():
-    if CFG_FILE.exists():
-        return json.loads(CFG_FILE.read_text(encoding="utf-8"))
-    return {}
+    with _CFG_LOCK:
+        if CFG_FILE.exists():
+            return json.loads(CFG_FILE.read_text(encoding="utf-8"))
+        return {}
 
 
 def save_cfg(cfg):
-    CFG_DIR.mkdir(exist_ok=True)
-    CFG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    try:
-        os.chmod(CFG_FILE, 0o600)
-    except Exception:
-        pass
+    """Written whole to a temporary file and swapped in, so a reader never sees a half-written config and a crash
+    mid-write can't leave it empty (it holds every app and credential id the kit made)."""
+    with _CFG_LOCK:
+        CFG_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CFG_FILE.with_name(CFG_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        try:
+            os.chmod(tmp, 0o600)
+        except Exception:
+            pass
+        os.replace(tmp, CFG_FILE)
+
+
+def update_cfg(change):
+    """Read-modify-write under the lock: change(cfg) edits the freshest config, which is then saved. For request
+    handlers that change one thing while a setup job may be saving its own progress."""
+    with _CFG_LOCK:
+        cfg = load_cfg()
+        change(cfg)
+        save_cfg(cfg)
+        return cfg
 
 
 def ask(prompt, default=None, secret=False):
@@ -3176,7 +3195,7 @@ def cmd_gui():
             lib = load_tests()
             if path == "/api/manual/mark":
                 try:
-                    manual_mark(c, body.get("id", ""), bool(body.get("done", True)))
+                    update_cfg(lambda fresh: manual_mark(fresh, body.get("id", ""), bool(body.get("done", True))))
                 except KitError as e:
                     return self._send(400, {"error": str(e)})
                 return self._send(200, {"ok": True})

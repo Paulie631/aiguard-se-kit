@@ -158,7 +158,7 @@ class EaiTenant:
                            body.get("request_id"))
             K.activity("api", "Endpoint AI sign-in failed", "error", error=str(err))
             raise err
-        self._token = K.remember_secret(body["access_token"])
+        self._token = body["access_token"]   # masked by field name in logs; not remembered, it's renewed every 15 min
         self._exp = time.time() + int(body.get("expires_in") or 900)
         return self._token
 
@@ -284,7 +284,8 @@ def preset_of(actions):
 
 def build_rules(actions="monitor", shell_lock=False):
     """The policy's rules: actions is a preset name or {rule_id: allow|audit|block}. Audit records and lets the
-    command run; block stops it; allow switches the rule off for the demo."""
+    command run; block stops it; allow switches the rule off for the demo, so it isn't sent to Endpoint AI at all
+    (which also lets you switch off a rule whose pattern Endpoint AI's check rejects)."""
     acts = preset_actions(actions) if isinstance(actions, str) else {**preset_actions("monitor"), **(actions or {})}
     rules = []
     for r in template()["rules"]:
@@ -293,8 +294,10 @@ def build_rules(actions="monitor", shell_lock=False):
         v = acts.get(r["id"], "audit")
         if v not in VERDICTS:
             raise K.KitError(f"'{v}' isn't an action: use allow, audit or block.")
+        if v == "allow":
+            continue
         r = {k: v for k, v in r.items() if k not in KIT_KEYS}
-        r["verdict"] = acts.get(r["id"], "audit")
+        r["verdict"] = v
         rules.append(r)
     return rules
 
@@ -366,7 +369,7 @@ def validate(t, rules, log=None):
         raise K.KitError(f"Endpoint AI rejected {len(bad)} rule{'s' if len(bad) > 1 else ''}: "
                          + ", ".join(b["title"] for b in bad) + ". Nothing was changed. Set "
                          + ("that rule" if len(bad) == 1 else "those rules") + " to Allow (rule off) under Per-rule "
-                         "actions and try again, and send the reason to the kit owner.")
+                         "actions and try again (a rule on Allow isn't sent to Endpoint AI), and send the reason to the kit owner.")
 
 
 def check_rules(t, cfg):
@@ -580,17 +583,25 @@ def add_members(t, gid, device_ids, log):
     return want
 
 
-def ensure_policy(t, cfg, gid, log, mode=None):
+def planned_rules(cfg, mode=None):
+    """The actions and rules the next ensure_policy() will write (a preset replaces per-rule choices; none given keeps
+    what the policy does now, never resetting to Monitor)."""
+    e = ecfg(cfg)
+    st = e.get("state") or {}
+    if mode in PRESETS:
+        e["actions"] = preset_actions(mode)
+    actions = e.get("actions") or preset_actions(st.get("mode") if st.get("mode") in PRESETS else "monitor")
+    return actions, build_rules(actions, bool(e.get("shell_lock")))
+
+
+def ensure_policy(t, cfg, gid, log, mode=None, validated=False):
     e = ecfg(cfg)
     st = e.setdefault("state", {})
-    if mode in PRESETS:   # a preset replaces any per-rule choices
-        e["actions"] = preset_actions(mode)
-    # no preset given: keep what the policy does now (saved per-rule actions, else the saved preset), never reset to Monitor
-    actions = e.get("actions") or preset_actions(st.get("mode") if st.get("mode") in PRESETS else "monitor")
+    actions, rules = planned_rules(cfg, mode)
     mode = preset_of(actions)
-    rules = build_rules(actions, bool(e.get("shell_lock")))
-    validate(t, rules, log)
-    log("ok", f"Endpoint AI accepted all {len(rules)} rules")
+    if not validated:
+        validate(t, rules, log)
+        log("ok", f"Endpoint AI accepted all {len(rules)} rules")
     name = policy_name()
     note = f"SE demo kit: {PRESETS[mode]['label'] if mode in PRESETS else 'custom per-rule actions'}"
     p = None
@@ -643,6 +654,9 @@ def assign(t, pid, gid, log):
 
 def setup(t, cfg, log, mode=None):
     log("head", "Endpoint AI demo setup")
+    _, rules = planned_rules(cfg, mode)   # Endpoint AI's check first: if it rejects a rule, nothing has been created yet
+    validate(t, rules, log)
+    log("ok", f"Endpoint AI accepted all {len(rules)} rules")
     gid = ensure_group(t, cfg, log)
     devices = find_devices(t, cfg)
     e = ecfg(cfg)
@@ -661,7 +675,7 @@ def setup(t, cfg, log, mode=None):
         e["hosts"] = sorted({*(e.get("hosts") or []), *[d.get("hostname") for d in devices if d.get("hostname")]})
     else:
         log("warn", "No generator device in Endpoint AI yet. " + generator_steps(cfg))
-    ensure_policy(t, cfg, gid, log, mode)
+    ensure_policy(t, cfg, gid, log, mode, validated=True)
     e["state"]["set_up"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     K.save_cfg(cfg)
     return status(t, cfg)
@@ -700,9 +714,10 @@ def _chk(cid, label, status_, detail="", fix=""):
 
 
 def _days_left(stamp):
+    """Days until an expiry stamp in any form Endpoint AI sends (ISO, offset, epoch); None when it can't be read."""
     try:
         import datetime as dt
-        end = dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        end = dt.datetime.fromisoformat(utc_iso(stamp).replace("Z", "+00:00"))
         return (end - dt.datetime.now(dt.timezone.utc)).days
     except Exception:
         return None
@@ -720,7 +735,9 @@ def status(t, cfg):
         admin = any("admin" in str(r).lower() for r in cred.get("roles") or [])
         out.append(_chk("ready-eai-credential", "Endpoint AI API credential",
                         "fail" if left is not None and left < 0 else "warn" if (left is not None and left < 14) or not admin else "ok",
-                        f"{cred.get('name')} ({roles or 'roles unknown'})" + (f", expires in {left} days" if left is not None else ", never expires"),
+                        f"{cred.get('name')} ({roles or 'roles unknown'})" + (f", expires in {left} days" if left is not None else
+                                                                               ", never expires" if not cred.get("expires_at") else
+                                                                               f", expiry unreadable ({str(cred.get('expires_at'))[:25]})"),
                         "Create a new credential (Admin role) in " + CONSOLE_PATH + " and enter it again." if (left is not None and left < 14) or not admin else ""))
     else:
         out.append(_chk("ready-eai-credential", "Endpoint AI API credential", "ok", "signs in (expiry not readable)"))
@@ -763,7 +780,10 @@ def status(t, cfg):
     if not p:
         out.append(_chk("ready-eai-policy", f"Policy '{policy_name()}'", "fail", "missing", "Run Endpoint AI setup again."))
         return out
-    live = {r.get("id"): r.get("verdict") for r in p.get("rules") or [] if r.get("id") in {x["id"] for x in template()["rules"]}}
+    ids = {x["id"] for x in template()["rules"] if not x.get("optional")}
+    live = {r.get("id"): r.get("verdict") for r in p.get("rules") or [] if r.get("id") in ids}
+    if live:   # a demo rule missing from the policy is one switched off (allow): the kit doesn't send those
+        live.update({i: "allow" for i in ids - set(live)})
     mode = preset_of(live) if live else (st.get("mode") or "custom")   # rules came back without the kit's ids: keep what we knew
     st["mode"] = mode
     e["actions"] = {**(e.get("actions") or {}), **{k: v for k, v in live.items() if v in VERDICTS}}
@@ -808,7 +828,7 @@ def reporting_settings(t):
 def _recent(stamp, hours):
     try:
         import datetime as dt
-        then = dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        then = dt.datetime.fromisoformat(utc_iso(stamp).replace("Z", "+00:00"))
         return (dt.datetime.now(dt.timezone.utc) - then).total_seconds() < hours * 3600
     except Exception:
         return False
@@ -1880,11 +1900,11 @@ def api_post(path, body, cfg):
         save_credential(cfg, body.get("domain"), body.get("region"), body.get("client_id"), body.get("client_secret"))
         return public_state(cfg)
     if path == "/api/eai/hosts":
-        e = ecfg(cfg)
-        e["hosts"] = sorted({h.strip() for h in (body.get("hosts") or []) if isinstance(h, str) and h.strip()})
-        e["shell_lock"] = bool(body.get("shell_lock", e.get("shell_lock")))
-        K.save_cfg(cfg)
-        return public_state(cfg)
+        def change(fresh):   # on the freshest config, under the lock: a setup job may be saving its own progress
+            e = ecfg(fresh)
+            e["hosts"] = sorted({h.strip() for h in (body.get("hosts") or []) if isinstance(h, str) and h.strip()})
+            e["shell_lock"] = bool(body.get("shell_lock", e.get("shell_lock")))
+        return public_state(K.update_cfg(change))
     return None
 
 

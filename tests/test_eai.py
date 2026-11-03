@@ -1199,10 +1199,11 @@ def test_per_rule_actions_reach_the_policy_and_status(eenv):
     e.set_actions(e.connect(kit.load_cfg()), kit.load_cfg(), {"r-sedemo-mcp": "block", "r-sedemo-outside": "allow"}, log_into(out))
     pol = next(p for p in fake.policies if p["name"].startswith("SE-Demo"))
     v = {r["id"]: r["verdict"] for r in pol["rules"]}
-    assert v["r-sedemo-mcp"] == "block" and v["r-sedemo-outside"] == "allow" and v["r-sedemo-aws-key"] == "audit"
+    assert v["r-sedemo-mcp"] == "block" and "r-sedemo-outside" not in v and v["r-sedemo-aws-key"] == "audit"   # allow = not sent
     assert any("1 block" in m and "1 allow" in m for _, m in out)
     c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}
     assert "Custom per-rule actions" in c["ready-eai-policy"]["detail"] and "1 blocking" in c["ready-eai-policy"]["detail"]
+    assert kit.load_cfg()["eai"]["actions"]["r-sedemo-outside"] == "allow"   # read back from the policy as switched off
     # a preset afterwards replaces the per-rule choices
     e.set_mode(e.connect(kit.load_cfg()), kit.load_cfg(), "secrets", log_into([]))
     v = {r["id"]: r["verdict"] for r in pol["rules"]}
@@ -1688,3 +1689,34 @@ def test_status_explains_event_delay_and_lists_reporting_settings_read_only(eenv
     assert "about 4 min 10 s" in c["detail"] and "every 60 s (daemon)" in c["detail"]
     assert "telemetry_flush_seconds=120" in c["detail"] and "ui_theme" not in c["detail"]
     assert len(fake.writes()) == before   # nothing changed
+
+
+def test_a_rejected_rule_can_be_switched_off_and_setup_then_succeeds(eenv):
+    """The advice in the rejection message has to work: a rule on Allow isn't sent to Endpoint AI's check at all."""
+    kit, e, fake = eenv("eai")
+    fake.reject_ids = {"r-sedemo-reverse-shell"}
+    with pytest.raises(kit.KitError, match="Reverse shell"):
+        e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    assert not any(g["name"].startswith("SE-Demo") for g in fake.groups)      # nothing created before the check
+    assert not any(p["name"].startswith("SE-Demo") for p in fake.policies)
+    cfg = kit.load_cfg(); cfg["eai"]["actions"] = {**e.preset_actions("monitor"), "r-sedemo-reverse-shell": "allow"}; kit.save_cfg(cfg)
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    pol = next(p for p in fake.policies if p["name"].startswith("SE-Demo"))
+    assert "r-sedemo-reverse-shell" not in {r["id"] for r in pol["rules"]} and len(pol["rules"]) == 41
+    c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}
+    assert "Custom per-rule actions" in c["ready-eai-policy"]["detail"]
+
+
+def test_credential_expiry_and_last_seen_read_every_timestamp_form(eenv):
+    kit, e, fake = eenv("eai")
+    e.setup(e.connect(kit.load_cfg()), kit.load_cfg(), log_into([]))
+    soon = time.time() + 5 * 86400
+    for stamp in (int(soon * 1000), time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(soon)), time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(soon))):
+        fake.keys[0]["expires_at"] = stamp
+        c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}["ready-eai-credential"]
+        assert "expires in 4 days" in c["detail"] or "expires in 5 days" in c["detail"], (stamp, c["detail"])
+        assert c["status"] == "warn"
+    fake.keys[0]["expires_at"] = "soon-ish"
+    c = {x["id"]: x for x in e.status(e.connect(kit.load_cfg()), kit.load_cfg())}["ready-eai-credential"]
+    assert "expiry unreadable" in c["detail"] and "never" not in c["detail"]
+    assert e._recent(int(time.time() * 1000) - 60000, 1) and e._recent(time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), 1)

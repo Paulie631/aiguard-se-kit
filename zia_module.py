@@ -124,7 +124,7 @@ class ZiaTenant:
         svc = (self.c.zins if insights else self.c.zid if resource.startswith("zid.")
                else self.c.zcc if resource.startswith("zcc.") else self.c.zia)
         api = getattr(svc, resource.split(".", 1)[-1])
-        K.vlog(f"zia {resource}.{method} {a} {json.dumps(kw, default=str)[:300] if kw else ''}")
+        K.vlog(f"zia {resource}.{method} {a} {json.dumps(K.redact(kw), default=str)[:300] if kw else ''}")
         write = not re.match(r"(list|get|search)", method)
         req = json.loads(json.dumps({"args": list(a), "body": kw}, default=str)) if (a or kw) else {}
         t0 = time.time()
@@ -1818,7 +1818,7 @@ def aws_module():
 def cloud_name(t):
     """'zscalertwo' from the tenant's own admin addresses (admin@<org>.zscalertwo.net)."""
     for u in items(t.call("user_management", "list_users", query_params={"page_size": 10000})):
-        m = re.search(r"\.(zscaler[a-z]*)\.net$", str(g(u, "email", "")).lower())
+        m = re.search(r"\.(zscaler[a-z]*|zs[a-z]+)\.net$", str(g(u, "email", "")).lower())
         if m:
             return m.group(1)
     return None
@@ -1834,7 +1834,12 @@ def aws_settings(t, cfg, zcc_url=""):
         zcc_url = "none"
     elif zcc_url.lower().startswith("s3://"):   # your own bucket: s3://bucket/key
         zcc_url, zcc_s3 = "", zcc_url[5:]
-    return {"cloud": cloud_name(t) or cfg.get("cloud") or "zscalertwo", "domain": user.split("@", 1)[1],
+    cloud = cloud_name(t)
+    if not cloud:   # cfg["cloud"] is the OneAPI environment (beta, production), never a Client Connector cloud name
+        K.warn("Couldn't read your Zscaler cloud from the tenant's admin addresses: using zscalertwo. Check the ZccCloudName "
+               "parameter (the <cloud> in admin.<cloud>.net) before deploying.")
+        cloud = "zscalertwo"
+    return {"cloud": cloud, "domain": user.split("@", 1)[1],
             "test_user": user, "zcc_url": zcc_url, "zcc_s3": zcc_s3, "policy_token": zcc_policy_token(t)}
 
 

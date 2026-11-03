@@ -1304,11 +1304,13 @@ async function wizard(){
 }
 function runJob(url,payload,logEl,onDone){
   logEl.style.display="block";logEl.innerHTML='<div class="info">Starting…</div>';let got=0;
-  api(url,payload).then(({id})=>{const tick=async()=>{
-    const j=await api(`/api/job?id=${id}&since=${got}`);if(got==0)logEl.innerHTML="";got+=j.results.length;
+  const fail=e=>{logEl.insertAdjacentHTML("beforeend",`<div class="fail">✗ ${esc(e.message)}</div>`);onDone({done:true,results:[],error:{error:e.message}})};   // callers re-enable their controls in onDone
+  api(url,payload).then(({id})=>{let misses=0;const tick=async()=>{
+    let j;try{j=await api(`/api/job?id=${id}&since=${got}`)}catch(e){if(++misses<5){setTimeout(tick,1500);return}return fail(new Error("Lost touch with the console: "+e.message))}
+    misses=0;if(got==0)logEl.innerHTML="";got+=j.results.length;
     logEl.insertAdjacentHTML("beforeend",j.results.map(e=>e.level=="head"?`<div class="h">${esc(e.msg)}</div>`:`<div class="${e.level}">${ICON[e.level]||"·"} ${esc(e.msg)}</div>`).join(""));
     logEl.scrollTop=logEl.scrollHeight;
-    if(j.done)onDone(j);else setTimeout(tick,600)};tick()}).catch(e=>{logEl.innerHTML=`<div class="fail">✗ ${esc(e.message)}</div>`});
+    if(j.done)onDone(j);else setTimeout(tick,600)};tick()}).catch(e=>{logEl.innerHTML="";fail(e)});
 }
 $("#tdgo").onclick=()=>{
   if($("#tdconfirm").value!="DELETE")return alert("Type DELETE to confirm.");
@@ -1546,7 +1548,7 @@ function liveFeed(el,opt={}){   // polls /api/feed while el is on screen; new ro
   el.querySelectorAll("[data-fm2]").forEach(b=>b.onclick=()=>{const m=b.dataset.fm2;
     if(!confirm(m=="block"?"Switch the SE-Demo policy to Block everything? The demo actions will be stopped before they run.":"Switch the SE-Demo policy to Monitor? The demo actions will run and be recorded."))return;
     el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=true);q("[data-fmodelog]").textContent=`Switching to ${m}…`;
-    runJob("/api/eai/mode",{mode:m},q("[data-fmodelog]"),()=>{el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=false);EAIMODE=null;st.fastUntil=Date.now()+600000;tick(true)})});
+    runJob("/api/eai/mode",{mode:m},q("[data-fmodelog]"),j=>{el.querySelectorAll("[data-fm2]").forEach(x=>x.disabled=false);EAIMODE=null;if(!j.error)st.fastUntil=Date.now()+600000;tick(true)})});
   q("[data-frecap]").onclick=()=>{if(!st.last)return;const who=(prompt("Customer name for the recap (optional):","")||"").trim();
     download(`endpoint-ai-recap-${new Date().toISOString().slice(0,10)}.html`,endpointRecap(st.last,st.min,who),"text/html")};
   q("[data-fp]").onclick=()=>{st.on=!st.on;q("[data-fp]").textContent=st.on?"Pause":"Resume";if(st.on)tick(true);else q("[data-fstat]").textContent="paused"};

@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.8.39
+Bug fixes from an end-to-end review.
+- **A rule on Allow is no longer sent to Endpoint AI**, so switching off a rule its check rejects now works (the
+  advice in the rejection message was impossible to follow). A rule missing from the policy reads back as Allow.
+- **Setup checks the rules before it creates anything.** If Endpoint AI rejects one, no device group or policy has
+  been made yet, as the message says.
+- **The config file is written atomically and under a lock.** A setup job and a console click could overwrite each
+  other's save, and a crash mid-write could leave an empty config (losing every app and credential id).
+  `--profile` on a fresh machine no longer fails to create its folder.
+- **The Live feed could stop with "Set changed size during iteration"** when the Endpoint AI token renewed while a
+  poll was redacting events. Renewed tokens are no longer kept in the redaction set.
+- **Console jobs survive a dropped poll.** A failed status poll froze the job log and left the Monitor / Block
+  buttons disabled; the poller now retries, then reports, and always re-enables the controls.
+- **Credential expiry and device last-seen read every timestamp form.** An epoch or offset-less stamp showed as
+  "never expires" or "not seen"; an unreadable one now says so.
+- **The AWS template and setup script read the Client Connector installer's exit code**; a failed install was
+  logged as installed.
+- **The image build only accepts an .msi installer** (each copy installs it with msiexec; an .exe staged as .msi
+  broke every copy), and refuses s3:// on the command line too.
+- **Zscaler cloud detection covers every cloud** (`zscloud.net`, `zspreview.net`, `zsdemo.net`, …), and no longer
+  falls back to the OneAPI environment name; it warns when it has to guess.
+- **Passwords are masked whole** in the activity log and diagnostics (the first four characters showed), and
+  `--verbose` request logging is redacted.
+
 ## 1.8.38
 - **A CloudShare image for traffic generators.** **Download image build script** on the ZIA tab (or
   `zia image`) builds one generic Windows Server 2022 image per team. The image holds the Client Connector installer
