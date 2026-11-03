@@ -67,7 +67,7 @@ HERE = Path(__file__).resolve().parent
 
 def generator_machine():
     """True on a traffic generator the kit's own scripts set up (AWS template, setup script or the CloudShare image):
-    the kit runs from <root>\kit next to the zia.cmd wrapper they write. Setup belongs on the SE's laptop, not here."""
+    the kit runs from <root>/kit next to the zia.cmd wrapper they write. Setup belongs on the SE's laptop, not here."""
     return (HERE.parent / "zia.cmd").exists() and (HERE.parent / "home").is_dir()
 WINDOWS = os.name == "nt"
 LAUNCHER = ".\\aiguard-kit.cmd" if WINDOWS else "./aiguard-kit"
